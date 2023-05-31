@@ -7,3 +7,8 @@
 
 ### knowing AutoGPT's limitations
 - It is an AI assistance that needs human assistance. This could be the start of human-AI collaboration, which could be where future is going with AI. Imagine we each have a personal AI assistant that helps us run our lives. Before it can assist us, however, we need to help it understand our needs and wishes. It will get confused if you're confused on what you want to do. 
+
+
+### what I want it to do for me
+#### create a functional webpage that uses OpenAI's LLM models for content creation
+#### use it to push any code on demand to this repository
