@@ -11,5 +11,4 @@
 
 ### what I want it to do for me
 #### create a functional webpage that uses OpenAI's LLM models for content creation
-#### give it access to this repository and have it push any code on demand 
 #### extra: maintain the site and monitor the budget
