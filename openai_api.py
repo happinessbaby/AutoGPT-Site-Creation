@@ -1,8 +1,11 @@
 # Code for OpenAI API call
 
 import openai
+from dotenv import load_dotenv, find_dotenv
 
-openai.api_key = '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'
+
+_ = load_dotenv(find_dotenv()) # read local .env file
+openai.api_key = os.environ['OPENAI_API_KEY']
 
 model_engine = 'text-davinci-002'
 

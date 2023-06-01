@@ -1,6 +1,9 @@
 import openai
 
-openai.api_key = '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'
+
+from dotenv import load_dotenv, find_dotenv
+_ = load_dotenv(find_dotenv()) # read local .env file
+openai.api_key = os.environ['OPENAI_API_KEY']
 
 models = openai.Model.list()
 
