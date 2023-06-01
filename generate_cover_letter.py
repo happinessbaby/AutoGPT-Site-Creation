@@ -1,6 +1,6 @@
 # Import the necessary modules
 import os
-from openai_api import call_openai_api
+from openai_api import get_completion1, get_completion2
 
 # Define the function to generate the cover letter
 
@@ -8,21 +8,24 @@ def generate_cover_letter(my_name, resume_file, company_name):
     # Read the resume file
     with open(resume_file, 'r') as f:
         resume = f.read()
+    print(resume)
     
     # Extract the relevant information from the resume
-    name = resume.split('\n')[0]
-    email = resume.split('\n')[1]
-    phone = resume.split('\n')[2]
+    # name = resume.split('\n')[0]
+    # email = resume.split('\n')[1]
+    # phone = resume.split('\n')[2]
     
     # Scrape out personal information
     
     # Use an LLM to generate a cover letter that is specific to the resume file that is being read
     
-    template = f"Dear Hiring Manager, I am writing to express my interest in the {company_name} position at your company. My name is {name} ......"
+    template = f"Dear Hiring Manager, I am writing to express my interest in the {company_name} position at your company. My name is {my_name} ......"
 
-    prompt = f"You're to generate a cover letter for person with name {my_name} applying to company {company_name} using template {template} and resume content: '''{resume}'''" 
+    prompt = f"""You're to generate a cover letter for person with name {my_name} applying to company {company_name}. This is the template: {template}. This is the content based on which you're to generate a personalized cover letter: '''{resume}'''"""
 
-    cover_letter = call_openai_api(prompt)
+    # print(prompt)
+
+    cover_letter = get_completion2(prompt)
     
     
     # Write the cover letter to a file
