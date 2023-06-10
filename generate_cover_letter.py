@@ -8,6 +8,11 @@ from langchain.output_parsers import StructuredOutputParser
 from langchain.document_loaders import TextLoader
 from langchain.indexes import VectorstoreIndexCreator
 from langchain.vectorstores import DocArrayInMemorySearch
+from langchain.agents.agent_toolkits import create_python_agent
+from langchain.agents import load_tools, initialize_agent
+from langchain.agents import AgentType
+from langchain.tools.python.tool import PythonREPLTool
+from langchain.python import PythonREPL
 from pathlib import Path
 import markdown
 
@@ -38,7 +43,7 @@ def extract_personal_information(resume_file):
 
     output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
     format_instructions = output_parser.get_format_instructions()
-    template_string = """For the following text, extract the following information:
+    template_string = """For the following text, delimited by triple backticks, extract the following information:
 
     name: Extract the full name of the applicant. If this information is not found, output -1\
 
@@ -48,7 +53,7 @@ def extract_personal_information(resume_file):
     
     address: Extract the home address of the applicant. If this information is not found, output -1\
 
-    text: {text}
+    text: '''{text}'''
 
     {format_instructions}
     """
@@ -58,29 +63,60 @@ def extract_personal_information(resume_file):
                                 format_instructions=format_instructions)
     
     response = chat(messages)
-    output_dict = output_parser.parse(response.content)
-    print(output_dict.get('email'))
+    personal_info_dict = output_parser.parse(response.content)
+    print(personal_info_dict.get('name'))
+    return personal_info_dict
 
 
 
-def extract_other_information(resume_file):
+def extract_relevant_information(resume_file, job_title):
     loader = TextLoader(resume_file, encoding='utf8')
     index = VectorstoreIndexCreator(
         vectorstore_cls=DocArrayInMemorySearch
     ).from_loaders([loader])
-    query = "list all the fields in the resume in a table in markdown and summarize each other"
+    query = f""""Your task is to summarize this text document containing a person's resume.
+
+    List all the fields in the resume  and summarize each field prioritizing information that would help this person get a position as {job_title}.
+    
+    """
     response = index.query(query)
-    print(response)
+    return response
+    # convert_to_dict(response)
+
+# def convert_to_dict(markdown_table):
+#     agent = create_python_agent(
+#     chat,
+#     tool=PythonREPLTool(),
+#     verbose=True    
+#     )
+#     dict_test = {}
+#     agent.run(f"""Convert the markdown table delimited by triple backticks into a python dictionary and save it into the variable {dict_test}. 
+              
+#               table: ''' {markdown_table}
+#               """)
+
+    
 
 
 
 
-def generate_basic_cover_letter(my_name,  my_company_name, my_job_title, my_resume_file):
+def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
     # Read the resume file
-    resume_filename = my_resume_file.filename
-    with open(resume_filename, 'r') as f:
-        resume = f.read()
+    
+    try:
+        file= my_resume_file.filename
+        filename = Path(file).stem
+        resume_file = file
+    except:
+        filename=Path(my_resume_file).stem
+        resume_file = my_resume_file
+    # resume_filename = my_resume_file.filename
+    # with open(resume_filename, 'r') as f:
+    #     resume = f.read()
     # print(resume)
+    personal_info_dict = extract_personal_information(resume_file)
+    relevant_content = extract_relevant_information(resume_file, my_job_title)
+    print(relevant_content)
     
     # Use an LLM to generate a cover letter that is specific to the resume file that is being read
     
@@ -96,19 +132,18 @@ def generate_basic_cover_letter(my_name,  my_company_name, my_job_title, my_resu
 
     cover_letter_message = prompt_template.format_messages(
                     # style=cover_letter_template,
-                    name = my_name,
+                    name = personal_info_dict.get('name'),
                     company = my_company_name,
                     job = my_job_title,
-                    content=resume)
+                    content=relevant_content)
     my_cover_letter = chat(cover_letter_message).content
     # cover_letter = get_completion2(template_string)
     
     # Write the cover letter to a file
-    file_name=Path(resume_filename).stem
-    with open(f'cover_letter_{file_name}.txt', 'w') as f:
+    with open(f'cover_letter_{filename}.txt', 'w') as f:
         f.write(my_cover_letter)
 
-    return file_name
+    return filename
 
 
 
@@ -124,11 +159,12 @@ def fine_tune_cover_letter(resume_file):
 
 
 # Call the function to generate the cover letter
-# my_name  = 'Yueqi Peng'
-# my_job_title = 'AI developer'
-# my_company_name = 'Google'
-# my_resume_file = 'resume2023v2.txt'
+
+my_job_title = 'python developer'
+my_company_name = 'Facebook'
+my_resume_file = 'resume2023v2.txt'
 # extract_personal_information(my_resume_file)
-# extract_other_information(my_resume_file)
-# generate_basic_cover_letter(my_name, my_company_name, my_job_title, my_resume_file)
+# extract_relevant_information(my_resume_file, my_job_title)
+if __name__ == '__main__':
+    generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file)
 
