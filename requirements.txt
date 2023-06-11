@@ -3,3 +3,6 @@ flask
 PyMuPDF
 langchain
 docarray
+python-magic
+pandoc
+pypandoc
