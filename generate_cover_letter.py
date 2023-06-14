@@ -9,10 +9,12 @@ from langchain.document_loaders import TextLoader
 from langchain.indexes import VectorstoreIndexCreator
 from langchain.vectorstores import DocArrayInMemorySearch
 from langchain.agents.agent_toolkits import create_python_agent
-from langchain.agents import load_tools, initialize_agent
+from langchain.agents import load_tools, initialize_agent, Tool, AgentExecutor
+from langchain.agents.react.base import DocstoreExplorer
 from langchain.agents import AgentType
 from langchain.tools.python.tool import PythonREPLTool
 from langchain.python import PythonREPL
+from langchain.docstore.wikipedia import Wikipedia
 from pathlib import Path
 import markdown
 
@@ -21,6 +23,7 @@ from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
 # Define the function to generate the cover letter
 chat = ChatOpenAI(temperature=0.0)
+delimiter = "####"
 
 def extract_personal_information(resume_file):
 
@@ -43,7 +46,7 @@ def extract_personal_information(resume_file):
 
     output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
     format_instructions = output_parser.get_format_instructions()
-    template_string = """For the following text, delimited by triple backticks, extract the following information:
+    template_string = """For the following text, delimited with {delimiter} chracters, extract the following information:
 
     name: Extract the full name of the applicant. If this information is not found, output -1\
 
@@ -74,14 +77,50 @@ def extract_relevant_information(resume_file, job_title):
     index = VectorstoreIndexCreator(
         vectorstore_cls=DocArrayInMemorySearch
     ).from_loaders([loader])
+
+    job_desciption = get_job_resources(job_title)
+
     query = f""""Your task is to summarize this text document containing a person's resume.
 
     List all the fields in the resume  and summarize each field prioritizing information that would help this person get a position as {job_title}.
     
     """
     response = index.query(query)
+    print(response)
     return response
     # convert_to_dict(response)
+
+
+
+def get_job_resources(job_title):
+    docstore = DocstoreExplorer(Wikipedia())
+    tools = [
+        Tool(
+            name = "Search",
+            func = docstore.search,
+            description= "Search for a term in the docstore."
+        ),
+        Tool(
+            name = "Lookup",
+            func = docstore.lookup,
+            description = "Lookup a term in the docstore."
+        )
+    ]
+    # tools = load_tools(["wikipedia"], llm=chat)
+    agent= initialize_agent(
+        tools, 
+        chat, 
+        agent=AgentType.REACT_DOCSTORE,
+        handle_parsing_errors=True,
+        verbose = True)
+    agent_executor = AgentExecutor.from_agent_and_tools(
+        agent=agent.agent,
+        tools = tools,
+        verbose = True,
+    )
+    question  = f"""Find  out what a {job_title} does and summarize the skills, tasks, responsibilties"""
+    agent_executor.run(question)
+    # return result
 
 # def convert_to_dict(markdown_table):
 #     agent = create_python_agent(
@@ -116,15 +155,13 @@ def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
     # print(resume)
     personal_info_dict = extract_personal_information(resume_file)
     relevant_content = extract_relevant_information(resume_file, my_job_title)
-    print(relevant_content)
     
     # Use an LLM to generate a cover letter that is specific to the resume file that is being read
     
     # style_string = f"Dear Hiring Manager, I am writing to express my interest in the {company_name} position at your company. My name is {my_name} ......"
-
     template_string = """Generate a cover letter for person with name {name} applying to company {company} for the job title {job}. 
 
-      The content you use to generate this personalized cover letter is delimited by triple backticks. content: '''{content}'''"""
+      The content you use to generate this personalized cover letter is delimited with {delimiter} characters. content: '''{content}'''"""
 
     prompt_template = ChatPromptTemplate.from_template(template_string)
 
@@ -160,11 +197,12 @@ def fine_tune_cover_letter(resume_file):
 
 # Call the function to generate the cover letter
 
-my_job_title = 'python developer'
+my_job_title = 'MLOps engineer'
 my_company_name = 'Facebook'
 my_resume_file = 'resume2023v2.txt'
 # extract_personal_information(my_resume_file)
 # extract_relevant_information(my_resume_file, my_job_title)
-if __name__ == '__main__':
-    generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file)
+get_job_resources(my_job_title)
+# if __name__ == '__main__':
+#     generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file)
 
