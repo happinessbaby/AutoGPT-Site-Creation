@@ -9,7 +9,7 @@ from langchain.output_parsers import StructuredOutputParser
 from langchain.agents import load_tools, initialize_agent, Tool, AgentExecutor
 from langchain.agents import AgentType
 from pathlib import Path
-from basic_utils import check_file_type
+from basic_utils import get_file_name
 from langchain_utils import get_index, create_tools
 
 
@@ -22,7 +22,7 @@ delimiter2 = "'''"
 
 def extract_personal_information(resume_file):
 
-    with open(resume_file, 'r') as f:
+    with open(resume_file, 'r', errors='ignore') as f:
         resume = f.read()
 
     name_schema = ResponseSchema(name="name",
@@ -60,6 +60,7 @@ def extract_personal_information(resume_file):
     messages = prompt.format_messages(text=resume, 
                                 format_instructions=format_instructions,
                                 delimiter=delimiter)
+
     
     response = chat(messages)
     personal_info_dict = output_parser.parse(response.content)
@@ -68,7 +69,7 @@ def extract_personal_information(resume_file):
 
 
 
-def extract_resume_fields(resume_file, job_title):
+def extract_resume_fields(resume_file):
 
     index = get_index(resume_file)
 
@@ -103,7 +104,7 @@ def get_job_resources(job_title):
         tools = tools,
         verbose = True,
     )
-    query  = f"""Find out what a {job_title} does using Search and Lookup"""
+    query  = f"""Find out what a {job_title} does."""
     # response = agent_executor.run(query)
     # return response
     # TEMPORARY FIX for raise OutputParserException(f"Could not parse LLM Output: {text}") 
@@ -115,7 +116,7 @@ def get_job_resources(job_title):
         # if not response.startswith("Could not parse LLM output: `"):
         #     raise e
         response = response.removeprefix("Could not parse LLM output: `").removesuffix("`")
-        # print(f"RESPONSE: {response}")
+        print(f"RESPONSE: {response}")
         return response
 
 
@@ -123,18 +124,21 @@ def get_job_resources(job_title):
 
 
 def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
-    # Read the resume file
-    
-    try:
-        file= my_resume_file.filename
-        filename = Path(file).stem
-        resume_file = file
-    except:
-        filename=Path(my_resume_file).stem
-        resume_file = my_resume_file
 
-    personal_info_dict = extract_personal_information(resume_file)
-    resume_content = extract_resume_fields(resume_file, my_job_title)
+    # Check file based on different sources
+    # try:
+    #     file= my_resume_file.filename
+    #     filename = Path(file).stem       
+    #     resume_file = file
+    # except:
+    #     filename=Path(my_resume_file).stem
+    #     resume_file = my_resume_file
+    
+    # Get personal information from resume
+    personal_info_dict = extract_personal_information(my_resume_file)
+    # Get fields of resume
+    resume_content = extract_resume_fields(my_resume_file)
+    # Get job description
     job_description = get_job_resources(my_job_title)
     
     # Use an LLM to generate a cover letter that is specific to the resume file that is being read
@@ -162,10 +166,10 @@ def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
     # cover_letter = get_completion2(template_string)
     
     # Write the cover letter to a file
+    filename = get_file_name(my_resume_file)
     with open(f'cover_letter_{filename}.txt', 'w') as f:
         f.write(my_cover_letter)
 
-    return filename
 
 
 
@@ -173,7 +177,7 @@ def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
 
 my_job_title = 'MLOps engineer'
 my_company_name = 'Facebook'
-my_resume_file = 'resume2023v2.txt'
+my_resume_file = 'resume2023.txt'
 # extract_personal_information(my_resume_file)
 # extract_resume_fields(my_resume_file, my_job_title)
 # get_job_resources(my_job_title)
