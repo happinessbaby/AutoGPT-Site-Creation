@@ -19,6 +19,7 @@ _ = load_dotenv(find_dotenv()) # read local .env file
 chat = ChatOpenAI(temperature=0.0)
 delimiter = "####"
 delimiter2 = "'''"
+delimiter3 = '---'
 
 def extract_personal_information(resume_file):
 
@@ -86,6 +87,17 @@ def extract_resume_fields(resume_file):
 def get_cover_letter_examples():
     # retrieve cover letter examples
     ### TBD
+    # loader = CSVLoader(file_path=file)
+    # docs = loader.load()
+
+    # db = DocArrayInMemorySearch.from_documents(
+    #     docs, 
+    #     embeddings
+    # )
+
+    # # doing Q&A with llm
+    # retriever = db.as_retriever()
+    # # do
     return ""
 
 
@@ -104,7 +116,9 @@ def get_job_resources(job_title):
         tools = tools,
         verbose = True,
     )
-    query  = f"""Find out what a {job_title} does."""
+    query  = f"""Find out what a {job_title} does.
+     
+       If you cannot find what a {job_title} does, look up responsibilities that are in the same ballpark and find out what they are."""
     # response = agent_executor.run(query)
     # return response
     # TEMPORARY FIX for raise OutputParserException(f"Could not parse LLM Output: {text}") 
@@ -140,15 +154,29 @@ def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
     resume_content = extract_resume_fields(my_resume_file)
     # Get job description
     job_description = get_job_resources(my_job_title)
+
+    # cover_letter_examples = get_cover_letter_examples()
     
     # Use an LLM to generate a cover letter that is specific to the resume file that is being read
     
     # style_string = f"Dear Hiring Manager, I am writing to express my interest in the {company_name} position at your company. My name is {my_name} ......"
     template_string = """Generate a cover letter for person with name {name} applying to company {company} for the job title {job}. 
 
-      The content you use to generate this personalized cover letter is delimited with {delimiter} characters. content: {delimiter}{content}{delimiter}.
+      The content you use to generate this personalized cover letter is delimited with {delimiter} characters.
       
-    The job description you use as a reference is delimited with {delimiter2} characters. job description: {delimiter2}{job_description}{delimiter2}. """
+    The job description of {job} for your point of reference is delimited with {delimiter2} characters. 
+
+
+    Reference job description so that the cover letter only includes information that is relevant to the job. Do not make things up. 
+
+    content: {delimiter}{content}{delimiter}.
+
+    job description: {delimiter2}{job_description}{delimiter2}. 
+
+    
+    """
+    # The examples of cover letter that are to be used as a guide of best practices are delimited with {delimiter3} characteres.  
+    # examples: {delimiter3}{examples}{delimiter3}
 
     prompt_template = ChatPromptTemplate.from_template(template_string)
     # print(prompt_template.messages[0].prompt.input_variables)
@@ -160,8 +188,11 @@ def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
                     job = my_job_title,
                     content=resume_content,
                     job_description = job_description,
+                    # examples = cover_letter_examples,
                     delimiter = delimiter,
-                    delimiter2 = delimiter2)
+                    delimiter2 = delimiter2,
+                    # delimiter3 = delimiter3
+    )
     my_cover_letter = chat(cover_letter_message).content
     # cover_letter = get_completion2(template_string)
     
@@ -175,7 +206,7 @@ def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
 
 # Call the function to generate the cover letter
 
-my_job_title = 'MLOps engineer'
+my_job_title = 'AI developer'
 my_company_name = 'Facebook'
 my_resume_file = 'resume2023.txt'
 # extract_personal_information(my_resume_file)
