@@ -3,6 +3,8 @@ flask
 PyMuPDF
 langchain
 docarray
+chromadb
 python-magic
 pandoc
 pypandoc
+wikipedia
