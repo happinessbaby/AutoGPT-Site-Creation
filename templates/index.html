@@ -1,20 +1,52 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Cover Letter Generator</title>
-</head>
-<body>
-    <h1>Cover Letter Generator</h1>
-    <form action="/submit" method="POST" enctype="multipart/form-data">
-        <!-- <label for="text1">Enter your name:</label><br>
-        <input type="text" id="text1" name="text1"><br> -->
-        <label for="text2">Enter the company you're applying to:</label><br>
-        <input type="text" id="text2" name="text2"><br>
-        <label for="text3">Enter the job title you're applying for:</label><br>
-        <input type="text" id="text3" name="text3"><br>
-        <label for="file">Upload your resume:</label><br>
-        <input type="file" id="file" name="file"><br><br>
-        <input type="submit" value="Generate Cover Letter">
+{% extends 'base.html' %}
+
+{% block content %}
+    <h1>{% block title %} Cover Letter Generator {% endblock %}</h1>
+
+    <form method="POST" action="/"  enctype="multipart/form-data">
+        {{ form.csrf_token }}
+        <p>
+            {{ form.company.label }}
+            {{ form.company(size=20) }}
+        </p>
+
+        {% if form.company.errors %}
+            <ul class="errors">
+                {% for error in form.name.errors %}
+                    <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+
+        <p>
+            {{ form.job.label }}
+            {{ form.job() }}
+        </p>
+
+        {% if form.job.errors %}
+            <ul class="errors">
+                {% for error in form.company.errors %}
+                    <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+
+        <p>
+            {{ form.hidden_tag() }}
+            {{ form.file }}
+        </p>
+
+        {% if form.file.errors %}
+            <ul class="errors">
+                {% for error in form.file.errors %}
+                    <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+
+        <p>
+            <input type="submit" value="Submit">
+        </p>
     </form>
-</body>
-</html>
+
+{% endblock %}

@@ -30,3 +30,19 @@ def get_completion(prompt, model="gpt-3.5-turbo"):
         temperature=0, 
     )
     return response.choices[0].message["content"]
+
+
+def get_text_model():
+	for model in models['data']:
+		if model['id'].startswith('text-'):
+			try:
+				openai.Completion.create(
+					model=model['id'],
+					prompt='This is a test prompt.',
+					max_tokens=5
+				)
+				print(f"available text model: {model}")
+				return model
+			except:
+				pass
+	return ""

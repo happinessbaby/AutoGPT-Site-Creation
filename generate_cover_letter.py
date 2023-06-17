@@ -22,7 +22,7 @@ from cover_letter_samples import cover_letter_samples_dict
 
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
-
+cover_letter_path = os.getenv('COVER_LETTER_PATH')
 chat = ChatOpenAI(temperature=0.0)
 embeddings = OpenAIEmbeddings()
 delimiter = "####"
@@ -183,8 +183,8 @@ def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
     # cover_letter = get_completion2(template_string)
     
     # Write the cover letter to a file
-    filename = get_file_name(my_resume_file)
-    with open(f'cover_letter_{filename}.txt', 'w') as f:
+       # Write the cover letter to a file
+    with open(os.path.join(cover_letter_path, 'cover_letter.txt'), 'w') as f:
         f.write(my_cover_letter)
 
 
@@ -194,7 +194,7 @@ def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
 
 my_job_title = 'software developer'
 my_company_name = 'Facebook'
-my_resume_file = 'resume2023.txt'
+my_resume_file = 'resume_samples/resume2023.txt'
 # extract_personal_information(my_resume_file)
 # extract_resume_fields(my_resume_file, my_job_title)
 # get_job_resources(my_job_title)
