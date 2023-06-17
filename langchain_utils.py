@@ -6,8 +6,6 @@ from langchain.indexes import VectorstoreIndexCreator
 from langchain.agents import Tool
 
 
-cover_letter_reference = "file of references for writing good cover letters"
-
 def get_index(file):
     loader = TextLoader(file, encoding='utf8')
     index = VectorstoreIndexCreator(
@@ -16,7 +14,7 @@ def get_index(file):
     return index
 
 
-def create_tools():
+def create_wiki_tools():
     docstore = DocstoreExplorer(Wikipedia())
     # cover_letter_index = get_index(cover_letter_reference)
     tools = [
@@ -30,11 +28,23 @@ def create_tools():
             func = docstore.lookup,
             description = "Lookup a term in the docstore."
         ),
-        # Tool(
-        #     name=f"cover letter index",
-        #     func=lambda q: str(cover_letter_index.query(q)),
-        #     description="Useful to answering questions about the given file",
-        #     return_direct=True,
-        # ),
     ]
     return tools
+
+def create_document_tools(document):
+    _index = get_index(document)
+    tools = [
+        Tool(
+            name=f"{_index} index",
+            func=lambda q: str(_index.query(q)),
+            description="Useful to answering questions about the given file",
+            return_direct=True,
+        ),
+    ]
+    return tools
+
+def add_embedding(embeddings):
+    embed = embeddings.embed_query("Prompt Engineer")
+    return embed
+
+    
