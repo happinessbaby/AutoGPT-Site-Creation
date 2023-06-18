@@ -1,5 +1,5 @@
 openai
-flask
+Flask
 PyMuPDF
 langchain
 docarray
@@ -8,3 +8,4 @@ python-magic
 pandoc
 pypandoc
 wikipedia
+Flask-WTF
