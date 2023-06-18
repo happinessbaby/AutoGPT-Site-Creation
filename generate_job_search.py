@@ -44,13 +44,12 @@ def find_similar_jobs(job_title):
 
     response = qa_stuff.run(query)
     print(response)
+    return response
 
-    prompt = f"""Extract the job titles in the markdown table: {response}.
-    
-    If there is no table, return unknown """
 
-    response = get_completion(prompt)
-    print(response)
+#TBD: based on resume information, suggest jobs 
+def generate_job_suggestion():
+    return None
 
 my_job_title = 'software developer'
 if __name__ == '__main__':

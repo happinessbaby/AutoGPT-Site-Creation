@@ -4,6 +4,7 @@ from langchain.docstore.wikipedia import Wikipedia
 from langchain.vectorstores import DocArrayInMemorySearch
 from langchain.indexes import VectorstoreIndexCreator
 from langchain.agents import Tool
+from langchain.tools.python.tool import PythonREPLTool
 
 
 def get_index(file):
@@ -42,6 +43,14 @@ def create_document_tools(document):
         ),
     ]
     return tools
+
+def create_python_agent(llm):
+    agent = create_python_agent(
+    llm,
+    tool=PythonREPLTool(),
+    verbose=True
+    )
+    return agent
 
 def add_embedding(embeddings):
     embed = embeddings.embed_query("Prompt Engineer")

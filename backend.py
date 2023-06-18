@@ -5,7 +5,7 @@ from wtforms.validators import DataRequired
 from flask_wtf.file import FileField, FileRequired, FileAllowed
 from werkzeug.utils import secure_filename
 from generate_cover_letter import generate_basic_cover_letter
-from basic_utils import get_file_name, check_file_type, convert_to_txt
+from basic_utils import convert_to_txt
 import os
 from pathlib import Path
 
@@ -58,10 +58,14 @@ def index():
         # if file_ext not in current_app.config['UPLOAD_EXTENSIONS']:
         #     abort(400)
         file.save(os.path.join(resume_path, filename))
-        convert_to_txt(os.path.join(resume_path, filename))
-        generate_basic_cover_letter(form.company.data, form.job.data, os.path.join(resume_path, Path(filename).stem+'.txt'))
-        return send_file(os.path.join(cover_letter_path, 'cover_letter.txt'), as_attachment=True)
-        return redirect('/')
+        read_path =  os.path.join(resume_path, Path(filename).stem+'.txt')
+
+        convert_to_txt(os.path.join(resume_path, filename), read_path)
+
+        if (Path(read_path).exists()):
+            generate_basic_cover_letter(form.company.data, form.job.data, read_path)
+            return send_file(os.path.join(cover_letter_path, 'cover_letter.txt'), as_attachment=True)
+            return redirect('/')
     return render_template('index.html', form = form)
 
 @app.route('/uploads/<filename>')
