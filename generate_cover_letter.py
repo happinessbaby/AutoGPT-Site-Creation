@@ -18,6 +18,7 @@ from basic_utils import markdown_table_to_dict, read_txt
 from langchain_utils import get_index, create_wiki_tools, create_document_tools
 from cover_letter_samples import cover_letter_samples_dict
 from generate_job_search import find_similar_jobs
+from datetime import date
 
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
@@ -81,7 +82,14 @@ def extract_resume_fields(resume_file):
 
     index = get_index(resume_file)
 
-    query = f"""" Search fields of this resume and list all the fields in a markdown table and provide a summary of each.
+    # query = f"""" Search fields of this resume and list all the fields in a markdown table and provide a summary of each.
+    
+    # """
+    query = f"""" Search and extract fields of this resume. 
+
+    Some common resume fields include but not limited to personal information, objective, education, work experience, awards and honors, and skills.
+    
+    List all the field information in a markdown table.
     
     """
 
@@ -92,7 +100,7 @@ def extract_resume_fields(resume_file):
 
 
 
-
+## in the future, can add other document tools as resources
 def get_job_resources(job_title):
 
     tools = create_wiki_tools()
@@ -144,14 +152,14 @@ def fetch_cover_letter_samples(job_title):
     Output your answer as a comma separated list. If there is no table, return -1. """
 
     jobs = get_completion(prompt)
-    print(jobs)
-
-    jobs_list = jobs.split(",")
     sample_string = ""
-    for job in jobs_list:
-        if (cover_letter_samples_dict.get(job)!=None):
-            sample = read_txt(cover_letter_samples_dict.get(job))
-            sample_string = sample_string + "\n" + f" {delimiter3}\n{sample}\n{delimiter3}" + "\n\nexample:"   
+    print(jobs)
+    if (jobs!=-1):
+        jobs_list = jobs.split(",")
+        for job in jobs_list:
+            if (cover_letter_samples_dict.get(job)!=None):
+                sample = read_txt(cover_letter_samples_dict.get(job))
+                sample_string = sample_string + "\n" + f" {delimiter3}\n{sample}\n{delimiter3}" + "\n\nexample:"   
     # print(sample_string)
     return sample_string
         
@@ -193,6 +201,8 @@ def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
 
     phone number: {phone}. \
     
+    today's date: {date}. \
+    
     company they are applying to: {company}. \
 
     job position they are applying for: {job}. \
@@ -212,6 +222,7 @@ def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
                     name = personal_info_dict.get('name'),
                     email = personal_info_dict.get('email'),
                     phone = personal_info_dict.get('phone'),
+                    date = date.today(),
                     company = my_company_name,
                     job = my_job_title,
                     content=resume_content,
@@ -232,7 +243,7 @@ def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
 
 # Call the function to generate the cover letter
  
-my_job_title = 'software engineer'
+my_job_title = 'prompt engineer'
 my_company_name = 'Facebook'
 my_resume_file = 'resume_samples/resume2023v2.txt'
 # extract_personal_information(my_resume_file)
