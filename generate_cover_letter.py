@@ -78,26 +78,6 @@ def extract_personal_information(resume_file):
 
 
 
-def extract_resume_fields(resume_file):
-
-    index = get_index(resume_file)
-
-    # query = f"""" Search fields of this resume and list all the fields in a markdown table and provide a summary of each.
-    
-    # """
-    query = f"""" Search and extract fields of this resume. 
-
-    Some common resume fields include but not limited to personal information, objective, education, work experience, awards and honors, and skills.
-    
-    List all the field information in a markdown table.
-    
-    """
-
-    response = index.query(query)
-    print(response)
-    return response
-
-
 
 
 ## in the future, can add other document tools as resources
@@ -173,7 +153,7 @@ def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
     # Get personal information from resume
     personal_info_dict = extract_personal_information(my_resume_file)
     # Get fields of resume
-    resume_content = extract_resume_fields(my_resume_file)
+    resume_content = read_txt(my_resume_file)
     # Get job description
     job_description = get_job_resources(my_job_title)
 
@@ -243,9 +223,9 @@ def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
 
 # Call the function to generate the cover letter
  
-my_job_title = 'prompt engineer'
-my_company_name = 'Facebook'
-my_resume_file = 'resume_samples/resume2023v2.txt'
+my_job_title = 'marketing'
+my_company_name = 'DoAI'
+my_resume_file = 'resume_samples/sample2.txt'
 # extract_personal_information(my_resume_file)
 # extract_resume_fields(my_resume_file)
 # get_job_resources(my_job_title)
