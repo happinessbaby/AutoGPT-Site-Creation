@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>{% block title %} {% endblock %} - YourJob</title>
+    <title>{% block title %} {% endblock %} - DreamJob</title>
     <style>
         nav a {
             color: #d64161;
@@ -11,15 +11,112 @@
             text-decoration: none;
         }
     </style>
+    <link rel= "stylesheet" type= "text/css" href= "{{url_for('static',filename='styles/main.css') }}">
+    <script type="text/javascript">
+        // function loadFile(){
+        //   // $("#loader").show();
+        //   // $("#fader").show();
+        //   document.getElementById("loader").style.display = "block";
+        //   document.getElementById("fader").style.display = "block";
+        //    // Start the file download by setting the href of the download link (replace 'fileUrl' with your actual file URL)
+        //   // document.getElementById("downloadLink").href = "{{url_for('static',filename='cover_letter.txt') }}";
+        //   // // // Display the download link and start checking if the file has finished downloading
+        //   // document.getElementById("downloadLink").style.display = "block";
+        //   // checkFileDownloaded();   
+        // }
+
+      // function checkFileDownloaded() {
+      //   var downloadLink = document.getElementById("downloadLink");
+
+      //   // Check if the file has finished downloading
+      //   if (downloadLink.readyState === 4) {
+      //     // Hide the loading animation
+      //     document.getElementById("loader").style.display = "none";
+      //   } else {
+      //     // The file has not finished downloading yet, check again after a short delay (adjust as needed)
+      //     setTimeout(checkFileDownloaded, 500);
+      //   }
+      // }
+
+      // function fileDownloaded() {
+      // // File has finished downloading, you can perform any additional actions here
+      //   console.log("File downloaded successfully!");
+      // }
+
+    //   var setCookie = function(name, value, expiracy) {
+    //   var exdate = new Date();
+    //   exdate.setTime(exdate.getTime() + expiracy * 1000);
+    //   var c_value = escape(value) + ((expiracy == null) ? "" : "; expires=" + exdate.toUTCString());
+    //   document.cookie = name + "=" + c_value + '; path=/';
+    //   };
+
+    //   var getCookie = function(name) {
+    //   var i, x, y, ARRcookies = document.cookie.split(";");
+    //   for (i = 0; i < ARRcookies.length; i++) {
+    //     x = ARRcookies[i].substr(0, ARRcookies[i].indexOf("="));
+    //     y = ARRcookies[i].substr(ARRcookies[i].indexOf("=") + 1);
+    //     x = x.replace(/^\s+|\s+$/g, "");
+    //     if (x == name) {
+    //       return y ? decodeURI(unescape(y.replace(/\+/g, ' '))) : y; //;//unescape(decodeURI(y));
+    //     }
+    //   }
+    // };
+
+    // function loadFile() {
+    //   // $('#fader').css('display', 'block');
+    //   // $('#loader').css('display', 'block');
+    //   document.getElementById("loader").style.display = "block";
+    //   document.getElementById("fader").style.display = "block";
+    //   // setCookie('downloadStarted', 0, 100); //Expiration could be anything... As long as we reset the value
+    //   // setTimeout(checkDownloadCookie, 1000); //Initiate the loop to check the cookie.
+    // };
+  // $('#downloadLink').click(function() {
+  //   $('#fader').css('display', 'block');
+  //   setCookie('downloadStarted', 0, 100); //Expiration could be anything... As long as we reset the value
+  //   setTimeout(checkDownloadCookie, 1000); //Initiate the loop to check the cookie.
+  // });
+
+    // var downloadTimeout;
+    // var checkDownloadCookie = function() {
+    //   if (getCookie("downloadStarted") == 1) {
+    //     setCookie("downloadStarted", "false", 100); //Expiration could be anything... As long as we reset the value
+    //     $('#loader').css('display', 'none');
+    //     $('#fader').css('display', 'none');
+    //     // display download link
+    //   } else {
+    //     downloadTimeout = setTimeout(checkDownloadCookie, 1000); //Re-run this function in 1 second.
+    //   }
+    // };
+
+    </script>
+    <!-- {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      <ul class=flashes>
+      {% for message in messages %}
+        {{message}}
+      {% endfor %}
+      </ul>
+    {% endif %}
+  {% endwith %}
+  {% block body %}{% endblock %} -->
 </head>
 <body>
     <nav>
-        <a href="{{ url_for('index') }}">FlaskApp</a>
+        <a href="{{ url_for('index') }}">AIJob</a>
         <a href="#">About</a>
     </nav>
     <hr>
     <div class="content">
         {% block content %} {% endblock %}
     </div>
-</body>
+    <!-- <div id="loader" ></div>
+    <div id="fader"></div> -->
+    <div class="loading">
+      {% block loading %} {% endblock %}
+    </div>
+    <div class="downloads">
+      {% block downloads %} {% endblock %}
+    
+    <!-- <a id="downloadLink" href="#" style="display: none;" download="cover_letter.txt" onload="fileDownloaded()">Download File</a> -->
+  </body>
 </html>

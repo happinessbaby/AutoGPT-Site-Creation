@@ -15,13 +15,14 @@ from langchain.agents import AgentType
 from langchain.chains import RetrievalQA
 from pathlib import Path
 from basic_utils import markdown_table_to_dict, read_txt
-from langchain_utils import get_index, create_wiki_tools, create_document_tools
+from langchain_utils import get_index, create_wiki_tools, create_document_tools, create_search_tools
 from cover_letter_samples import cover_letter_samples_dict
 from generate_job_search import find_similar_jobs
 from datetime import date
 
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
+
 cover_letter_path = os.getenv('COVER_LETTER_PATH')
 chat = ChatOpenAI(temperature=0.0)
 embeddings = OpenAIEmbeddings()
@@ -78,16 +79,18 @@ def extract_personal_information(resume_file):
 
 
 
-
-
 ## in the future, can add other document tools as resources
 def get_job_resources(job_title):
 
-    tools = create_wiki_tools()
+    wiki_tools = create_wiki_tools()
+    search_tools = create_search_tools()
+    tools = wiki_tools+search_tools
+    
     agent= initialize_agent(
         tools, 
         chat, 
-        agent=AgentType.REACT_DOCSTORE,
+        # agent=AgentType.REACT_DOCSTORE,
+        agent="zero-shot-react-description",
         handle_parsing_errors=True,
         verbose = True,
         )
@@ -101,32 +104,24 @@ def get_job_resources(job_title):
        If you cannot find what a {job_title} does, look up responsibilities that are in the same ballpark and find out what they are."""
     # response = agent_executor.run(query)
     # return response
-    # TEMPORARY FIX for raise OutputParserException(f"Could not parse LLM Output: {text}") 
+    # TEMPORARY FIX for raise OutputParserException(f"Could not parse LLM Output: {text}") with agent=AgentType.REACT_DOCSTORE
     try:
         response = agent_executor.run(query)
+        print(f"Success: {response}")
         return response
     except Exception as e:
         response = str(e)
         # if not response.startswith("Could not parse LLM output: `"):
         #     raise e
         response = response.removeprefix("Could not parse LLM output: `").removesuffix("`")
-        print(f"RESPONSE: {response}")
+        print(f"Exception RESPONSE: {response}")
         return response
     
 
 
 def fetch_cover_letter_samples(job_title):
     table = find_similar_jobs(job_title)
-    # agent = create_python_agent(
-    #     chat,
-    #     tool=PythonREPLTool(),
-    #     verbose=True
-    # )
-    # query = f"""Extract the Job Title field values from the markdown table: {table}.  \
-    
-    # If there is no markdown table, output -1."""
 
-    # jobs = agent.run(query)
     prompt = f"""Extract the Job Title values in the markdown table: {table}.
     
     Output your answer as a comma separated list. If there is no table, return -1. """
@@ -223,13 +218,13 @@ def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
 
 # Call the function to generate the cover letter
  
-my_job_title = 'marketing'
+my_job_title = 'software engineer'
 my_company_name = 'DoAI'
 my_resume_file = 'resume_samples/sample2.txt'
 # extract_personal_information(my_resume_file)
 # extract_resume_fields(my_resume_file)
-# get_job_resources(my_job_title)
+get_job_resources(my_job_title)
 # fetch_cover_letter_samples(my_job_title)
-if __name__ == '__main__':
-    generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file)
+# if __name__ == '__main__':
+#     generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file)
 

@@ -48,9 +48,13 @@ def find_similar_jobs(job_title):
     return response
 
 
-#TBD: based on resume information, suggest jobs 
-def generate_job_suggestion():
-    return None
+#TBD: help people get their dream jobs
+def generate_job(resume_file, dream_job):
+    resume_table = extract_resume_fields(resume_file)
+    
+    
+
+
 
 
 def extract_resume_fields(resume_file):
