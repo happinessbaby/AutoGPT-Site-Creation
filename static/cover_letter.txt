@@ -1,26 +1,13 @@
----
-
-John Doe
-1234 North 55 Street
-Bellevue, Nebraska 68005
-(402) 292-2345
-johndoe@email.com
-June 25, 2023
-
 Dear Hiring Manager,
 
-I am excited to apply for the Account Manager position at Bank. With over six years of experience in accounting and financial management, I have developed strong analytical and problem-solving skills that will enable me to excel in this role.
+I am excited to apply for the Account Manager position at Bank. With over six years of experience in accounting and financial management, I have developed strong analytical and problem-solving skills that will enable me to manage sales and relationships with particular customers.
 
-In my previous position as an Accounting Coordinator at Nebraska Special Olympics, I was responsible for managing financial records for the organization and preparing monthly and year-end financial statements. I also successfully completed a comprehensive three-year audit of financial operations, ensuring the accuracy of account balances and preparing supporting documentation for submission.
+In my previous role as an Accounting Coordinator at Nebraska Special Olympics, I was responsible for maintaining the company's existing relationships with clients and generating sales for the company. I managed a portfolio of more than 20 clients and consistently delivered results, including generating over $1 million in revenue in 2022. I also formulated monthly and year-end financial statements and generated various payroll records, including federal and state payroll reports, annual tax reports, W-2 and 1099 forms, etc.
 
-As an Account Manager, I understand the importance of building strong relationships with customers. In my role as a Bookkeeper at SMC, Inc., I worked closely with clients to ensure their financial needs were met and their questions were answered promptly. I also converted manual to computerized accounting systems for two organizations, demonstrating my ability to analyze and successfully reprogram software to meet customer requirements.
+In addition to my experience working with existing client accounts, I have also converted manual to computerized accounting systems for two organizations and successfully reprogrammed software to meet customer requirements. My efforts have resulted in increased efficiency and accuracy in financial operations.
 
-I am proficient in MS Office (Word, Excel, PowerPoint, Outlook) and QuickBooks, and have basic knowledge of MS Access, SQL, Visual Basic, and C++. I am also a member of the IMA Bellevue University Student Chapter, demonstrating my commitment to professional development.
-
-Thank you for considering my application. I am excited about the opportunity to bring my skills and experience to Bank as an Account Manager. I look forward to discussing my qualifications further and learning more about the position.
+Thank you for considering my application. I am eager to learn more about the Account Manager position and how I can contribute to Bank's success. With my strong organizational skills and experience in accounting and financial management, I am confident that I can create long-term client relationships and generate sales for the company.
 
 Sincerely,
 
-John Doe
-
----
+[Your Name]

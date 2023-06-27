@@ -50,6 +50,7 @@ celery_app = celery_init_app(flask_app)
 # app.config['UPLOAD_EXTENSIONS'] = ['.docx', '.txt', '.pdf', '.odt']
 flask_app.config['UPLOAD_PATH'] = os.getenv('RESUME_PATH')
 flask_app.config['RESULT_PATH'] = os.getenv('COVER_LETTER_PATH')
+flask_app.config['MAX_CONTENT_LENGTH'] = 16 * 1000 * 1000
 # enable CSRF protection
 # app.config['DROPZONE_ENABLE_CSRF'] = True
 
@@ -87,21 +88,12 @@ def index():
         'filename': filename
         }
         send_cover_letter.delay(form_data)
-        # flash('Generating your cover letter')
-        # file.save(os.path.join(resume_path, filename))
-        # read_path =  os.path.join(resume_path, Path(filename).stem+'.txt')
-
-        # convert_to_txt(os.path.join(resume_path, filename), read_path)
-
-        # if (Path(read_path).exists()):
-        #     generate_basic_cover_letter(form.company.data, form.job.data, read_path)
-        #     return send_file(os.path.join(cover_letter_path, 'cover_letter.txt'), as_attachment=True)
-    else:
-        print("File did not pass validation")
+        redirect(url_for('static', filename="cover_letter.txt"))
     return render_template('index.html', form = form)
 
 @celery_app.task(serializer='json')
 def send_cover_letter(form_data):
+    # TBA: error handling and logging
     read_path =  os.path.join(flask_app.config['UPLOAD_PATH'], Path(form_data['filename']).stem+'.txt')
     convert_to_txt(os.path.join(flask_app.config['UPLOAD_PATH'], form_data['filename']), read_path)
     if (Path(read_path).exists()):
@@ -112,15 +104,16 @@ def send_cover_letter(form_data):
                 return {"status": True} 
             
 
-@flask_app.route('/downloads/<path:filename>', methods=['GET', 'POST'])
+@flask_app.route('/static/<path:filename>', methods=['GET', 'POST'])
 def download(filename):
     read_path = os.path.join(flask_app.root_path, flask_app.config['RESULT_PATH'])
     return send_from_directory(read_path,
                                filename, as_attachment=True)
 
-@flask_app.route('/loading', methods=['POST'])
+@flask_app.route('/loading/', methods=['GET', 'POST'])
 def loading_model():
     return render_template ("loading.html")
+
 
 
 

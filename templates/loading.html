@@ -1,44 +1,36 @@
 {% extends 'base.html' %}
-{% block loading %}
+{% block loader %}
 
-    <div id="loader" ></div>
-    <div id="fader"></div>
+<div id="loader" ></div>
+<div id="fader"></div> 
+<a href="{{url_for('static',filename='cover_letter.txt') }}" display=none download="cover_letter.txt" id="downloadLink">Download</a>
 
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script type="text/javascript"> 
+    var download_url = "{{url_for('static',filename='cover_letter.txt') }}";
 
-{% endblock %}
-<script> 
-
-    window.location.replace('/');
-
-    setCookie('downloadStarted', 0, 100); //Expiration could be anything... As long as we reset the value
-    setTimeout(checkDownloadCookie, 1000); //Initiate the loop to check the cookie.
-
-      var setCookie = function(name, value, expiracy) {
-      var exdate = new Date();
-      exdate.setTime(exdate.getTime() + expiracy * 1000);
-      var c_value = escape(value) + ((expiracy == null) ? "" : "; expires=" + exdate.toUTCString());
-      document.cookie = name + "=" + c_value + '; path=/';
-      };
-
-      var getCookie = function(name) {
-      var i, x, y, ARRcookies = document.cookie.split(";");
-      for (i = 0; i < ARRcookies.length; i++) {
-        x = ARRcookies[i].substr(0, ARRcookies[i].indexOf("="));
-        y = ARRcookies[i].substr(ARRcookies[i].indexOf("=") + 1);
-        x = x.replace(/^\s+|\s+$/g, "");
-        if (x == name) {
-          return y ? decodeURI(unescape(y.replace(/\+/g, ' '))) : y; //;//unescape(decodeURI(y));
+  $(document).ready(function() {
+    document.getElementById("loader").style.display = "block";
+    document.getElementById("fader").style.display = "block";
+    function checkStatus() {
+      $.ajax({
+        url: download_url,
+        type: 'HEAD',
+        statusCode: {
+          404: function() {
+            alert('page not found');
+          },
+          200: function() {
+            window.location.href = download_url;
+          }
         }
-      }
+      });
     };
-        var downloadTimeout;
-    var checkDownloadCookie = function() {
-      if (getCookie("downloadStarted") == 1) {
-        setCookie("downloadStarted", "false", 100); //Expiration could be anything... As long as we reset the value
-        window.location.href =  "https://www.google.com"
-        // display download link
-      } else {
-        downloadTimeout = setTimeout(checkDownloadCookie, 1000); //Re-run this function in 1 second.
-      }
-    };
- </script>
+    // Interval to check the status every 5 seconds
+    setInterval(checkStatus, 1000);
+  });
+
+
+
+</script>
+{% endblock %}

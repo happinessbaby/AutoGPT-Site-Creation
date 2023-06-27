@@ -6,6 +6,7 @@ div#loader {
     height: 120px;
     cursor: wait;
     animation: spin 2s linear infinite;
+    display: none;
   }
   
 @keyframes spin {
@@ -21,6 +22,7 @@ div#fader {
     right: 0;
     bottom: 0;
     left: 0;
+    display: none;
 }
   /* .content {
     display: flex;
