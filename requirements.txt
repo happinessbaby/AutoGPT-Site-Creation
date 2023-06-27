@@ -9,3 +9,5 @@ pandoc
 pypandoc
 wikipedia
 Flask-WTF
+google-search-results
+celery

@@ -3,7 +3,7 @@
 {% block content %}
     <h1>{% block title %} Cover Letter Generator {% endblock %}</h1>
 
-    <form method="POST" action="/"  enctype="multipart/form-data">
+    <form method="POST"  action="/"  enctype="multipart/form-data" id = "myform"  >
         {{ form.csrf_token }}
         <p>
             {{ form.company.label }}
@@ -40,13 +40,51 @@
             <ul class="errors">
                 {% for error in form.file.errors %}
                     <li>{{ error }}</li>
-                {% endfor %}
-            </ul>
-        {% endif %}
+                    {% endfor %}
+                </ul>
+                {% endif %}
+                
+                <p>
+                    <!-- {{ form.submit()  }} -->
+                    <input type="submit",id="submitButton">
+                </p>
+            </form>
+            
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    
+    <script type="text/javascript">
+                
+        $(document).ready(function() {
+            $("#myform").submit(function(e) {
+                // e.preventDefault();
+                $.ajax({
+                type: "POST",
+                url: window.location.href,
+                data: $(this).serialize(),
+                success: function() {
+                    alert("Form has been successfully submitted");
+                    window.location.href = './loading';
+                    // callback();
+                },
+                error: function(xhr, status, error) {
+                // Handle any errors that occurred during the request
+                    alert("Error:", error);
+                },
+                // }).done(function(resp) {
+                //     alert("Form has been successfully submitted");
+                //     callback();
+            })
+            })
+        });
 
-        <p>
-            <input type="submit" value="Submit">
-        </p>
-    </form>
+    </script>
+
+    <!-- <ul>
+        {% for file in files %}
+         <li> <a href="{{ url_for('download', filename=file) }}">{{ file }}</a></li>
+        {% endfor %}
+    </ul> -->
+
+
 
 {% endblock %}

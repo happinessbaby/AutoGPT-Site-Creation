@@ -5,6 +5,7 @@ from langchain.vectorstores import DocArrayInMemorySearch
 from langchain.indexes import VectorstoreIndexCreator
 from langchain.agents import Tool
 from langchain.tools.python.tool import PythonREPLTool
+from langchain.utilities import SerpAPIWrapper
 
 
 def get_index(file):
@@ -17,7 +18,6 @@ def get_index(file):
 
 def create_wiki_tools():
     docstore = DocstoreExplorer(Wikipedia())
-    # cover_letter_index = get_index(cover_letter_reference)
     tools = [
         Tool(
             name = "Search",
@@ -44,6 +44,19 @@ def create_document_tools(document):
     ]
     return tools
 
+def create_search_tools():
+    search = SerpAPIWrapper()  
+    tool = [
+        Tool(
+        name="SerpSearch",
+        # description="A Python shell. Use this to execute python commands. Input should be a valid python command. If you want to see the output of a value, you should print it out with `print(...)`.",
+        description= "Useful when you cannot find answers in the docstore",
+        func=search.run,
+    ),
+    ]
+    return tool
+
+
 def create_python_agent(llm):
     agent = create_python_agent(
     llm,
@@ -51,6 +64,8 @@ def create_python_agent(llm):
     verbose=True
     )
     return agent
+
+
 
 def add_embedding(embeddings):
     embed = embeddings.embed_query("Prompt Engineer")

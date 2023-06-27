@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{% block loader %}
+
+<div id="loader" ></div>
+<div id="fader"></div> 
+<a href="{{url_for('static',filename='cover_letter.txt') }}" display=none download="cover_letter.txt" id="downloadLink">Download</a>
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script type="text/javascript"> 
+    var download_url = "{{url_for('static',filename='cover_letter.txt') }}";
+
+  $(document).ready(function() {
+    document.getElementById("loader").style.display = "block";
+    document.getElementById("fader").style.display = "block";
+    function checkStatus() {
+      $.ajax({
+        url: download_url,
+        type: 'HEAD',
+        statusCode: {
+          404: function() {
+            alert('page not found');
+          },
+          200: function() {
+            window.location.href = download_url;
+          }
+        }
+      });
+    };
+    // Interval to check the status every 5 seconds
+    setInterval(checkStatus, 1000);
+  });
+
+
+
+</script>
+{% endblock %}

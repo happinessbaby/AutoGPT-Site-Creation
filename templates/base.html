@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>{% block title %} {% endblock %} - YourJob</title>
+    <title>{% block title %} {% endblock %} - DreamJob</title>
     <style>
         nav a {
             color: #d64161;
@@ -11,15 +11,21 @@
             text-decoration: none;
         }
     </style>
+    <link rel= "stylesheet" type= "text/css" href= "{{url_for('static',filename='styles/main.css') }}">
 </head>
 <body>
     <nav>
-        <a href="{{ url_for('index') }}">FlaskApp</a>
+        <a href="{{ url_for('index') }}">AIJob</a>
         <a href="#">About</a>
     </nav>
     <hr>
     <div class="content">
         {% block content %} {% endblock %}
     </div>
-</body>
+    <!-- <div id="loader" ></div>
+    <div id="fader"></div>  -->
+    <div class="loader">
+      {% block loader %} {% endblock %}
+  </div>
+  </body>
 </html>

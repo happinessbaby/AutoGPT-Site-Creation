@@ -6,6 +6,7 @@ from langchain.embeddings import OpenAIEmbeddings
 from langchain.document_loaders import CSVLoader
 from langchain.vectorstores import DocArrayInMemorySearch
 from langchain.chains import RetrievalQA
+from langchain_utils import get_index
 
 
 from dotenv import load_dotenv, find_dotenv
@@ -47,9 +48,32 @@ def find_similar_jobs(job_title):
     return response
 
 
-#TBD: based on resume information, suggest jobs 
-def generate_job_suggestion():
-    return None
+#TBD: help people get their dream jobs
+def generate_job(resume_file, dream_job):
+    resume_table = extract_resume_fields(resume_file)
+    
+    
+
+
+
+
+def extract_resume_fields(resume_file):
+
+    index = get_index(resume_file)
+
+    query = f"""" Search and extract fields of this resume. 
+
+    Some common resume fields include but not limited to personal information, objective, education, work experience, awards and honors, and skills.
+
+    List all the field information in a markdown table.
+    
+    """
+
+    response = index.query(query)
+    print(response)
+    return response
+
+
 
 my_job_title = 'software developer'
 if __name__ == '__main__':
