@@ -64,7 +64,6 @@
                 success: function() {
                     alert("Form has been successfully submitted");
                     window.location.href = './loading';
-                    // callback();
                 },
                 error: function(xhr, status, error) {
                 // Handle any errors that occurred during the request
@@ -78,13 +77,5 @@
         });
 
     </script>
-
-    <!-- <ul>
-        {% for file in files %}
-         <li> <a href="{{ url_for('download', filename=file) }}">{{ file }}</a></li>
-        {% endfor %}
-    </ul> -->
-
-
 
 {% endblock %}

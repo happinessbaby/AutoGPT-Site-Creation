@@ -24,6 +24,15 @@ div#fader {
     left: 0;
     display: none;
 }
+
+div#generate {
+  display: none;
+}
+
+a#downloadLink {
+  display: none;
+}
+
   /* .content {
     display: flex;
     align-items: center 
