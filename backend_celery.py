@@ -4,6 +4,7 @@ from wtforms import StringField, SubmitField
 from wtforms.validators import DataRequired
 from flask_wtf.file import FileField, FileRequired, FileAllowed
 from werkzeug.utils import secure_filename
+from werkzeug.datastructures import CombinedMultiDict
 from generate_cover_letter import generate_basic_cover_letter
 from basic_utils import convert_to_txt
 import os
@@ -72,7 +73,7 @@ class MyForm(FlaskForm):
 
 
 @flask_app.route('/', methods=('GET', 'POST'))
-def index():
+def index(): 
     form = MyForm()
     # if request.method == 'POST':
         # validates form fields

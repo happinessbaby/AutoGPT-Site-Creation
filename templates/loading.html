@@ -1,13 +1,16 @@
 {% extends 'base.html' %}
 {% block loader %}
 
-<div id="loader" ></div>
+<div id="loader" style="  display: block;
+margin-left: auto;
+margin-right: auto;" ></div>
 <div id="fader"></div> 
-<h1 id="generate">Generating, please wait...</h1>
+<h1 id="generate" style="text-align:center">Generating, please wait...</h1>
 <a href="{{url_for('static',filename='cover_letter.txt') }}" id="downloadLink" download="cover_letter.txt">Click me to download</a>
-<div id="dialog" title="Dialog Title">I'm in a dialog</div>
 
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="sweetalert2.all.min.js"></script>   
 <script type="text/javascript"> 
     var download_url = "{{url_for('static',filename='cover_letter.txt') }}";
 
@@ -15,6 +18,7 @@
     document.getElementById("loader").style.display = "block";
     document.getElementById("fader").style.display = "block";
     var callCount = 0;
+    var fired = false;
     function checkStatus() {
       $.ajax({
         url: download_url,
@@ -24,10 +28,15 @@
             // alert('page not found');
             // after a certain period of time of no response from backend, needs to take user back to index
             callCount++;
-            if (callCount>5) {
-              // alert('Oops, something happened, please try again!');
-              $("#dialog").dialog();
-              window.location.href = "{{url_for('index') }}";
+            if (callCount>5 && fired==false) {
+              Swal.fire({
+                icon: 'error',
+                title: 'Oops...',
+                text: 'something went wrong',
+                footer: '<a href="{{url_for("index")}}">Take me back</a>'
+                });
+                fired=true;
+              // window.location.href = "{{url_for('index') }}";
             }
             
           },

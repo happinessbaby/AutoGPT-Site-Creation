@@ -1,13 +1,15 @@
 {% extends 'base.html' %}
 
 {% block content %}
+<div class="form">
     <h1>{% block title %} Cover Letter Generator {% endblock %}</h1>
 
-    <form method="POST"  action="/"   enctype="multipart/form-data" id = "myform" class="dropzone"  >
+    <form method="POST"  action="/"   enctype="multipart/form-data" id = "myform" >
         {{ form.csrf_token }}
         <p>
             {{ form.company.label }}
             {{ form.company(size=20) }}
+            <span id = error1></span>
         </p>
 
         {% if form.company.errors %}
@@ -16,11 +18,12 @@
                     <li>{{ error }}</li>
                 {% endfor %}
             </ul>
-        {% endif %}
+            {% endif %}
 
         <p>
             {{ form.job.label }}
-            {{ form.job() }}
+            {{ form.job(size=20) }}
+            <span id="error2"></span>
         </p>
 
         {% if form.job.errors %}
@@ -29,18 +32,27 @@
                     <li>{{ error }}</li>
                 {% endfor %}
             </ul>
-        {% endif %}
-        <p>
-            <input type="submit" id="submitButton">
-        </p>
-
+            {% endif %}
+            
+        <div class="dropzone" id="myDropzone">
+        <div class="dz-message" data-dz-message><span>drop resume here</span></div>
+        </div>
+        <span id = error3></span>
+    
+        <input type="submit" id="submitButton" class="hidden" style="display:none">
+        
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/> 
     </form>
+</div>
+
+    <label id=lsb for="submitButton" tabindex="0">Generate</label>
             
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="http://ajax.aspnetcdn.com/ajax/jquery.validate/1.10.0/jquery.validate.js"></script>
     <script src="http://ajax.microsoft.com/ajax/jquery.validate/1.11.1/additional-methods.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/dropzone/5.7.1/min/dropzone.min.js"></script>    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dropzone/5.7.1/min/dropzone.min.js"></script> 
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="sweetalert2.all.min.js"></script>   
     
     <script type="text/javascript"> 
 
@@ -49,7 +61,7 @@
         $(document).ready(function() {
               // The dropzone method is added to jQuery elements and can
             // be invoked with an (optional) configuration object.
-            var mydropzone = new Dropzone("#myform", {
+            var mydropzone = new Dropzone("#myDropzone", {
                 paramName: 'file', 
                 maxFilesize:2, 
                 acceptedFiles: '.txt, .pdf, .docx, .odt',
@@ -60,6 +72,8 @@
                 uploadMultiple: true,
                 parallelUploads:100,
                 addRemoveLinks:true,
+                // previewpreviewsContainer: "#dropzonePreview",
+                // clickable: "#dropzonePreview",
                 userId: "",
                 init: function() {
                     
@@ -77,7 +91,19 @@
                         else
                         {
                             // TBD: add each case's error handling
-                            alert("please upload a file!");
+                            if (uploaded_file==false) 
+                            {
+                                document.getElementById('error3').innerHTML="<font color=red size=1 face='Verdana'>required field</font>";
+                            }
+                            if (document.getElementById("company").value=='')
+                            {
+                                document.getElementById('error1').innerHTML="<font color=red size=1 face='Verdana'>required field</font>";
+                            }
+                            if (document.getElementById("job").value=='')
+                            {
+                                document.getElementById('error2').innerHTML="<font color=red size=1 face='Verdana'>required field</font>";
+                            }
+                            // alert("please upload a file!");
                         }
                     });
                     // to append extra data and form data
@@ -97,19 +123,34 @@
                         uploaded_file = false;
                     });
                     this.on("maxfilesexceeded", function() {
-                        alert("exceeded file limit!");
+                        // Swal.fire("Exceeded file limit!")
                         uploaded_file=true;   
                     });
                     this.on("successmultiple", function(file, response) {
-                        alert("file has been sucessfully sent");
-                        window.location.href = './loading';
+                        // alert("file has been sucessfully sent");
+                        Swal.fire({
+                            title: "Your file will automatically download when done.",
+                            // showDenyButton: true,
+                            showCancelButton: true,
+                            confirmButtonText: 'okay',
+                            // denyButtonText: `Don't save`,
+                            }).then((result) => {
+                            /* Read more about isConfirmed, isDenied below */
+                            if (result.isConfirmed) {
+                                window.location.href = './loading';
+                            // } else if (result.isDenied) {
+                            //     // Swal.fire('Changes are not saved', '', 'info')
+                                }
+                            })
                     });
                     this.on("complete", function(file) {
                         dz.removeFile(file);
                     });
-                    this.on("errormultiple", function(files, response) {
+                    this.on("errormultiple", function(file, error) {
                     // Gets triggered when there was an error sending the files.
                     // Maybe show form again, and notify user of error
+                        // DOES NOT WORK YET
+                        file.previewElement.querySelectorAll('.dz-error-message span')[0].textContent = error.message || "Unable to Upload";
                     });
                 }
 
