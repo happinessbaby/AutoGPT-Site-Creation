@@ -1,8 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>{% block title %} {% endblock %} - DreamJob</title>
+    <head>
+        <meta charset="UTF-8">
+        <title>{% block title %} {% endblock %} - JobAI</title>
+        {{ dropzone.load_css() }}
     <style>
         nav a {
             color: #d64161;
@@ -11,11 +12,19 @@
             text-decoration: none;
         }
     </style>
+    <style>
+        .dropzone {
+        border: 2px dashed #0087F7;
+        margin: 20%;
+        min-height: 200px;
+        }
+    </style>
     <link rel= "stylesheet" type= "text/css" href= "{{url_for('static',filename='styles/main.css') }}">
 </head>
 <body>
+    {{ dropzone.load_js() }}
     <nav>
-        <a href="{{ url_for('index') }}">AIJob</a>
+        <a href="{{ url_for('index') }}">JobAI</a>
         <a href="#">About</a>
     </nav>
     <hr>
@@ -23,7 +32,7 @@
         {% block content %} {% endblock %}
     </div>
     <div class="loader">
-      {% block loader %} {% endblock %}
-  </div>
+        {% block loader %} {% endblock %}
+    </div>
   </body>
 </html>

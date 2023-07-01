@@ -3,7 +3,7 @@
 {% block content %}
     <h1>{% block title %} Cover Letter Generator {% endblock %}</h1>
 
-    <form method="POST"  action="/"  enctype="multipart/form-data" id = "myform"  >
+    <form method="POST"  action="/"   enctype="multipart/form-data" id = "myform" class="dropzone"  >
         {{ form.csrf_token }}
         <p>
             {{ form.company.label }}
@@ -12,7 +12,7 @@
 
         {% if form.company.errors %}
             <ul class="errors">
-                {% for error in form.name.errors %}
+                {% for error in form.company.errors %}
                     <li>{{ error }}</li>
                 {% endfor %}
             </ul>
@@ -25,56 +25,142 @@
 
         {% if form.job.errors %}
             <ul class="errors">
-                {% for error in form.company.errors %}
+                {% for error in form.job.errors %}
                     <li>{{ error }}</li>
                 {% endfor %}
             </ul>
         {% endif %}
-
         <p>
-            {{ form.hidden_tag() }}
-            {{ form.file }}
+            <input type="submit" id="submitButton">
         </p>
 
-        {% if form.file.errors %}
-            <ul class="errors">
-                {% for error in form.file.errors %}
-                    <li>{{ error }}</li>
-                    {% endfor %}
-                </ul>
-                {% endif %}
-                
-                <p>
-                    <!-- {{ form.submit()  }} -->
-                    <input type="submit",id="submitButton">
-                </p>
-            </form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/> 
+    </form>
             
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="http://ajax.aspnetcdn.com/ajax/jquery.validate/1.10.0/jquery.validate.js"></script>
+    <script src="http://ajax.microsoft.com/ajax/jquery.validate/1.11.1/additional-methods.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dropzone/5.7.1/min/dropzone.min.js"></script>    
     
-    <script type="text/javascript">
-                
+    <script type="text/javascript"> 
+
+        Dropzone.autoDiscover = false;
+        var uploaded_file = false;
         $(document).ready(function() {
-            $("#myform").submit(function(e) {
-                // e.preventDefault();
-                $.ajax({
-                type: "POST",
-                url: window.location.href,
-                data: $(this).serialize(),
-                success: function() {
-                    alert("Form has been successfully submitted");
-                    window.location.href = './loading';
-                },
-                error: function(xhr, status, error) {
-                // Handle any errors that occurred during the request
-                    alert("Error:", error);
-                },
-                // }).done(function(resp) {
-                //     alert("Form has been successfully submitted");
-                //     callback();
-            })
-            })
-        });
+              // The dropzone method is added to jQuery elements and can
+            // be invoked with an (optional) configuration object.
+            var mydropzone = new Dropzone("#myform", {
+                paramName: 'file', 
+                maxFilesize:2, 
+                acceptedFiles: '.txt, .pdf, .docx, .odt',
+                url:window.location.href, 
+                autoProcessQueue: false,
+                maxFiles:1,
+                // uploadMultiple has to be set to true for form+file combo: https://docs.dropzone.dev/configuration/tutorials/combine-form-data-with-files
+                uploadMultiple: true,
+                parallelUploads:100,
+                addRemoveLinks:true,
+                userId: "",
+                init: function() {
+                    
+                    var dz = this;
+                    document.getElementById("submitButton").addEventListener("click", function(e)
+                    {
+                        // Make sure that the form isn't actually being sent.
+                        e.preventDefault();
+                        e.stopPropagation();
+                        // Valide form data and file
+                        if(uploaded_file ==true && document.getElementById("company").value!='' && document.getElementById("job").value!='')
+                        {   
+                            dz.processQueue();
+                        }
+                        else
+                        {
+                            // TBD: add each case's error handling
+                            alert("please upload a file!");
+                        }
+                    });
+                    // to append extra data and form data
+                    this.on("sendingmultiple", function(file, xhr, formData){
+                        // alert("sending");
+                        formData.append("userid", dz.userId);
+                        formData.append("company", $('#company').val());
+                        formData.append("job", $('#job').val());
+                        formData.append("csrf_token", '{{csrf_token()}}');
+                    });
+                    this.on("addedfile", file => {
+                        // alert("file has been added");
+                        uploaded_file=true;
+                    });
+                    this.on("removedfile", function(file) {
+                        // alert("file has been removed");
+                        uploaded_file = false;
+                    });
+                    this.on("maxfilesexceeded", function() {
+                        alert("exceeded file limit!");
+                        uploaded_file=true;   
+                    });
+                    this.on("successmultiple", function(file, response) {
+                        alert("file has been sucessfully sent");
+                        window.location.href = './loading';
+                    });
+                    this.on("complete", function(file) {
+                        dz.removeFile(file);
+                    });
+                    this.on("errormultiple", function(files, response) {
+                    // Gets triggered when there was an error sending the files.
+                    // Maybe show form again, and notify user of error
+                    });
+                }
+
+            });
+                // $("#myform").validate({
+                //     rules: {
+                //         company: "required",
+                //         job: "required",
+                //     },
+                //     submitHandler: function(form) {
+                //         // do other things for a valid form
+                //         alert("form is valid!");
+                //         form.submit();
+                //         alert("after submitting");
+                //     },
+                //     invalidHandler: function(event, validator) {
+                //         // 'this' refers to the form
+                //         var errors = validator.numberOfInvalids();
+                //         if (errors) {
+                //             var message = errors == 1
+                //             ? 'You missed 1 field. It has been highlighted'
+                //             : 'You missed ' + errors + ' fields. They have been highlighted';
+                //             $("div.error span").html(message);
+                //             $("div.error").show();
+                //         } else {
+                //             $("div.error").hide();
+                //         }
+                //     }
+                // });
+                    // $.ajax({
+                    //     type: "POST",
+                    //     url: window.location.href,
+                    //     data: $('#myform').serialize(),
+                    //     success: function() {
+                    //         // alert("Your form has been successfully submitted");
+                    //         mydropzone.userid = "id";
+                    //         mydropzone.processQueue();
+                    //         window.location.href = './loading';
+                    //     },
+                    //     error: function(xhr, status, error) {
+                    //         // Handle any errors that occurred during the request
+                    //         alert("Error:", error);
+                    //         // defaults back to index (form submission page)
+                    //     },
+                    //     // }).done(function(resp) {
+                    //         //     alert("Form has been successfully submitted");
+                    // })
+            //})
+
+            });
+        
 
     </script>
 

@@ -9,6 +9,8 @@ from basic_utils import convert_to_txt
 import os
 from pathlib import Path
 from celery import Celery, Task
+from flask_dropzone import Dropzone
+from flask_wtf.csrf import CSRFProtect,  CSRFError
 
 
 from dotenv import load_dotenv, find_dotenv
@@ -45,47 +47,61 @@ celery_app = celery_init_app(flask_app)
 # CELERY_RESULT_SERIALIZER = 'json'
 # CELERY_TASK_SERIALIZER = 'json'
 
-# accept requests that are up to 1MB in size
-# flask_app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024
+dropzone = Dropzone(flask_app)
+csrf = CSRFProtect(flask_app)
+csrf.init_app(flask_app)
+flask_app.config['DROPZONE_ALLOWED_FILE_CUSTOM'] = True
+flask_app.config['DROPZONE_ALLOWED_FILE_TYPE'] = '.docx, .odt, .pdf, .txt'
+
 # app.config['UPLOAD_EXTENSIONS'] = ['.docx', '.txt', '.pdf', '.odt']
+# accept requests that are up to 16MB in size
 flask_app.config['UPLOAD_PATH'] = os.getenv('RESUME_PATH')
 flask_app.config['RESULT_PATH'] = os.getenv('COVER_LETTER_PATH')
 flask_app.config['MAX_CONTENT_LENGTH'] = 16 * 1000 * 1000
 # enable CSRF protection
-# app.config['DROPZONE_ENABLE_CSRF'] = True
+flask_app.config['DROPZONE_ENABLE_CSRF'] = True
+
 
 
 class MyForm(FlaskForm):
     company = StringField('Company', validators=[DataRequired()])
     job = StringField('Position', validators=[DataRequired()])
-    file = FileField('Resume file', validators=[FileRequired(), FileAllowed(['docx', 'txt', 'pdf', 'odt'], 'File type not supported!')])
-    submit = SubmitField("Generate Cover Letter")
+    # file = FileField('Resume file', validators=[FileRequired(), FileAllowed(['docx', 'txt', 'pdf', 'odt'], 'File type not supported!')])
+    # submit = SubmitField("Generate Cover Letter")
 
 
 
 @flask_app.route('/', methods=('GET', 'POST'))
 def index():
-    # if request.method == 'POST':
     form = MyForm()
+    # if request.method == 'POST':
+        # validates form fields
+        #ALSO HAS TO VALIDATE FILE!
     if form.validate_on_submit():
-        file = form.file.data
-        filename = secure_filename(file.filename)
-        # return redirect('/success')
+        # file = form.file.data
+        # filename = secure_filename(file.filename)
         # text1 = request.form['text1']
         # text2 = request.form['text2']
         # text3 = request.form['text3']
-        # uploaded_file = request.files['file']
+        # filename = ""
+        # syntax for dropzone's upload multiple set to true,
+        #  see advanced usage: https://readthedocs.org/projects/flask-dropzone/downloads/pdf/latest/
+        for key, f in request.files.items():
+            if key.startswith('file'):
+                f.save(os.path.join(flask_app.config['UPLOAD_PATH'], f.filename))
+                filename=f.filename
+        # file = request.files['file']
+        # filename = file.filename
         # # checks if user submits without uploading file
-        # if uploaded_file.filename != '':
-        # #     uploaded_file.save(uploaded_file.filename)
         # file_ext = os.path.splitext(filename)[1]
-        # if file_ext not in current_app.config['UPLOAD_EXTENSIONS']:
-        #     abort(400)
-        file.save(os.path.join(flask_app.config['UPLOAD_PATH'], filename))
+        # # if file_ext not in current_app.config['DROPZONE_ALLOWED_FILE_TYPE']:
+        # #     return 'Unsupported file type!', 400
+        # if filename != '':
+        #     file.save(os.path.join(flask_app.config['UPLOAD_PATH'], filename))
         form_data = {
         'company': form.company.data,
         'job': form.job.data,
-        'filename': filename
+        'filename': filename,
         }
         send_cover_letter.delay(form_data)
         redirect(url_for('static', filename="cover_letter.txt"))
@@ -113,6 +129,11 @@ def download(filename):
 @flask_app.route('/loading/', methods=['GET', 'POST'])
 def loading_model():
     return render_template ("loading.html")
+
+# handle CSRF error
+@flask_app.errorhandler(CSRFError)
+def csrf_error(e):
+    return e.description, 400
 
 
 
