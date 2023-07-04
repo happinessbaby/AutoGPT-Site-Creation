@@ -162,17 +162,15 @@ def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
 
     # Try using a step wise instruction as seen in: https://learn.deeplearning.ai/chatgpt-building-system/lesson/5/chain-of-thought-reasoning
 
-    template_string2 = """Generate a cover letter for a person applying for a job position or an intern opportunity using the following information. 
+    template_string2 = """Generate a cover letter for a person applying for {job} at {company} using the following information. 
 
-      The content you are to use to create this personalized cover letter is delimited with {delimiter} characters.
+      The content you are to reference to create the cover letter is delimited with {delimiter} characters.
 
         content: {delimiter}{content}{delimiter}. \
     
-      Step 1: Determine which information in the content is useful and which is not. Usefulness of the information should be based on how close it related to job description delimited with {delimiter2} charaters. \
+      Step 1: Determine which information in the content is useful and which is not. Usefulness of the information should be based on how close it related to {job} and job description delimited with {delimiter2} charaters. \
       
         For example, cooking skills are not related to software development so it is not usefu information.
-      
-        Use provided context only and do not make things up. \
 
         job description: {delimiter2}{job_description}{delimiter2}. \
     
@@ -180,9 +178,9 @@ def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
         
         Each good cover example is delimited with {delimiter3} characters. Use them as a guide based on which you make the judgment. 
 
-         example: {examples}. 
+         example: {examples}. \
 
-      Step 3: change all the personal information to the following. Do not incude them if they are -1 or empty: 
+      Step 3: Change all the personal information to the following. Do not incude them if they are -1 or empty: 
 
         name: {name}. \
 
@@ -196,14 +194,13 @@ def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
 
         job position they are applying for: {job}. \
     
+      Step 4: Generate the cover letter based on the information you gathered in Steps 1 to 3. Do not make things up. 
+    
     Use the following format:
-        Step 1:{delimiter4} <step 1 reasoning>
-        Step 2:{delimiter4} <step 2 reasoning>
-        Step 3:{delimiter4} <step 3 reasoning>
-
-        final cover letter:{delimiter4} <the cover letter you generated>
-
-        Make sure to include {delimiter4} to separate every step.
+        Step 1:{delimiter} <step 1 reasoning>
+        Step 2:{delimiter} <step 2 reasoning>
+        Step 3:{delimiter} <step 3 reasoning>
+        Step 4:{delimiter} <the cover letter you generate>
 
 
     """
@@ -262,11 +259,11 @@ def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
     )
     my_cover_letter = chat(cover_letter_message).content
 
-    my_cover_letter= my_cover_letter.split("final cover letter:")[-1].strip()
+    my_cover_letter= my_cover_letter.split(f"{delimiter}")[-1].strip()
 
-    # Check potential harmful content
+    # Check potential harmful content in response
     if (get_moderation_flag(my_cover_letter)==False):   
-        # Check if it's a cover letter
+        # Validate cover letter
         if (evaluate_response(my_cover_letter)):
             # Write the cover letter to a file
             with open(os.path.join(cover_letter_path, 'cover_letter.txt'), 'w') as f:

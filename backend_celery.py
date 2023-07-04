@@ -5,7 +5,7 @@ from wtforms.validators import DataRequired, Length
 from werkzeug.utils import secure_filename
 from werkzeug.datastructures import CombinedMultiDict
 from generate_cover_letter import generate_basic_cover_letter
-from basic_utils import convert_to_txt
+from basic_utils import convert_to_txt, check_file_safety
 import os
 from pathlib import Path
 from celery import Celery, Task
@@ -46,13 +46,10 @@ celery_app = celery_init_app(flask_app)
 dropzone = Dropzone(flask_app)
 csrf = CSRFProtect(flask_app)
 csrf.init_app(flask_app)
-flask_app.config['DROPZONE_ALLOWED_FILE_CUSTOM'] = True
-flask_app.config['DROPZONE_ALLOWED_FILE_TYPE'] = '.docx, .odt, .pdf, .txt'
 
 # app.config['UPLOAD_EXTENSIONS'] = ['.docx', '.txt', '.pdf', '.odt']
 flask_app.config['UPLOAD_PATH'] = os.getenv('RESUME_PATH')
 flask_app.config['RESULT_PATH'] = os.getenv('COVER_LETTER_PATH')
-flask_app.config['MAX_CONTENT_LENGTH'] = 16 * 1000 * 1000
 # enable CSRF protection
 flask_app.config['DROPZONE_ENABLE_CSRF'] = True
 
@@ -61,9 +58,6 @@ flask_app.config['DROPZONE_ENABLE_CSRF'] = True
 class MyForm(FlaskForm):
     company = StringField('Company', validators=[DataRequired()])
     job = StringField('Position', validators=[DataRequired()])
-    # file = FileField('Resume file', validators=[FileRequired(), FileAllowed(['docx', 'txt', 'pdf', 'odt'], 'File type not supported!')])
-    # submit = SubmitField("Generate Cover Letter")
-
 
 
 @flask_app.route('/', methods=('GET', 'POST'))
@@ -99,12 +93,16 @@ def send_cover_letter(form_data):
     read_path =  os.path.join(flask_app.config['UPLOAD_PATH'], Path(form_data['filename']).stem+'.txt')
     convert_to_txt(os.path.join(flask_app.config['UPLOAD_PATH'], form_data['filename']), read_path)
     if (Path(read_path).exists()):
-        generate_basic_cover_letter(form_data['company'], form_data['job'], read_path)
-        with flask_app.test_request_context():
-            with flask_app.app_context():
-                send_file(os.path.join(flask_app.config['RESULT_PATH'], 'cover_letter.txt'))
-                # return {"status": True} 
-            
+        # Check for content safety
+        if (check_file_safety(read_path)):
+            generate_basic_cover_letter(form_data['company'], form_data['job'], read_path)
+            with flask_app.test_request_context():
+                with flask_app.app_context():
+                    send_file(os.path.join(flask_app.config['RESULT_PATH'], 'cover_letter.txt'))
+                    # return {"status": True}       
+        # else:
+            # abort celery task
+
 
 @flask_app.route('/static/<path:filename>', methods=['GET', 'POST'])
 def download(filename):
