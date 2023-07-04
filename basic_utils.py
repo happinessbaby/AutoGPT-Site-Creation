@@ -7,6 +7,7 @@ import pypandoc
 import uuid
 import markdown
 import csv
+from openai_api import get_moderation_flag, get_protection_layer
 
 
 
@@ -77,6 +78,12 @@ def markdown_table_to_dict(markdown_table):
     return result
 
 
+def check_file_safety(file):
+    text = read_txt(file)
+    if (get_moderation_flag(text)| get_protection_layer(text)):
+        return False
+    else:
+        return True
 
 
 

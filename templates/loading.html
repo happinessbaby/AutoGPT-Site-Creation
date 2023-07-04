@@ -1,11 +1,10 @@
 {% extends 'base.html' %}
 {% block loader %}
 
-<div id="loader" style="  display: block;
-margin-left: auto;
-margin-right: auto;" ></div>
+<div id="loader" ></div>
 <div id="fader"></div> 
 <h1 id="generate" style="text-align:center">Generating, please wait...</h1>
+<div id="downloadMsg" > Did not get your file? </div>
 <a href="{{url_for('static',filename='cover_letter.txt') }}" id="downloadLink" download="cover_letter.txt">Click me to download</a>
 
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
@@ -25,26 +24,26 @@ margin-right: auto;" ></div>
         type: 'HEAD',
         statusCode: {
           404: function() {
-            // alert('page not found');
-            // after a certain period of time of no response from backend, needs to take user back to index
             callCount++;
-            if (callCount>5 && fired==false) {
+            if (callCount>300 && fired==false) {
               Swal.fire({
                 icon: 'error',
                 title: 'Oops...',
                 text: 'something went wrong',
-                footer: '<a href="{{url_for("index")}}">Take me back</a>'
+                footer: '<a href="{{url_for("index")}}">Take me back</a>' // Takes user back to form
                 });
                 fired=true;
-              // window.location.href = "{{url_for('index') }}";
+              document.getElementById("loader").style.display = "none";
+              document.getElementById("fader").style.display = "none";
+              document.getElementById("generate").style.display = "none";
             }
             
           },
           200: function() {
-            // window.location.href = download_url;
             document.getElementById("loader").style.display = "none";
             document.getElementById("fader").style.display = "none";
             document.getElementById("generate").style.display = "none";
+            document.getElementById("downloadMsg").style.display="block";
             document.getElementById("downloadLink").style.display = "block";
 
           }

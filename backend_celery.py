@@ -1,8 +1,7 @@
 from flask import Flask, redirect, request, render_template, send_file, send_from_directory, abort, current_app, flash, url_for, config
 from flask_wtf import FlaskForm
 from wtforms import StringField, SubmitField
-from wtforms.validators import DataRequired
-from flask_wtf.file import FileField, FileRequired, FileAllowed
+from wtforms.validators import DataRequired, Length
 from werkzeug.utils import secure_filename
 from werkzeug.datastructures import CombinedMultiDict
 from generate_cover_letter import generate_basic_cover_letter
@@ -28,10 +27,6 @@ flask_app.config.from_mapping(
         task_ignore_result=True,
     ),
 )
-# app.config['CELERY_BROKER_URL'] = f'redis://:{redis_password}@localhost:6379/0'
-# app.config['CELERY_RESULT_BACKEND'] = f'redis://:{redis_password}@localhost:6379/0'
-# celery = Celery(app.name, broker=app.config['CELERY_BROKER_URL'])
-# celery.conf.update(app.config)
 def celery_init_app(flask_app: Flask) -> Celery:
     class FlaskTask(Task):
         def __call__(self, *args: object, **kwargs: object) -> object:
@@ -55,7 +50,6 @@ flask_app.config['DROPZONE_ALLOWED_FILE_CUSTOM'] = True
 flask_app.config['DROPZONE_ALLOWED_FILE_TYPE'] = '.docx, .odt, .pdf, .txt'
 
 # app.config['UPLOAD_EXTENSIONS'] = ['.docx', '.txt', '.pdf', '.odt']
-# accept requests that are up to 16MB in size
 flask_app.config['UPLOAD_PATH'] = os.getenv('RESUME_PATH')
 flask_app.config['RESULT_PATH'] = os.getenv('COVER_LETTER_PATH')
 flask_app.config['MAX_CONTENT_LENGTH'] = 16 * 1000 * 1000
@@ -75,37 +69,28 @@ class MyForm(FlaskForm):
 @flask_app.route('/', methods=('GET', 'POST'))
 def index(): 
     form = MyForm()
-    # if request.method == 'POST':
-        # validates form fields
-        #ALSO HAS TO VALIDATE FILE!
-    if form.validate_on_submit():
-        # file = form.file.data
-        # filename = secure_filename(file.filename)
-        # text1 = request.form['text1']
-        # text2 = request.form['text2']
-        # text3 = request.form['text3']
-        # filename = ""
-        # syntax for dropzone's upload multiple set to true,
-        #  see advanced usage: https://readthedocs.org/projects/flask-dropzone/downloads/pdf/latest/
-        for key, f in request.files.items():
-            if key.startswith('file'):
-                f.save(os.path.join(flask_app.config['UPLOAD_PATH'], f.filename))
-                filename=f.filename
-        # file = request.files['file']
-        # filename = file.filename
-        # # checks if user submits without uploading file
-        # file_ext = os.path.splitext(filename)[1]
-        # # if file_ext not in current_app.config['DROPZONE_ALLOWED_FILE_TYPE']:
-        # #     return 'Unsupported file type!', 400
-        # if filename != '':
-        #     file.save(os.path.join(flask_app.config['UPLOAD_PATH'], filename))
-        form_data = {
-        'company': form.company.data,
-        'job': form.job.data,
-        'filename': filename,
-        }
-        send_cover_letter.delay(form_data)
-        redirect(url_for('static', filename="cover_letter.txt"))
+    if request.method == 'POST':
+        # Validates form fields
+        if form.validate_on_submit():
+            filename = ""
+            # syntax for dropzone's upload multiple set to true,
+            #  see advanced usage: https://readthedocs.org/projects/flask-dropzone/downloads/pdf/latest/
+            for key, f in request.files.items():
+                if key.startswith('file'):
+                    f.save(os.path.join(flask_app.config['UPLOAD_PATH'], f.filename))
+                    filename=f.filename
+            # file = request.files['file']
+            # filename = file.filename
+            if filename != '':
+                form_data = {
+                    'company': form.company.data,
+                    'job': form.job.data,
+                    'filename': filename,
+                    }
+                send_cover_letter.delay(form_data)
+                return redirect(url_for('index'))
+            else:
+                abort(400)
     return render_template('index.html', form = form)
 
 @celery_app.task(serializer='json')
@@ -118,7 +103,7 @@ def send_cover_letter(form_data):
         with flask_app.test_request_context():
             with flask_app.app_context():
                 send_file(os.path.join(flask_app.config['RESULT_PATH'], 'cover_letter.txt'))
-                return {"status": True} 
+                # return {"status": True} 
             
 
 @flask_app.route('/static/<path:filename>', methods=['GET', 'POST'])

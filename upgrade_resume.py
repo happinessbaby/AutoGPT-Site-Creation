@@ -51,6 +51,9 @@ def find_similar_jobs(job_title):
 #TBD: help people get their dream jobs
 def generate_job(resume_file, dream_job):
     resume_table = extract_resume_fields(resume_file)
+    # Make a list of job suggestions based on their resume information
+    # Let user select the ones they like
+    # upgrade their resume
     
     
 
