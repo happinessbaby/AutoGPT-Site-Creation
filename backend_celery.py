@@ -9,6 +9,7 @@ from basic_utils import convert_to_txt, check_file_safety
 import os
 from pathlib import Path
 from celery import Celery, Task
+from celery.result import AsyncResult
 from flask_dropzone import Dropzone
 from flask_wtf.csrf import CSRFProtect,  CSRFError
 
@@ -84,6 +85,8 @@ def index():
                 send_cover_letter.delay(form_data)
                 return redirect(url_for('index'))
             else:
+                # no file error handling
+                # maybe redirect the user to 'index' and try again
                 abort(400)
     return render_template('index.html', form = form)
 
@@ -96,10 +99,11 @@ def send_cover_letter(form_data):
         # Check for content safety
         if (check_file_safety(read_path)):
             generate_basic_cover_letter(form_data['company'], form_data['job'], read_path)
+            # error in above step has been handled
             with flask_app.test_request_context():
                 with flask_app.app_context():
-                    send_file(os.path.join(flask_app.config['RESULT_PATH'], 'cover_letter.txt'))
-                    # return {"status": True}       
+                    send_file(os.path.join(flask_app.config['RESULT_PATH'], 'cover_letter.txt'))   
+                    # return {"status": True}   
         # else:
             # abort celery task
 

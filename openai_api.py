@@ -96,8 +96,12 @@ def check_injection(message):
 	response = get_completion_from_messages(messages, max_tokens=1)
 	if response=="Y":
 		return True
-	else:
+	elif (response == "N"):
 		return False
+	else:
+		# return false for now, will have error handling here
+		return False
+	
 	
 
 # Could also implement a scoring system_message to provide model with feedback
@@ -121,7 +125,10 @@ def evaluate_response(cover_letter):
 
 	if (response=="Y"):
 		return True
+	elif (response == "N"):
+		return False
 	else:
+		# return false for now, will have error handling here
 		return False
 	
 

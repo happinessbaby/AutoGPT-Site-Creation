@@ -31,9 +31,15 @@ from openai_api import get_moderation_flag, check_injection
 def convert_to_txt(file, output_path):
     file_ext = os.path.splitext(file)[1]
     if (file_ext=='.pdf'):
-        convert_pdf_to_txt(file, output_path)
+        try: 
+            convert_pdf_to_txt(file, output_path)
+        except Exception as e:
+            print(e)
     elif (file_ext=='.odt' or file_ext=='.docx'):
-        convert_doc_to_txt(file, output_path)
+        try:
+            convert_doc_to_txt(file, output_path)
+        except Exception as e:
+            print(e)
 
 
 def convert_pdf_to_txt(pdf_file, output_path):
@@ -50,9 +56,12 @@ def convert_doc_to_txt(doc_file, output_path):
     pypandoc.convert_file(doc_file, 'plain', outputfile=output_path)
 
 def read_txt(file):
-    with open(file, 'r', errors='ignore') as f:
-        text = f.read()
-        return text
+    try:
+        with open(file, 'r', errors='ignore') as f:
+            text = f.read()
+            return text
+    except Exception as e:
+        print(e)
     
 def markdown_table_to_dict(markdown_table):
     # Convert Markdown to HTML

@@ -164,23 +164,23 @@ def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
 
     template_string2 = """Generate a cover letter for a person applying for {job} at {company} using the following information. 
 
-      The content you are to reference to create the cover letter is delimited with {delimiter} characters.
+      The content you are to use as reference to create the cover letter is delimited with {delimiter} characters.
 
         content: {delimiter}{content}{delimiter}. \
     
-      Step 1: Determine which information in the content is useful and which is not. Usefulness of the information should be based on how close it related to {job} and job description delimited with {delimiter2} charaters. \
+      Step 1: {delimiter4} Read the content and determine which information in the content is useful and which is not. Usefulness of the information should be based on how close it relates to {job} and the job description, which is delimited with {delimiter2} charaters. \
       
-        For example, cooking skills are not related to software development so it is not usefu information.
+        For example, cooking skills are not related to software development so it is not useful information.
 
         job description: {delimiter2}{job_description}{delimiter2}. \
     
-      Step 2: Determine which information from Step 1 should be included and which should not based on the quality of information in contributing to a good cover letter.
-        
-        Each good cover example is delimited with {delimiter3} characters. Use them as a guide based on which you make the judgment. 
+      Step 2: {delimiter4} Research example cover letters provided. Each example is delimited with {delimiter3} characters.
 
+         Determine which information from Step 1 should be included and which should not based on the quality of information in contributing to a good cover letter.
+        
          example: {examples}. \
 
-      Step 3: Change all the personal information to the following. Do not incude them if they are -1 or empty: 
+      Step 3: {delimiter4} Change all personal information to the following. Do not incude them if they are -1 or empty: 
 
         name: {name}. \
 
@@ -194,13 +194,15 @@ def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
 
         job position they are applying for: {job}. \
     
-      Step 4: Generate the cover letter based on the information you gathered in Steps 1 to 3. Do not make things up. 
+      Step 4: {delimiter4} Generate the cover letter. Use information you filtered downn in steps 1 through 3. Do not make stuff up. 
     
-    Use the following format:
-        Step 1:{delimiter} <step 1 reasoning>
-        Step 2:{delimiter} <step 2 reasoning>
-        Step 3:{delimiter} <step 3 reasoning>
-        Step 4:{delimiter} <the cover letter you generate>
+      Use the following format:
+        Step 1:{delimiter4} <step 1 reasoning>
+        Step 2:{delimiter4} <step 2 reasoning>
+        Step 3:{delimiter4} <step 3 reasoning>
+        Step 4:{delimiter4} <the cover letter you generate>
+
+      Make sure to include {delimiter4} to separate every step.
 
 
     """
@@ -259,7 +261,7 @@ def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
     )
     my_cover_letter = chat(cover_letter_message).content
 
-    my_cover_letter= my_cover_letter.split(f"{delimiter}")[-1].strip()
+    my_cover_letter= my_cover_letter.split(delimiter4)[-1].strip()
 
     # Check potential harmful content in response
     if (get_moderation_flag(my_cover_letter)==False):   
@@ -267,8 +269,13 @@ def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
         if (evaluate_response(my_cover_letter)):
             # Write the cover letter to a file
             with open(os.path.join(cover_letter_path, 'cover_letter.txt'), 'w') as f:
-                f.write(my_cover_letter)
-                print("ALL SUCCESS")
+                try:
+                    my_cover_letter= my_cover_letter.split(delimiter4)[-1].strip()
+                    f.write(my_cover_letter)
+                    print("ALL SUCCESS")
+                except Exception as e:
+                    print("FAILED")
+                    # Error logging
         
 
 # Call the function to generate the cover letter
