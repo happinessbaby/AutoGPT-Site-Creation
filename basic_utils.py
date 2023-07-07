@@ -87,8 +87,11 @@ def markdown_table_to_dict(markdown_table):
     return result
 
 
-def check_file_safety(file):
-    text = read_txt(file)
+def check_content_safety(file=None, text_str=None):
+    if (file!=None):
+        text = read_txt(file)
+    elif (text_str!=None):
+        text = text_str
     if (get_moderation_flag(text) or check_injection(text)):
         return False
     else:

@@ -1,7 +1,7 @@
 # Import the necessary modules
 import os
 import markdown
-from openai_api import get_completion, get_moderation_flag, evaluate_response
+from openai_api import get_completion, evaluate_response
 from langchain.chat_models import ChatOpenAI
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
@@ -14,8 +14,8 @@ from langchain.tools.python.tool import PythonREPLTool
 from langchain.agents import AgentType
 from langchain.chains import RetrievalQA
 from pathlib import Path
-from basic_utils import markdown_table_to_dict, read_txt
-from langchain_utils import get_index, create_wiki_tools, create_document_tools, create_search_tools
+from basic_utils import check_content_safety, read_txt
+from langchain_utils import create_wiki_tools, create_document_tools, create_search_tools
 from cover_letter_samples import cover_letter_samples_dict
 from upgrade_resume import find_similar_jobs
 from datetime import date
@@ -23,13 +23,19 @@ from datetime import date
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
 
-cover_letter_path = os.getenv('COVER_LETTER_PATH')
+
 chat = ChatOpenAI(temperature=0.0)
 embeddings = OpenAIEmbeddings()
 delimiter = "####"
 delimiter2 = "'''"
 delimiter3 = '---'
 delimiter4 = '////'
+
+# test run defaults, change for yours
+my_job_title = 'software developer'
+my_company_name = 'DoAI'
+my_resume_file = 'resume_samples/resume2023v2.txt'
+
 
 def extract_personal_information(resume):
 
@@ -116,9 +122,9 @@ def get_job_resources(job_title):
         response = str(e)
         # if not response.startswith("Could not parse LLM output: `"):
         #     raise e
-        response = response.removeprefix("Could not parse LLM output: `").removesuffix("`")
+        # response = response.removeprefix("Could not parse LLM output: `").removesuffix("`")
         print(f"Exception RESPONSE: {response}")
-        return response
+        # return response
     
 
 
@@ -146,7 +152,7 @@ def fetch_cover_letter_samples(job_title):
 
 
 
-def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
+def generate_basic_cover_letter(my_company_name, my_job_title, read_path=my_resume_file, save_path= "cover_letter.txt"):
     
     resume_content = read_txt(my_resume_file)
 
@@ -264,11 +270,11 @@ def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
     my_cover_letter= my_cover_letter.split(delimiter4)[-1].strip()
 
     # Check potential harmful content in response
-    if (get_moderation_flag(my_cover_letter)==False):   
+    if (check_content_safety(text_str=my_cover_letter)):   
         # Validate cover letter
         if (evaluate_response(my_cover_letter)):
             # Write the cover letter to a file
-            with open(os.path.join(cover_letter_path, 'cover_letter.txt'), 'w') as f:
+            with open(save_path, 'w') as f:
                 try:
                     my_cover_letter= my_cover_letter.split(delimiter4)[-1].strip()
                     f.write(my_cover_letter)
@@ -280,12 +286,9 @@ def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
 
 # Call the function to generate the cover letter
  
-my_job_title = 'software developer'
-my_company_name = 'DoAI'
-my_resume_file = 'resume_samples/resume2023v2.txt'
 # extract_personal_information(my_resume_file)
 # get_job_resources(my_job_title)
 # fetch_cover_letter_samples(my_job_title)
 if __name__ == '__main__':
-    generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file)
+    generate_basic_cover_letter(my_company_name, my_job_title)
 
