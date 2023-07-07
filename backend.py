@@ -1,13 +1,14 @@
-from flask import Flask, redirect, request, render_template, send_file, send_from_directory, abort, current_app
+from flask import Flask, redirect, request, render_template, send_file, send_from_directory, abort, current_app, url_for
 from flask_wtf import FlaskForm
 from wtforms import StringField, SubmitField
 from wtforms.validators import DataRequired
-from flask_wtf.file import FileField, FileRequired, FileAllowed
 from werkzeug.utils import secure_filename
 from generate_cover_letter import generate_basic_cover_letter
 from basic_utils import convert_to_txt
 import os
 from pathlib import Path
+from flask_dropzone import Dropzone
+from flask_wtf.csrf import CSRFProtect,  CSRFError
 
 
 from dotenv import load_dotenv, find_dotenv
@@ -15,67 +16,62 @@ _ = load_dotenv(find_dotenv()) # read local .env file
 
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY')
-resume_path = os.getenv('RESUME_PATH')
-cover_letter_path = os.getenv('COVER_LETTER_PATH')
-# accept requests that are up to 1MB in size
-app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024
+app.config['UPLOAD_PATH'] = os.getenv('RESUME_PATH')
+app.config['RESULT_PATH'] = os.getenv('COVER_LETTER_PATH')
 # app.config['UPLOAD_EXTENSIONS'] = ['.docx', '.txt', '.pdf', '.odt']
-# app.config['UPLOAD_PATH'] = 'uploads'
-# app.config['RESULT_PATH'] = "results"
-# enable CSRF protection
-# app.config['DROPZONE_ENABLE_CSRF'] = True
+dropzone = Dropzone(app)
+csrf = CSRFProtect(app)
+csrf.init_app(app)
 
 
 
 class MyForm(FlaskForm):
     company = StringField('company', validators=[DataRequired()])
     job = StringField('job', validators=[DataRequired()])
-    file = FileField('file', validators=[FileRequired(), FileAllowed(['docx', 'txt', 'pdf', 'odt'], 'File type not supported!')])
 
 
-
-# @app.route('/')
-# def index():
-#     return render_template('index.html')
-
-# @app.route('/submit', methods=('GET', 'POST'))
 @app.route('/', methods=('GET', 'POST'))
 def index():
-    # if request.method == 'POST':
     form = MyForm()
-    if form.validate_on_submit():
-        file = form.file.data
-        filename = secure_filename(file.filename)
-        # return redirect('/success')
-        # text1 = request.form['text1']
-        # text2 = request.form['text2']
-        # text3 = request.form['text3']
-        # uploaded_file = request.files['file']
-        # # checks if user submits without uploading file
-        # if uploaded_file.filename != '':
-        # #     uploaded_file.save(uploaded_file.filename)
-        # file_ext = os.path.splitext(filename)[1]
-        # if file_ext not in current_app.config['UPLOAD_EXTENSIONS']:
-        #     abort(400)
-        file.save(os.path.join(resume_path, filename))
-        read_path =  os.path.join(resume_path, Path(filename).stem+'.txt')
-
-        convert_to_txt(os.path.join(resume_path, filename), read_path)
-
-        if (Path(read_path).exists()):
-            generate_basic_cover_letter(form.company.data, form.job.data, read_path)
-            return send_file(os.path.join(cover_letter_path, 'cover_letter.txt'), as_attachment=True)
-            return redirect('/')
+    if request.method == 'POST':
+        if form.validate_on_submit():
+            filename = ""
+            for key, f in request.files.items():
+                if key.startswith('file'):
+                    f.save(os.path.join(app.config['UPLOAD_PATH'], f.filename))
+                    filename=f.filename
+            if filename != '':
+                form_data = {
+                'company': form.company.data,
+                'job': form.job.data,
+                'filename': filename,
+                }
+                read_path =  os.path.join(app.config['UPLOAD_PATH'], Path(filename).stem+'.txt')
+                convert_to_txt(os.path.join(app.config['UPLOAD_PATH'], form_data['filename']), read_path)
+                if (Path(read_path).exists()):
+                    generate_basic_cover_letter(form_data['company'], form_data['job'], read_path)
+                    with app.test_request_context():
+                        with app.app_context():
+                            send_file(os.path.join(app.config['RESULT_PATH'], 'cover_letter.txt'))
+                            return redirect(url_for('index'))
+            else:
+                abort(400)
     return render_template('index.html', form = form)
 
-@app.route('/uploads/<filename>')
-def upload(filename):
-    return send_from_directory(app.config['UPLOAD_PATH'], filename)
-    
+@app.route('/static/<path:filename>', methods=['GET', 'POST'])
+def download(filename):
+    read_path = os.path.join(app.root_path, app.config['RESULT_PATH'])
+    return send_from_directory(read_path,
+                               filename, as_attachment=True)
 
-# @app.route('/results')
-# def results():
-#     return send_from_directory('static', 'results.html')
+@app.route('/loading/', methods=['GET', 'POST'])
+def loading_model():
+    return render_template ("loading.html")
+
+# handle CSRF error
+@app.errorhandler(CSRFError)
+def csrf_error(e):
+    return e.description, 400
 
 if __name__ == '__main__':
     app.run(debug=True)

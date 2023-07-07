@@ -1,80 +1,204 @@
 {% extends 'base.html' %}
 
 {% block content %}
+<div class="form">
     <h1>{% block title %} Cover Letter Generator {% endblock %}</h1>
 
-    <form method="POST"  action="/"  enctype="multipart/form-data" id = "myform"  >
-        {{ form.csrf_token }}
+    <form method="POST"  action="/"   enctype="multipart/form-data" id = "myform" >
+        {{form.hidden_tag()}} 
+        <!-- {{ form.csrf_token }} -->
         <p>
             {{ form.company.label }}
             {{ form.company(size=20) }}
+            <span id = error1></span>
         </p>
-
-        {% if form.company.errors %}
-            <ul class="errors">
-                {% for error in form.name.errors %}
-                    <li>{{ error }}</li>
-                {% endfor %}
-            </ul>
-        {% endif %}
-
-        <p>
-            {{ form.job.label }}
-            {{ form.job() }}
-        </p>
-
-        {% if form.job.errors %}
+        <!-- {% if form.company.errors %}
             <ul class="errors">
                 {% for error in form.company.errors %}
                     <li>{{ error }}</li>
                 {% endfor %}
             </ul>
-        {% endif %}
+            {% endif %} -->
+            <!-- {% for error in form.company.errors %}
+            <span style="color: red;">[{{ error }}]</span>
+            {% endfor %} -->
 
         <p>
-            {{ form.hidden_tag() }}
-            {{ form.file }}
+            {{ form.job.label }}
+            {{ form.job(size=20) }}
+            <span id="error2"></span>
         </p>
 
-        {% if form.file.errors %}
+        <!-- {% if form.job.errors %}
             <ul class="errors">
-                {% for error in form.file.errors %}
+                {% for error in form.job.errors %}
                     <li>{{ error }}</li>
-                    {% endfor %}
-                </ul>
-                {% endif %}
-                
-                <p>
-                    <!-- {{ form.submit()  }} -->
-                    <input type="submit",id="submitButton">
-                </p>
-            </form>
+                {% endfor %}
+            </ul>
+            {% endif %} -->
+            
+        <div class="dropzone" id="myDropzone">
+        <div class="dz-message" data-dz-message><span>Drop resume here</span></div>
+        </div>
+        <span id = error3></span>
+    
+        <input type="submit" id="submitButton">
+        
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/> 
+        <input type="hidden" name="userid" value=""/>
+        <input type="hidden" name="status" value="proceed"/>
+    </form>
+</div>
+
+    <!-- <label id=lsb for="submitButton" tabindex="0" style=" position:relative; top:10px; left:200px">Generate</label> -->
             
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="http://ajax.aspnetcdn.com/ajax/jquery.validate/1.10.0/jquery.validate.js"></script>
+    <script src="http://ajax.microsoft.com/ajax/jquery.validate/1.11.1/additional-methods.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dropzone/5.7.1/min/dropzone.min.js"></script> 
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="sweetalert2.all.min.js"></script>   
     
-    <script type="text/javascript">
-                
+    <script type="text/javascript"> 
+
+        Dropzone.autoDiscover = false;
+        var uploaded_file = false;
         $(document).ready(function() {
-            $("#myform").submit(function(e) {
-                // e.preventDefault();
-                $.ajax({
-                type: "POST",
-                url: window.location.href,
-                data: $(this).serialize(),
-                success: function() {
-                    alert("Form has been successfully submitted");
-                    window.location.href = './loading';
-                },
-                error: function(xhr, status, error) {
-                // Handle any errors that occurred during the request
-                    alert("Error:", error);
-                },
-                // }).done(function(resp) {
-                //     alert("Form has been successfully submitted");
-                //     callback();
-            })
-            })
+              // The dropzone method is added to jQuery elements and can
+            // be invoked with an (optional) configuration object.
+            var mydropzone = new Dropzone("#myDropzone", {
+                paramName: 'file', 
+                maxFilesize:2, 
+                acceptedFiles: '.txt, .pdf, .docx, .odt',
+                url:window.location.href, 
+                autoProcessQueue: false,
+                maxFiles:1,
+                // uploadMultiple has to be set to true for form+file combo: https://docs.dropzone.dev/configuration/tutorials/combine-form-data-with-files
+                uploadMultiple: true,
+                parallelUploads:100,
+                addRemoveLinks:true,
+                // previewpreviewsContainer: "#dropzonePreview",
+                // clickable: "#dropzonePreview",
+                // userId: "",
+                init: function() {
+                    
+                    var dz = this;
+                    document.getElementById("submitButton").addEventListener("click", function(e)
+                    {
+                        // Make sure that the form isn't actually being sent.
+                        e.preventDefault();
+                        e.stopPropagation();
+                        // Valide form data and file
+                        if(uploaded_file ==true && document.getElementById("company").value!='' && document.getElementById("job").value!='')
+                        {   
+                            dz.processQueue();
+            
+                        }
+                        else
+                        {
+                            if (uploaded_file==false) 
+                            {
+                                document.getElementById('error3').innerHTML="<font color=red size=1 face='Verdana'>required field</font>";
+                            }
+                            if (document.getElementById("company").value=='')
+                            {
+                                document.getElementById('error1').innerHTML="<font color=red size=1 face='Verdana'>required field</font>";
+                            }
+                            if (document.getElementById("job").value=='')
+                            {
+                                document.getElementById('error2').innerHTML="<font color=red size=1 face='Verdana'>required field</font>";
+                            }
+                            if (uploaded_file==true) 
+                            {
+                                document.getElementById('error3').innerHTML="";
+                            }
+                            if (document.getElementById("company").value!='')
+                            {
+                                document.getElementById('error1').innerHTML="";
+                            }
+                            if (document.getElementById("job").value!='')
+                            {
+                                document.getElementById('error2').innerHTML="";
+                            }
+                            
+                        }
+                    });
+                    // Append extra data and form data
+                    this.on("sendingmultiple", function(file, xhr, formData){
+                        formData.append("company", $('#company').val());
+                        formData.append("job", $('#job').val());
+                        formData.append("csrf_token", '{{csrf_token()}}');
+                        formData.append("userid", "tebs");
+
+                    });
+                    this.on("addedfile", file => {
+                        while ( this.files.length > this.options.maxFiles ) this.removeFile(this.files[0])
+                        uploaded_file=true;
+                    });
+                    this.on("removedfile", function(file) {
+                        uploaded_file = false;
+                    });
+                    this.on("maxfilesexceeded", function() {
+                        uploaded_file=true;   
+                    });
+                    this.on("successmultiple", function(file, response) {
+                        Swal.fire({
+                            title: "Your file will automatically download when done. Continue?",
+                            showDenyButton: true,
+                            //showCancelButton: true,
+                            confirmButtonText: 'yes',
+                            denyButtonText: `cancel`,
+                            }).then((result) => {
+                            /* Read more about isConfirmed, isDenied below */
+                            if (result.isConfirmed) {
+                                window.location.href = './loading';
+                            } else if (result.isDenied) {
+                                // CURRENTLY CANNOT CANCEL BACKEND PROCESS, BUT FOR NOW, IT'S OKAY
+                                // document.getElementById("status").value="cancel";
+                                // var message = document.getElementById("status").value;
+                                // $.ajax({
+                                //     url: '/',
+                                //     type: 'POST',
+                                //     data: JSON.stringify({ 'message': message }),
+                                //     contentType: 'application/json',
+                                //     success: function(response) {
+                                //         // Display the message received from the server
+                                //         alert("process canceled!!");
+                                //     }
+                                // });
+                                }
+                            })
+                    });
+                    this.on("complete", function(file) {
+                        // Clear all fields
+                        dz.removeFile(file);
+                        document.getElementById('error1').innerHTML="";
+                        document.getElementById('error2').innerHTML="";
+                        document.getElementById('error3').innerHTML="";
+                        document.getElementById("company").value="";
+                        document.getElementById("job").value="";
+    
+                    });
+                    this.on("errormultiple", function(file, response,xhr) {
+                    // Gets triggered when there was an error sending the files.
+                    // Maybe show form again, and notify user of error
+                        Swal.fire({
+                        icon: 'error',
+                        title: 'Oops...',
+                        text: 'Something happened. Try again!',
+                        })
+                        // if (typeof xhr !== 'undefined') {
+                        //     this.defaultOptions.error(file,xhr.statusText);// use xhr err (from server)
+                        //     } else {
+                        //         this.defaultOptions.error(file,response);// use default (from dropzone)
+                        //     }
+                    });
+                }
+
+            });
+
         });
+        
 
     </script>
 

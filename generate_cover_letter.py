@@ -1,7 +1,7 @@
 # Import the necessary modules
 import os
 import markdown
-from openai_api import get_completion
+from openai_api import get_completion, evaluate_response
 from langchain.chat_models import ChatOpenAI
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
@@ -14,26 +14,33 @@ from langchain.tools.python.tool import PythonREPLTool
 from langchain.agents import AgentType
 from langchain.chains import RetrievalQA
 from pathlib import Path
-from basic_utils import markdown_table_to_dict, read_txt
-from langchain_utils import get_index, create_wiki_tools, create_document_tools, create_search_tools
+from basic_utils import check_content_safety, read_txt
+from langchain_utils import create_wiki_tools, create_document_tools, create_search_tools
 from cover_letter_samples import cover_letter_samples_dict
-from generate_job_search import find_similar_jobs
+from upgrade_resume import find_similar_jobs
 from datetime import date
 
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
 
-cover_letter_path = os.getenv('COVER_LETTER_PATH')
+
 chat = ChatOpenAI(temperature=0.0)
 embeddings = OpenAIEmbeddings()
 delimiter = "####"
 delimiter2 = "'''"
 delimiter3 = '---'
+delimiter4 = '////'
 
-def extract_personal_information(resume_file):
+# test run defaults, change for yours
+my_job_title = 'software developer'
+my_company_name = 'DoAI'
+my_resume_file = 'resume_samples/resume2023v2.txt'
 
-    with open(resume_file, 'r', errors='ignore') as f:
-        resume = f.read()
+
+def extract_personal_information(resume):
+
+    # with open(resume_file, 'r', errors='ignore') as f:
+    #     resume = f.read()
 
     name_schema = ResponseSchema(name="name",
                              description="Extract the full name of the applicant. If this information is not found, output -1")
@@ -74,7 +81,7 @@ def extract_personal_information(resume_file):
     
     response = chat(messages)
     personal_info_dict = output_parser.parse(response.content)
-    print(personal_info_dict.get('name'))
+    print(personal_info_dict.get('email'))
     return personal_info_dict
 
 
@@ -82,9 +89,11 @@ def extract_personal_information(resume_file):
 ## in the future, can add other document tools as resources
 def get_job_resources(job_title):
 
-    wiki_tools = create_wiki_tools()
-    search_tools = create_search_tools()
-    tools = wiki_tools+search_tools
+    # wiki_tools = create_wiki_tools()
+    # search_tools = create_search_tools()
+    # tools = wiki_tools+search_tools
+    # SERPAPI has limited searches, for now, skip
+    tools = create_wiki_tools()
     
     agent= initialize_agent(
         tools, 
@@ -113,9 +122,9 @@ def get_job_resources(job_title):
         response = str(e)
         # if not response.startswith("Could not parse LLM output: `"):
         #     raise e
-        response = response.removeprefix("Could not parse LLM output: `").removesuffix("`")
+        # response = response.removeprefix("Could not parse LLM output: `").removesuffix("`")
         print(f"Exception RESPONSE: {response}")
-        return response
+        # return response
     
 
 
@@ -143,54 +152,102 @@ def fetch_cover_letter_samples(job_title):
 
 
 
-def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
+def generate_basic_cover_letter(my_company_name, my_job_title, read_path=my_resume_file, save_path= "cover_letter.txt"):
     
-    # Get personal information from resume
-    personal_info_dict = extract_personal_information(my_resume_file)
-    # Get fields of resume
     resume_content = read_txt(my_resume_file)
+
+    # Get personal information from resume
+    personal_info_dict = extract_personal_information(resume_content)
+
     # Get job description
     job_description = get_job_resources(my_job_title)
 
     cover_letter_examples = fetch_cover_letter_samples(my_job_title)
     
     # Use an LLM to generate a cover letter that is specific to the resume file that is being read
-    
-    template_string = """Generate a cover letter for a person applying to a job using the following information. 
 
-      The content you use to make this cover letter personalized is delimited with {delimiter} characters.
+    # Try using a step wise instruction as seen in: https://learn.deeplearning.ai/chatgpt-building-system/lesson/5/chain-of-thought-reasoning
+
+    template_string2 = """Generate a cover letter for a person applying for {job} at {company} using the following information. 
+
+      The content you are to use as reference to create the cover letter is delimited with {delimiter} characters.
+
+        content: {delimiter}{content}{delimiter}. \
+    
+      Step 1: {delimiter4} Read the content and determine which information in the content is useful and which is not. Usefulness of the information should be based on how close it relates to {job} and the job description, which is delimited with {delimiter2} charaters. \
       
-    A job description for the job {job} they are applying to is delimited with {delimiter2} characters. 
+        For example, cooking skills are not related to software development so it is not useful information.
 
-    Reference job description to only includes information that is relevant to {job}. Do not make things up. 
-
-    Some examples of good cover letters are provided and each example is delimited with {delimiter3} characteres.  
-
-    Reference the examples as a stylistic guide only. 
-
-    Personal information needs to be changed to as follows. Do not include them if they are -1 or empty:
-
-    name: {name}. \
-
-    email: {email}. \
-
-    phone number: {phone}. \
+        job description: {delimiter2}{job_description}{delimiter2}. \
     
-    today's date: {date}. \
+      Step 2: {delimiter4} Research example cover letters provided. Each example is delimited with {delimiter3} characters.
+
+         Determine which information from Step 1 should be included and which should not based on the quality of information in contributing to a good cover letter.
+        
+         example: {examples}. \
+
+      Step 3: {delimiter4} Change all personal information to the following. Do not incude them if they are -1 or empty: 
+
+        name: {name}. \
+
+        email: {email}. \
+
+        phone number: {phone}. \
+        
+        today's date: {date}. \
+        
+        company they are applying to: {company}. \
+
+        job position they are applying for: {job}. \
     
-    company they are applying to: {company}. \
+      Step 4: {delimiter4} Generate the cover letter. Use information you filtered downn in steps 1 through 3. Do not make stuff up. 
+    
+      Use the following format:
+        Step 1:{delimiter4} <step 1 reasoning>
+        Step 2:{delimiter4} <step 2 reasoning>
+        Step 3:{delimiter4} <step 3 reasoning>
+        Step 4:{delimiter4} <the cover letter you generate>
 
-    job position they are applying for: {job}. \
+      Make sure to include {delimiter4} to separate every step.
 
-    content: {delimiter}{content}{delimiter}. \
-
-    job description: {delimiter2}{job_description}{delimiter2}. \
-
-    example: {examples}. 
 
     """
+    
+    # template_string = """Generate a cover letter for a person applying to a job using the following information. 
 
-    prompt_template = ChatPromptTemplate.from_template(template_string)
+    #   The content you use to make this cover letter personalized is delimited with {delimiter} characters.
+      
+    # A job description for the job {job} they are applying to is delimited with {delimiter2} characters. 
+
+    # Reference job description to only includes information that is relevant to {job}. Do not make things up. 
+
+    # Some examples of good cover letters are provided and each example is delimited with {delimiter3} characteres.  
+
+    # Reference the examples as a stylistic guide only. 
+
+    # Personal information needs to be changed to as follows. Do not include them if they are -1 or empty:
+
+    # name: {name}. \
+
+    # email: {email}. \
+
+    # phone number: {phone}. \
+    
+    # today's date: {date}. \
+    
+    # company they are applying to: {company}. \
+
+    # job position they are applying for: {job}. \
+
+    # content: {delimiter}{content}{delimiter}. \
+
+    # job description: {delimiter2}{job_description}{delimiter2}. \
+
+    # example: {examples}. 
+
+    # """
+
+    prompt_template = ChatPromptTemplate.from_template(template_string2)
     # print(prompt_template.messages[0].prompt.input_variables)
 
     cover_letter_message = prompt_template.format_messages(
@@ -205,26 +262,33 @@ def generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file):
                     examples = cover_letter_examples,
                     delimiter = delimiter,
                     delimiter2 = delimiter2,
-                    delimiter3 = delimiter3
+                    delimiter3 = delimiter3,
+                    delimiter4 = delimiter4
     )
     my_cover_letter = chat(cover_letter_message).content
-    
-    # Write the cover letter to a file
-    with open(os.path.join(cover_letter_path, 'cover_letter.txt'), 'w') as f:
-        f.write(my_cover_letter)
 
+    my_cover_letter= my_cover_letter.split(delimiter4)[-1].strip()
 
-
+    # Check potential harmful content in response
+    if (check_content_safety(text_str=my_cover_letter)):   
+        # Validate cover letter
+        if (evaluate_response(my_cover_letter)):
+            # Write the cover letter to a file
+            with open(save_path, 'w') as f:
+                try:
+                    my_cover_letter= my_cover_letter.split(delimiter4)[-1].strip()
+                    f.write(my_cover_letter)
+                    print("ALL SUCCESS")
+                except Exception as e:
+                    print("FAILED")
+                    # Error logging
+        
 
 # Call the function to generate the cover letter
  
-my_job_title = 'software engineer'
-my_company_name = 'DoAI'
-my_resume_file = 'resume_samples/sample2.txt'
 # extract_personal_information(my_resume_file)
-# extract_resume_fields(my_resume_file)
-get_job_resources(my_job_title)
+# get_job_resources(my_job_title)
 # fetch_cover_letter_samples(my_job_title)
-# if __name__ == '__main__':
-#     generate_basic_cover_letter(my_company_name, my_job_title, my_resume_file)
+if __name__ == '__main__':
+    generate_basic_cover_letter(my_company_name, my_job_title)
 
