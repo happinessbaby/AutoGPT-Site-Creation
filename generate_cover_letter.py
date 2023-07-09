@@ -15,9 +15,8 @@ from langchain.agents import AgentType
 from langchain.chains import RetrievalQA
 from pathlib import Path
 from basic_utils import check_content_safety, read_txt
-from langchain_utils import create_wiki_tools, create_document_tools, create_search_tools
+from langchain_utils import create_wiki_tools, create_document_tools, create_google_search_tools, create_custom_llm_agent
 from cover_letter_samples import cover_letter_samples_dict
-from upgrade_resume import find_similar_jobs
 from datetime import date
 
 from dotenv import load_dotenv, find_dotenv
@@ -87,44 +86,39 @@ def extract_personal_information(resume):
 
 
 ## in the future, can add other document tools as resources
-def get_job_resources(job_title):
+def get_job_resources(job_title, top=10):
 
-    # wiki_tools = create_wiki_tools()
-    # search_tools = create_search_tools()
-    # tools = wiki_tools+search_tools
+    wiki_tools = create_wiki_tools()
+    search_tools = create_google_search_tools(top)
+    tools = wiki_tools+search_tools
     # SERPAPI has limited searches, for now, skip
-    tools = create_wiki_tools()
+    # tools = create_wiki_tools()
     
-    agent= initialize_agent(
-        tools, 
-        chat, 
-        # agent=AgentType.REACT_DOCSTORE,
-        agent="zero-shot-react-description",
-        handle_parsing_errors=True,
-        verbose = True,
-        )
-    agent_executor = AgentExecutor.from_agent_and_tools(
-        agent=agent.agent,
-        tools = tools,
-        verbose = True,
-    )
-    query  = f"""Find out what a {job_title} does.
+    # agent= initialize_agent(
+    #     tools, 
+    #     chat, 
+    #     # agent=AgentType.REACT_DOCSTORE,
+    #     agent="zero-shot-react-description",
+    #     handle_parsing_errors=True,
+    #     verbose = True,
+    #     )
+    # agent_executor = AgentExecutor.from_agent_and_tools(
+    #     agent=agent.agent,
+    #     tools = tools,
+    #     verbose = True,
+    # )
+    query  = f"""Find out what a {job_title} does and the skills and responsibilities involved. 
      
-       If you cannot find what a {job_title} does, look up responsibilities that are in the same ballpark and find out what they are."""
-    # response = agent_executor.run(query)
-    # return response
-    # TEMPORARY FIX for raise OutputParserException(f"Could not parse LLM Output: {text}") with agent=AgentType.REACT_DOCSTORE
+    """
+    agent_executor = create_custom_llm_agent(chat, tools)
     try:
         response = agent_executor.run(query)
         print(f"Success: {response}")
         return response
     except Exception as e:
         response = str(e)
-        # if not response.startswith("Could not parse LLM output: `"):
-        #     raise e
-        # response = response.removeprefix("Could not parse LLM output: `").removesuffix("`")
-        print(f"Exception RESPONSE: {response}")
-        # return response
+        print(f"Exception: {response}")
+
     
 
 
@@ -146,6 +140,38 @@ def fetch_cover_letter_samples(job_title):
                 sample_string = sample_string + "\n" + f" {delimiter3}\n{sample}\n{delimiter3}" + "\n\nexample:"   
     # print(sample_string)
     return sample_string
+
+def find_similar_jobs(job_title):
+
+    loader = CSVLoader(file_path="jobs.csv")
+    docs = loader.load()
+
+    db = DocArrayInMemorySearch.from_documents(
+        docs, 
+        embeddings
+    )
+    # doing Q&A with llm
+    retriever = db.as_retriever()
+
+    query = f"""List all the jobs related to or the same as {job_title} in a markdown table.
+    
+    Do not make up things not in the given context. """
+
+    # docs = db.similarity_search(query)
+
+    # print(len(docs))
+    # print(docs[0])
+
+    qa_stuff = RetrievalQA.from_chain_type(
+    llm=chat, 
+    chain_type="stuff", 
+    retriever=retriever, 
+    verbose=True
+    )
+
+    response = qa_stuff.run(query)
+    print(response)
+    return response
         
 
 
@@ -286,9 +312,9 @@ def generate_basic_cover_letter(my_company_name, my_job_title, read_path=my_resu
 
 # Call the function to generate the cover letter
  
-# extract_personal_information(my_resume_file)
-# get_job_resources(my_job_title)
-# fetch_cover_letter_samples(my_job_title)
 if __name__ == '__main__':
-    generate_basic_cover_letter(my_company_name, my_job_title)
+    # generate_basic_cover_letter(my_company_name, my_job_title)
+    # extract_personal_information(my_resume_file)
+    get_job_resources("AI Developer")
+    # fetch_cover_letter_samples(my_job_title)
 
