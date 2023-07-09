@@ -13,4 +13,5 @@ google-search-results
 celery
 flask-dropzone
 Flask-Session
+elasticsearch
 
