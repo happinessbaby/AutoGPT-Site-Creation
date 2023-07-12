@@ -1,15 +1,11 @@
 import os
-import markdown
 from openai_api import get_completion
 from langchain.chat_models import ChatOpenAI
 from langchain.embeddings import OpenAIEmbeddings
-from langchain.document_loaders import CSVLoader
-from langchain.vectorstores import DocArrayInMemorySearch
-from langchain.chains import RetrievalQA
-from langchain_utils import get_index, create_google_search_tools, create_custom_llm_agent
 from langchain.prompts import ChatPromptTemplate
 from basic_utils import read_txt
-from langchain.chains.summarize import load_summarize_chain
+from common_utils import fetch_samples, get_web_resources
+from samples import resume_samples_dict
 
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
@@ -20,72 +16,50 @@ embeddings = OpenAIEmbeddings()
 delimiter = "####"
 delimiter1 = "````"
 delimiter2 = "////"
+delimiter3 = "<<<<"
 
 
 
+def basic_upgrade_resume(resume_file, job_title):
+    return analyze_resume(resume_file, job_title)
 
-def basic_upgrade_resume(resume_file):
-    return analyze_resume(resume_file)
 
-
-def get_resume_tips(query, top=10):
-    # look into webpages and summarize content
-    tools = create_google_search_tools(top)
-    agent_executor = create_custom_llm_agent(chat, tools)
-    try:
-        response = agent_executor.run(query)
-        print(f"Success: {response}")
-        return response
-    except Exception as e:
-        response = str(e)
-        print(f"Exception RESPONSE: {response}")
-    # Set up the base template
-    
-    # pages = tool.run(query)
-    # print(pages)
-    # summaries = []
-    # for page in pages:
-    #     chain = load_summarize_chain(chat, chain_type="map_reduce")
-    #     summary = chain.run(docs)
-    #     summaries.append(summary)
-
-    
-
-    
+        
 
     
     
 
-def analyze_resume(resume_file):
+def analyze_resume(resume_file, my_job_title):
 
     resume = read_txt(resume_file)
-    good_examples = get_resume_tips("good resume examples")
-    print(good_examples)
-    bad_examples = get_resume_tips("bad resume examples")
+    resume_advices = get_web_resources("what makes a bad resume and how to improve")
+    resume_samples = fetch_samples(my_job_title, resume_samples_dict)
 
     template_string = """" Your task is to determine the strengths and weaknesses of a resume and ways to improve it. 
         
-    The resume is delimited with {delimiter} chararacters.
+    The resume is delimited with {delimiter1} chararacters.
     
-    resume: {delimiter}{resume}{delimiter}
+    resume: {delimiter1}{resume}{delimiter1}
 
-    Step 1: Search and extract fields of the resume.  
+    Step 1: {delimiter} Search and extract fields of the resume.  
 
     Some common resume fields include but not limited to personal information, objective, education, work experience, awards and honors, and skills.
 
-    Step 2: Read through ways to write good resume delimited with {delimiter1} characters. 
+    Step 2: {delimiter} Research sample resume provided. Each sample is delimited with {delimiter2} characters.
 
-    Use the information to determine which fields of the resume in Step 1 are well-written.
+    Compare them with resume in Step 1 and list things Step 1's resume differ from the others.
 
-    ways to write good resume: {delimiter1}{good_examples}{delimiter1}
+    sample: {delimiter2}{samples}{delimiter2}
 
-    Step 3: Read through bad resume cases delimited with {delimiter2} characters.
+    Step 3: {delimiter} An resume advisor has also given some advices on what makes a bad resume and how to write good resume. The advises are delimited with {delimiter3} characters.
+    
+    Read through the advices and determine which fields of resume in Step 1 needs to be improved. Focus mainly on the list of differences you found in Step 2.
 
-    Use the information to determine which fields of the resume in Step 1 are badly written. 
+    advices: {delimiter3}{advices}{delimiter3}
 
-    bad resume bases: {delimiter2}{bad_examples}{delimiter2}
 
-    Step 4: For each badly written fields, give your adviace on how they can be improved, basing your reasoning on Step 2 and Step 3. 
+    Step 4: {delimiter} For each badly written fields, give your adviace on how they can be improved, basing your reasoning on Step 2 and Step 3. 
+
 
 
     Use the following format:
@@ -101,11 +75,12 @@ def analyze_resume(resume_file):
     prompt_template = ChatPromptTemplate.from_template(template_string)
     upgrade_resume_message = prompt_template.format_messages(
         resume = resume,
-        good_examples = good_examples,
-        bad_examples = bad_examples,
+        samples = resume_samples,
+        advices = resume_advices,
         delimiter = delimiter,
         delimiter1 = delimiter1, 
         delimiter2 = delimiter2,
+        delimiter3 = delimiter3,
         
     )
     my_advices = chat(upgrade_resume_message).content
@@ -113,30 +88,8 @@ def analyze_resume(resume_file):
 
 
 
-
-# def extract_resume_fields(resume_file):
-
-#     index = get_index(resume_file)
-
-#     query = f"""" Search and extract fields of this resume. 
-
-#     Some common resume fields include but not limited to personal information, objective, education, work experience, awards and honors, and skills.
-
-#     List all the field information in a markdown table.
-
-#     Do not delete any content unless they are absolutely irrelevant. 
-    
-#     """
-
-#     response = index.query(query)
-#     print(response)
-#     return response
-
-
-
 my_job_title = 'software developer'
 my_resume_file = 'resume_samples/resume2023.txt'
 
 if __name__ == '__main__':
-    basic_upgrade_resume(my_resume_file)
-    # get_resume_tips("summarize good resume examples")
+    basic_upgrade_resume(my_resume_file, my_job_title)

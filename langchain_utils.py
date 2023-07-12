@@ -18,6 +18,7 @@ from langchain.schema import AgentAction, AgentFinish, HumanMessage
 from typing import List, Union
 import re
 from langchain import LLMChain
+from langchain.chains.summarize import load_summarize_chain
 
 
 def get_index(file):
@@ -124,7 +125,7 @@ def create_custom_llm_agent(llm, tools):
     Observation: the result of the action
     ... (this Thought/Action/Action Input/Observation can repeat N times)
     Thought: I now know the final answer
-    Final Answer: the final answer to the original input question
+    Final Answer: the final answer to the original input question. Your output should be detailed, descriptive, and at least 100 words. Do not provide just a summary. 
 
 
     Begin!
@@ -155,12 +156,16 @@ def create_custom_llm_agent(llm, tools):
 
     return agent_executor
 
+def get_summary(llm, docs):
+    chain = load_summarize_chain(llm, chain_type="map_reduce")
+    summary = chain.run(docs)
 
 
 
-def add_embedding(embeddings):
-    query_embedding = embeddings.embed_query("Prompt Engineer")
+def add_embedding(embeddings, text):
+    query_embedding = embeddings.embed_query(text)
     return query_embedding
+
 
 
 # Set up a prompt template
