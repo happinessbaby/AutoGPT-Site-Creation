@@ -29,12 +29,12 @@ my_resume_file = 'resume_samples/resume2023v2.txt'
 
 def generate_basic_cover_letter(my_company_name, my_job_title, read_path=my_resume_file, save_path= "cover_letter.txt"):
     
-    resume_content = read_txt(my_resume_file)
+    resume_content = read_txt(read_path)
     # Get personal information from resume
     personal_info_dict = extract_personal_information(resume_content)
     # Get job description
-    query  = f"""Find out what a {my_job_title} does and the skills and responsibilities involved. """
-    job_description = get_web_resources(query)
+    # query  = f"""Find out what a {my_job_title} does and the skills and responsibilities involved. """
+    advices = get_web_resources("what to include in a good cover letter")
     # Get cover letter examples
     cover_letter_examples = fetch_samples(my_job_title, cover_letter_samples_dict)
     
@@ -48,19 +48,21 @@ def generate_basic_cover_letter(my_company_name, my_job_title, read_path=my_resu
 
         content: {delimiter}{content}{delimiter}. \
     
-      Step 1: {delimiter4} Read the content and determine which information in the content is useful and which is not. Usefulness of the information should be based on how close it relates to {job} and the job description, which is delimited with {delimiter2} charaters. \
+      Step 1: Read the content and determine which information in the content is useful and which is not. Usefulness of the information should be based on how close it relates to {job}
+       
+         and expert advices on what to include in a good cover letter.
       
-        For example, cooking skills are not related to software development so it is not useful information.
+        The expert advices are delimited with {delimiter2} characters
 
-        job description: {delimiter2}{job_description}{delimiter2}. \
+        expert advices: {delimiter2}{advices}{delimiter2}. \
     
-      Step 2: {delimiter4} Research example cover letters provided. Each example is delimited with {delimiter3} characters.
+      Step 2: Research example cover letters provided. Each example is delimited with {delimiter3} characters.
 
          Determine which information from Step 1 should be included and which should not based on the quality of information in contributing to a good cover letter.
         
          example: {examples}. \
 
-      Step 3: {delimiter4} Change all personal information to the following. Do not incude them if they are -1 or empty: 
+      Step 3: Change all personal information to the following. Do not incude them if they are -1 or empty: 
 
         name: {name}. \
 
@@ -74,7 +76,7 @@ def generate_basic_cover_letter(my_company_name, my_job_title, read_path=my_resu
 
         job position they are applying for: {job}. \
     
-      Step 4: {delimiter4} Generate the cover letter. Use information you filtered downn in steps 1 through 3. Do not make stuff up. 
+      Step 4: Generate the cover letter. Use information you filtered downn in steps 1 through 3. Do not make stuff up. 
     
       Use the following format:
         Step 1:{delimiter4} <step 1 reasoning>
@@ -132,7 +134,7 @@ def generate_basic_cover_letter(my_company_name, my_job_title, read_path=my_resu
                     company = my_company_name,
                     job = my_job_title,
                     content=resume_content,
-                    job_description = job_description,
+                    advices = advices,
                     examples = cover_letter_examples,
                     delimiter = delimiter,
                     delimiter2 = delimiter2,

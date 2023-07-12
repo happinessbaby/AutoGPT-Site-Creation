@@ -20,16 +20,10 @@ delimiter3 = "<<<<"
 
 
 
-def basic_upgrade_resume(resume_file, job_title):
-    return analyze_resume(resume_file, job_title)
-
-
-        
 
     
-    
 
-def analyze_resume(resume_file, my_job_title):
+def basic_upgrade_resume(resume_file, my_job_title):
 
     resume = read_txt(resume_file)
     resume_advices = get_web_resources("what makes a bad resume and how to improve")
@@ -41,24 +35,26 @@ def analyze_resume(resume_file, my_job_title):
     
     resume: {delimiter1}{resume}{delimiter1}
 
-    Step 1: {delimiter} Search and extract fields of the resume.  
+    Step 1: Search and extract fields of the resume.  
 
     Some common resume fields include but not limited to personal information, objective, education, work experience, awards and honors, and skills.
 
-    Step 2: {delimiter} Research sample resume provided. Each sample is delimited with {delimiter2} characters.
+    Step 2: Research sample resume provided. Each sample is delimited with {delimiter2} characters.
 
     Compare them with resume in Step 1 and list things Step 1's resume differ from the others.
 
     sample: {delimiter2}{samples}{delimiter2}
 
-    Step 3: {delimiter} An resume advisor has also given some advices on what makes a bad resume and how to write good resume. The advises are delimited with {delimiter3} characters.
+    Step 3: An resume advisor has also given some advices on what makes a bad resume and how to write good resume. The advises are delimited with {delimiter3} characters.
     
     Read through the advices and determine which fields of resume in Step 1 needs to be improved. Focus mainly on the list of differences you found in Step 2.
 
     advices: {delimiter3}{advices}{delimiter3}
 
 
-    Step 4: {delimiter} For each badly written fields, give your adviace on how they can be improved, basing your reasoning on Step 2 and Step 3. 
+    Step 4: For each badly written fields, give your adviace on how they can be improved, basing your reasoning on Step 2 and Step 3. 
+
+    Step 5: Rewrite the resume
 
 
 
@@ -66,7 +62,8 @@ def analyze_resume(resume_file, my_job_title):
         Step 1:{delimiter} <step 1 reasoning>
         Step 2:{delimiter} <step 2 reasoning>
         Step 3:{delimiter} <step 3 reasoning>
-        Step 4:{delimiter} <give your advice>
+        Step 4:{delimiter} <step 4 reasoning>
+        Step 5:{delimiter} <rewrite the resume>
 
       Make sure to include {delimiter} to separate every step.
     
@@ -88,8 +85,8 @@ def analyze_resume(resume_file, my_job_title):
 
 
 
-my_job_title = 'software developer'
-my_resume_file = 'resume_samples/resume2023.txt'
+my_job_title = 'accountant'
+my_resume_file = 'resume_samples/sample2.txt'
 
 if __name__ == '__main__':
     basic_upgrade_resume(my_resume_file, my_job_title)
