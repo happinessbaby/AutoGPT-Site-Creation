@@ -2,6 +2,8 @@
 import os
 from openai_api import get_completion, evaluate_response
 from langchain.chat_models import ChatOpenAI
+from langchain.llms import OpenAI
+from langchain import PromptTemplate
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
 from basic_utils import check_content_safety, read_txt
@@ -13,9 +15,11 @@ from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
 
 
-chat = ChatOpenAI(temperature=0.0)
+llm = ChatOpenAI(temperature=0.0)
+# llm = OpenAI(temperature=0, top_p=0.2, presence_penalty=0.4, frequency_penalty=0.2)
 embeddings = OpenAIEmbeddings()
 delimiter = "####"
+delimiter1 = "****"
 delimiter2 = "'''"
 delimiter3 = '---'
 delimiter4 = '////'
@@ -31,12 +35,14 @@ def generate_basic_cover_letter(my_company_name, my_job_title, read_path=my_resu
     
     resume_content = read_txt(read_path)
     # Get personal information from resume
-    personal_info_dict = extract_personal_information(resume_content)
+    personal_info_dict = extract_personal_information(llm, resume_content)
     # Get job description
-    # query  = f"""Find out what a {my_job_title} does and the skills and responsibilities involved. """
-    advices = get_web_resources("what to include in a good cover letter")
+    query  = f"""Find out what a {my_job_title} does and the skills and responsibilities involved. """
+    job_description = get_web_resources(llm, query)
+    # Get advices on cover letter
+    advices = get_web_resources(llm, "what to include in a good cover letter")
     # Get cover letter examples
-    cover_letter_examples = fetch_samples(my_job_title, cover_letter_samples_dict)
+    cover_letter_examples = fetch_samples(llm, embeddings, my_job_title, cover_letter_samples_dict)
     
     # Use an LLM to generate a cover letter that is specific to the resume file that is being read
 
@@ -48,21 +54,30 @@ def generate_basic_cover_letter(my_company_name, my_job_title, read_path=my_resu
 
         content: {delimiter}{content}{delimiter}. \
     
-      Step 1: Read the content and determine which information in the content is useful and which is not. Usefulness of the information should be based on how close it relates to {job}
-       
-         and expert advices on what to include in a good cover letter.
+      Step 1: Read the content and determine which information in the content is useful to generate the cover letter. 
       
-        The expert advices are delimited with {delimiter2} characters
+        Usefulness of the information should be based on how close it is to {job}'s job description. 
+      
+        The job description is delimited with {delimiter2} characters
 
-        expert advices: {delimiter2}{advices}{delimiter2}. \
+        job description: {delimiter2}{job_description}{delimiter2}. \
     
       Step 2: Research example cover letters provided. Each example is delimited with {delimiter3} characters.
 
-         Determine which information from Step 1 should be included and which should not based on the quality of information in contributing to a good cover letter.
+        From these examples, determine which information in the content is useful to generate the cover letter.
+
+        Usefulness should be based on how common they appear in these cover letter examples. 
         
          example: {examples}. \
+         
+      Step 3:  Some expert advices are also provided as basic guidelines. Expert advices are delimited with {delimiter1} characters. 
 
-      Step 3: Change all personal information to the following. Do not incude them if they are -1 or empty: 
+        Selectively filter down information in Step 1 and Step 2. 
+
+        expert advices: {delimiter1}{advices}{delimiter1}
+     
+
+      Step 4: Change all personal information to the following. Do not incude them if they are -1 or empty: 
 
         name: {name}. \
 
@@ -76,13 +91,14 @@ def generate_basic_cover_letter(my_company_name, my_job_title, read_path=my_resu
 
         job position they are applying for: {job}. \
     
-      Step 4: Generate the cover letter. Use information you filtered downn in steps 1 through 3. Do not make stuff up. 
+      Step 5: Generate the cover letter. 
     
       Use the following format:
         Step 1:{delimiter4} <step 1 reasoning>
         Step 2:{delimiter4} <step 2 reasoning>
         Step 3:{delimiter4} <step 3 reasoning>
-        Step 4:{delimiter4} <the cover letter you generate>
+        Step 4:{delimiter4} <step 4 reasoning>
+        Step 5:{delimiter4} <the cover letter you generate>
 
       Make sure to include {delimiter4} to separate every step.
 
@@ -135,13 +151,16 @@ def generate_basic_cover_letter(my_company_name, my_job_title, read_path=my_resu
                     job = my_job_title,
                     content=resume_content,
                     advices = advices,
+                    job_description = job_description,
                     examples = cover_letter_examples,
                     delimiter = delimiter,
+                    delimiter1 = delimiter1, 
                     delimiter2 = delimiter2,
                     delimiter3 = delimiter3,
                     delimiter4 = delimiter4
     )
-    my_cover_letter = chat(cover_letter_message).content
+    # FOR THE FUTURE, THIS LLM HERE CAN BE CUSTOMLY TRAINED
+    my_cover_letter = llm(cover_letter_message).content
 
     my_cover_letter= my_cover_letter.split(delimiter4)[-1].strip()
 

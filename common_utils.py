@@ -14,21 +14,17 @@ from langchain.agents import AgentType
 from langchain.chains import RetrievalQA
 from pathlib import Path
 from basic_utils import check_content_safety, read_txt
-from langchain_utils import create_wiki_tools, create_document_tools, create_google_search_tools, create_custom_llm_agent
+from langchain_utils import create_wiki_tools, create_document_tools, create_google_search_tools, create_custom_llm_agent, create_QA_chain
+from langchain import PromptTemplate
 
 
 
-chat = ChatOpenAI(temperature=0.0)
-embeddings = OpenAIEmbeddings()
 delimiter = "####"
 delimiter2 = "'''"
 delimiter3 = '---'
 delimiter4 = '////'
 
-def extract_personal_information(resume):
-
-    # with open(resume_file, 'r', errors='ignore') as f:
-    #     resume = f.read()
+def extract_personal_information(llm, resume):
 
     name_schema = ResponseSchema(name="name",
                              description="Extract the full name of the applicant. If this information is not found, output -1")
@@ -67,15 +63,15 @@ def extract_personal_information(resume):
                                 delimiter=delimiter)
 
     
-    response = chat(messages)
+    response = llm(messages)
     personal_info_dict = output_parser.parse(response.content)
     print(personal_info_dict.get('email'))
     return personal_info_dict
 
 
-def fetch_samples(job_title, samples):
+def fetch_samples(llm, embeddings, job_title, samples):
 
-    table = find_similar_jobs(job_title)
+    table = find_similar_jobs(llm, embeddings, job_title)
 
     prompt = f"""Extract the Job Title values in the markdown table: {table}.
     
@@ -94,67 +90,55 @@ def fetch_samples(job_title, samples):
     return sample_string
 
 
-def find_similar_jobs(job_title):
+def find_similar_jobs(llm, embeddings, job_title):
 
     loader = CSVLoader(file_path="jobs.csv")
     docs = loader.load()
 
-    db = DocArrayInMemorySearch.from_documents(
-        docs, 
-        embeddings
-    )
-    # doing Q&A with llm
-    retriever = db.as_retriever()
+    qa_stuff = create_QA_chain(llm, embeddings, "inmemory", docs=docs, chain_type="stuff")
 
     query = f"""List all the jobs related to or the same as {job_title} in a markdown table.
     
     Do not make up things not in the given context. """
-
-    # docs = db.similarity_search(query)
-
-    # print(len(docs))
-    # print(docs[0])
-
-    qa_stuff = RetrievalQA.from_chain_type(
-    llm=chat, 
-    chain_type="stuff", 
-    retriever=retriever, 
-    verbose=True
-    )
+    
 
     response = qa_stuff.run(query)
     print(response)
     return response
 
 
-def get_web_resources(query, top=10):
+# okay for basic version, but in the future, need a vecstore where all the information are saved and updated
+def get_web_resources(llm, query, top=10):
 
-    wiki_tools = create_wiki_tools()
-    search_tools = create_google_search_tools(top)
-    tools = wiki_tools+search_tools
+    # wiki_tools = create_wiki_tools()
+    tools = create_google_search_tools(top)
+    # tools = wiki_tools+search_tools
     # SERPAPI has limited searches, for now, skip
-    # tools = create_wiki_tools()
-    # agent= initialize_agent(
-    #     tools, 
-    #     chat, 
-    #     # agent=AgentType.REACT_DOCSTORE,
-    #     agent="zero-shot-react-description",
-    #     handle_parsing_errors=True,
-    #     verbose = True,
-    #     )
-    # agent_executor = AgentExecutor.from_agent_and_tools(
-    #     agent=agent.agent,
-    #     tools = tools,
-    #     verbose = True,
-    # )
-    agent_executor = create_custom_llm_agent(chat, tools)
+    agent= initialize_agent(
+        tools, 
+        llm, 
+        # agent=AgentType.REACT_DOCSTORE,
+        agent="zero-shot-react-description",
+        handle_parsing_errors=True,
+        verbose = True,
+        )
+    agent_executor = AgentExecutor.from_agent_and_tools(
+        agent=agent.agent,
+        tools = tools,
+        verbose = True,
+    )
+    # agent_executor = create_custom_llm_agent(llm, tools)
     try:
         response = agent_executor.run(query)
-        print(f"Success: {response}")
         return response
-    except Exception as e:
+    except ValueError as e:
         response = str(e)
-        print(f"Exception: {response}")
+        if not response.startswith("Could not parse LLM output: `"):
+            print(e)
+            raise e
+        response = response.removeprefix(
+            "Could not parse LLM output: `").removesuffix("`")
+        return response
 
 
 
