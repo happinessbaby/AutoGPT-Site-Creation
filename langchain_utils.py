@@ -52,18 +52,43 @@ def create_wiki_tools():
     ]
     return tools
 
-def create_qa_tools(qa):
+def create_qa_tools(qa_chain):
     # _index = get_index(document)
     tools = [
         Tool(
-            name="Document QA",
+            name="QA Document",
             # func=lambda q: str(_index.query(q)),
-            func = qa.run,
+            func = qa_chain.run,
             description="Useful for answering questions found in documents",
             return_direct=True,
         ),
     ]
     return tools
+
+
+def create_google_search_tools(top_n):
+    # search = SerpAPIWrapper()  
+    search = GoogleSearchAPIWrapper(k=top_n)
+    tool = [
+        Tool(
+        # name="SerpSearch",
+        name = "Google Search", 
+        description= "useful for when you need to ask with search",
+        func=search.run,
+    ),
+    ]
+    return tool
+
+def create_db_tools(db_chain, name):
+    tool = [
+        Tool(
+        name="PineCone DB",
+        func=db_chain.run,
+        description="useful for when you need to answer questions about FooBar. Input should be in the form of a question containing full context",
+    ),
+    ]
+    return tool
+
 
 def create_QA_chain(chat, embeddings, db_type, docs=None, chain_type="stuff"):
     if (db_type=="chroma"):
@@ -102,20 +127,6 @@ def create_QA_chain(chat, embeddings, db_type, docs=None, chain_type="stuff"):
 
     return qa
 
-
-
-def create_google_search_tools(top_n):
-    # search = SerpAPIWrapper()  
-    search = GoogleSearchAPIWrapper(k=top_n)
-    tool = [
-        Tool(
-        # name="SerpSearch",
-        name = "Google Search", 
-        description= "useful for when you need to ask with search",
-        func=search.run,
-    ),
-    ]
-    return tool
 
 def create_elastic_knn():
     # Define the model ID
@@ -172,7 +183,7 @@ def create_custom_llm_agent(llm, tools):
     Observation: the result of the action
     ... (this Thought/Action/Action Input/Observation can repeat N times)
     Thought: I now know the final answer
-    Final Answer: the final answer to the original input question. Your output should be detailed, descriptive, and at least 100 words. Do not provide just a summary. 
+    Final Answer: the final answer to the original input question
 
 
     Begin!
