@@ -11,8 +11,8 @@ from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
 openai.api_key = os.environ['OPENAI_API_KEY']
 
-st_callback = StreamlitCallbackHandler(st.container())
-chat_agent = ChatController()
+# st_callback = StreamlitCallbackHandler(st.container())
+# chat_agent = ChatController()
 
 # Initialize chat history
 if "messages" not in st.session_state:

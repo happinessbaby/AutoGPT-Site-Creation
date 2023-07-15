@@ -66,17 +66,25 @@ def create_qa_tools(qa_chain):
     return tools
 
 
-def create_google_search_tools(top_n):
-    # search = SerpAPIWrapper()  
-    search = GoogleSearchAPIWrapper(k=top_n)
-    tool = [
-        Tool(
-        # name="SerpSearch",
-        name = "Google Search", 
-        description= "useful for when you need to ask with search",
-        func=search.run,
-    ),
-    ]
+def create_search_tools(name, top_n):
+    if (name=="google"):
+        search = GoogleSearchAPIWrapper(k=top_n)
+        tool = [
+            Tool(
+            name = "Google Search", 
+            description= "useful for when you need to ask with search",
+            func=search.run,
+        ),
+        ]
+    elif (name=="serp"):
+        search = SerpAPIWrapper() 
+        tool = [
+            Tool(
+            name="SerpSearch",
+            description= "useful for when you need to ask with search",
+            func=search.run,
+        ),
+        ]
     return tool
 
 def create_db_tools(db_chain, name):

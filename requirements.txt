@@ -15,4 +15,5 @@ flask-dropzone
 Flask-Session
 elasticsearch
 streamlit
+pinecone-client
 
