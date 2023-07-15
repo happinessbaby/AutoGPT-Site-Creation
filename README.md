@@ -11,5 +11,10 @@
 
 
 ### what I want it to do for me
-#### create a functional webpage that uses OpenAI's LLM models for content creation
-#### extra: maintain the site and monitor the budget
+#### create a functional webpage that uses OpenAI's LLM models for content creation (this part I have mostly given up. I ended up coding everything without its help )
+#### extra: maintain the site and monitor the budget (still hopeful this can be achieved)
+
+
+# What this project will become
+
+### An AI Powered job hosting platform with AI-powered features such as a cover letter generator and a chatbot for helping people improve their resumes. The ultimate goal is creating a powerful AI powered job search. 
