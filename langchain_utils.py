@@ -18,7 +18,15 @@ from langchain.schema import AgentAction, AgentFinish, HumanMessage
 from typing import List, Union
 import re
 from langchain import LLMChain
+from langchain.chains.summarize import load_summarize_chain
+from langchain.vectorstores import Chroma
+from langchain import PromptTemplate
+from langchain.chains import RetrievalQA
+from feast import FeatureStore
 
+
+# You may need to update the path depending on where you stored it
+feast_repo_path = "."
 
 def get_index(file):
     loader = TextLoader(file, encoding='utf8')
@@ -44,32 +52,89 @@ def create_wiki_tools():
     ]
     return tools
 
-def create_document_tools(document):
-    _index = get_index(document)
+def create_qa_tools(qa_chain):
+    # _index = get_index(document)
     tools = [
         Tool(
-            name=f"{_index} index",
-            func=lambda q: str(_index.query(q)),
-            description="Useful to answering questions about the given file",
+            name="QA Document",
+            # func=lambda q: str(_index.query(q)),
+            func = qa_chain.run,
+            description="Useful for answering questions found in documents",
             return_direct=True,
         ),
     ]
     return tools
 
-def create_google_search_tools(top_n):
-    # search = SerpAPIWrapper()  
-    search = GoogleSearchAPIWrapper(k=top_n)
+
+def create_search_tools(name, top_n):
+    if (name=="google"):
+        search = GoogleSearchAPIWrapper(k=top_n)
+        tool = [
+            Tool(
+            name = "Google Search", 
+            description= "useful for when you need to ask with search",
+            func=search.run,
+        ),
+        ]
+    elif (name=="serp"):
+        search = SerpAPIWrapper() 
+        tool = [
+            Tool(
+            name="SerpSearch",
+            description= "useful for when you need to ask with search",
+            func=search.run,
+        ),
+        ]
+    return tool
+
+def create_db_tools(db_chain, name):
     tool = [
         Tool(
-        # name="SerpSearch",
-        name = "Google Search", 
-        # description="A Python shell. Use this to execute python commands. Input should be a valid python command. If you want to see the output of a value, you should print it out with `print(...)`.",
-        # description= "Useful when you cannot find answers in the docstore or other provided documents",
-        description= "useful for when you need to ask with search",
-        func=search.run,
+        name="PineCone DB",
+        func=db_chain.run,
+        description="useful for when you need to answer questions about FooBar. Input should be in the form of a question containing full context",
     ),
     ]
     return tool
+
+
+def create_QA_chain(chat, embeddings, db_type, docs=None, chain_type="stuff"):
+    if (db_type=="chroma"):
+        persist_directory = 'myvectordb'
+        vectorstore = Chroma(persist_directory=persist_directory, embedding_function = embeddings)
+    elif (db_type=="inmemory"):
+        vectorstore = DocArrayInMemorySearch.from_documents(
+        docs, 
+        embeddings
+    )
+    elif (db_type == "feast"):
+        vectorstore = FeatureStore(repo_path=feast_repo_path)
+
+        
+    prompt_template = """If the context is not relevant, 
+    please answer the question by using your own knowledge about the topic
+    
+    {context}
+    
+    Question: {question}
+    """
+
+    PROMPT = PromptTemplate(
+        template=prompt_template, input_variables=["context", "question"]
+    )
+
+    chain_type_kwargs = {"prompt": PROMPT}
+
+    qa = RetrievalQA.from_chain_type(
+        llm=chat, 
+        chain_type=chain_type, 
+        retriever=vectorstore.as_retriever(), 
+        verbose=True, 
+        chain_type_kwargs=chain_type_kwargs,
+    )
+
+    return qa
+
 
 def create_elastic_knn():
     # Define the model ID
@@ -108,6 +173,8 @@ def create_python_agent(llm):
     verbose=True
     )
     return agent
+
+
 
 def create_custom_llm_agent(llm, tools):
     # Set up the base template
@@ -155,12 +222,17 @@ def create_custom_llm_agent(llm, tools):
 
     return agent_executor
 
+def get_summary(llm, docs):
+    chain = load_summarize_chain(llm, chain_type="map_reduce")
+    summary = chain.run(docs)
+    return summary
 
 
 
-def add_embedding(embeddings):
-    query_embedding = embeddings.embed_query("Prompt Engineer")
+def add_embedding(embeddings, text):
+    query_embedding = embeddings.embed_query(text)
     return query_embedding
+
 
 
 # Set up a prompt template

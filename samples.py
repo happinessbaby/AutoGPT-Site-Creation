@@ -8,6 +8,8 @@ cover_letter_samples_dict = {
     "Software Developer": "sample_cover_letters/software_developer.txt"
 }
 
+resume_samples_dict = {}
+
 
 
 

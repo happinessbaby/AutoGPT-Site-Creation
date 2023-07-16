@@ -1,31 +1,25 @@
 # Import the necessary modules
 import os
-import markdown
 from openai_api import get_completion, evaluate_response
 from langchain.chat_models import ChatOpenAI
+from langchain.llms import OpenAI
+from langchain import PromptTemplate
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
-from langchain.output_parsers import ResponseSchema
-from langchain.output_parsers import StructuredOutputParser
-from langchain.agents import load_tools, initialize_agent, Tool, AgentExecutor
-from langchain.document_loaders import CSVLoader
-from langchain.vectorstores import DocArrayInMemorySearch
-from langchain.tools.python.tool import PythonREPLTool
-from langchain.agents import AgentType
-from langchain.chains import RetrievalQA
-from pathlib import Path
 from basic_utils import check_content_safety, read_txt
-from langchain_utils import create_wiki_tools, create_document_tools, create_google_search_tools, create_custom_llm_agent
-from cover_letter_samples import cover_letter_samples_dict
+from common_utils import extract_personal_information, fetch_samples, get_web_resources
+from samples import cover_letter_samples_dict
 from datetime import date
 
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
 
 
-chat = ChatOpenAI(temperature=0.0)
+llm = ChatOpenAI(temperature=0.0)
+# llm = OpenAI(temperature=0, top_p=0.2, presence_penalty=0.4, frequency_penalty=0.2)
 embeddings = OpenAIEmbeddings()
 delimiter = "####"
+delimiter1 = "****"
 delimiter2 = "'''"
 delimiter3 = '---'
 delimiter4 = '////'
@@ -36,159 +30,19 @@ my_company_name = 'DoAI'
 my_resume_file = 'resume_samples/resume2023v2.txt'
 
 
-def extract_personal_information(resume):
-
-    # with open(resume_file, 'r', errors='ignore') as f:
-    #     resume = f.read()
-
-    name_schema = ResponseSchema(name="name",
-                             description="Extract the full name of the applicant. If this information is not found, output -1")
-    email_schema = ResponseSchema(name="email",
-                                        description="Extract the email address of the applicant. If this information is not found, output -1")
-    phone_schema = ResponseSchema(name="phone",
-                                        description="Extract the phone number of the applicant. If this information is not found, output -1")
-    address_schema = ResponseSchema(name="address",
-                                        description="Extract the home address of the applicant. If this information is not found, output -1")
-
-    response_schemas = [name_schema, 
-                        email_schema,
-                        phone_schema, 
-                        address_schema]
-
-    output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
-    format_instructions = output_parser.get_format_instructions()
-    template_string = """For the following text, delimited with {delimiter} chracters, extract the following information:
-
-    name: Extract the full name of the applicant. If this information is not found, output -1\
-
-    email: Extract the email address of the applicant. If this information is not found, output -1\
-
-    phone number: Extract the phone number of the applicant. If this information is not found, output -1\
-    
-    address: Extract the home address of the applicant. If this information is not found, output -1\
-
-    text: {delimiter}{text}{delimiter}
-
-    {format_instructions}
-    """
-
-    prompt = ChatPromptTemplate.from_template(template=template_string)
-    messages = prompt.format_messages(text=resume, 
-                                format_instructions=format_instructions,
-                                delimiter=delimiter)
-
-    
-    response = chat(messages)
-    personal_info_dict = output_parser.parse(response.content)
-    print(personal_info_dict.get('email'))
-    return personal_info_dict
-
-
-
-## in the future, can add other document tools as resources
-def get_job_resources(job_title, top=10):
-
-    wiki_tools = create_wiki_tools()
-    search_tools = create_google_search_tools(top)
-    tools = wiki_tools+search_tools
-    # SERPAPI has limited searches, for now, skip
-    # tools = create_wiki_tools()
-    
-    # agent= initialize_agent(
-    #     tools, 
-    #     chat, 
-    #     # agent=AgentType.REACT_DOCSTORE,
-    #     agent="zero-shot-react-description",
-    #     handle_parsing_errors=True,
-    #     verbose = True,
-    #     )
-    # agent_executor = AgentExecutor.from_agent_and_tools(
-    #     agent=agent.agent,
-    #     tools = tools,
-    #     verbose = True,
-    # )
-    query  = f"""Find out what a {job_title} does and the skills and responsibilities involved. 
-     
-    """
-    agent_executor = create_custom_llm_agent(chat, tools)
-    try:
-        response = agent_executor.run(query)
-        print(f"Success: {response}")
-        return response
-    except Exception as e:
-        response = str(e)
-        print(f"Exception: {response}")
-
-    
-
-
-def fetch_cover_letter_samples(job_title):
-    table = find_similar_jobs(job_title)
-
-    prompt = f"""Extract the Job Title values in the markdown table: {table}.
-    
-    Output your answer as a comma separated list. If there is no table, return -1. """
-
-    jobs = get_completion(prompt)
-    sample_string = ""
-    print(jobs)
-    if (jobs!=-1):
-        jobs_list = jobs.split(",")
-        for job in jobs_list:
-            if (cover_letter_samples_dict.get(job)!=None):
-                sample = read_txt(cover_letter_samples_dict.get(job))
-                sample_string = sample_string + "\n" + f" {delimiter3}\n{sample}\n{delimiter3}" + "\n\nexample:"   
-    # print(sample_string)
-    return sample_string
-
-def find_similar_jobs(job_title):
-
-    loader = CSVLoader(file_path="jobs.csv")
-    docs = loader.load()
-
-    db = DocArrayInMemorySearch.from_documents(
-        docs, 
-        embeddings
-    )
-    # doing Q&A with llm
-    retriever = db.as_retriever()
-
-    query = f"""List all the jobs related to or the same as {job_title} in a markdown table.
-    
-    Do not make up things not in the given context. """
-
-    # docs = db.similarity_search(query)
-
-    # print(len(docs))
-    # print(docs[0])
-
-    qa_stuff = RetrievalQA.from_chain_type(
-    llm=chat, 
-    chain_type="stuff", 
-    retriever=retriever, 
-    verbose=True
-    )
-
-    response = qa_stuff.run(query)
-    print(response)
-    return response
-        
-
-
-
-
 
 def generate_basic_cover_letter(my_company_name, my_job_title, read_path=my_resume_file, save_path= "cover_letter.txt"):
     
-    resume_content = read_txt(my_resume_file)
-
+    resume_content = read_txt(read_path)
     # Get personal information from resume
-    personal_info_dict = extract_personal_information(resume_content)
-
+    personal_info_dict = extract_personal_information(llm, resume_content)
     # Get job description
-    job_description = get_job_resources(my_job_title)
-
-    cover_letter_examples = fetch_cover_letter_samples(my_job_title)
+    query  = f"""Find out what a {my_job_title} does and the skills and responsibilities involved. """
+    job_description = get_web_resources(llm, query)
+    # Get advices on cover letter
+    advices = get_web_resources(llm, "what to include in a good cover letter")
+    # Get cover letter examples
+    cover_letter_examples = fetch_samples(llm, embeddings, my_job_title, cover_letter_samples_dict)
     
     # Use an LLM to generate a cover letter that is specific to the resume file that is being read
 
@@ -200,19 +54,30 @@ def generate_basic_cover_letter(my_company_name, my_job_title, read_path=my_resu
 
         content: {delimiter}{content}{delimiter}. \
     
-      Step 1: {delimiter4} Read the content and determine which information in the content is useful and which is not. Usefulness of the information should be based on how close it relates to {job} and the job description, which is delimited with {delimiter2} charaters. \
+      Step 1: Read the content and determine which information in the content is useful to generate the cover letter. 
       
-        For example, cooking skills are not related to software development so it is not useful information.
+        Usefulness of the information should be based on how close it is to {job}'s job description. 
+      
+        The job description is delimited with {delimiter2} characters
 
         job description: {delimiter2}{job_description}{delimiter2}. \
     
-      Step 2: {delimiter4} Research example cover letters provided. Each example is delimited with {delimiter3} characters.
+      Step 2: Research example cover letters provided. Each example is delimited with {delimiter3} characters.
 
-         Determine which information from Step 1 should be included and which should not based on the quality of information in contributing to a good cover letter.
+        From these examples, determine which information in the content is useful to generate the cover letter.
+
+        Usefulness should be based on how common they appear in these cover letter examples. 
         
          example: {examples}. \
+         
+      Step 3:  Some expert advices are also provided as basic guidelines. Expert advices are delimited with {delimiter1} characters. 
 
-      Step 3: {delimiter4} Change all personal information to the following. Do not incude them if they are -1 or empty: 
+        Selectively filter down information in Step 1 and Step 2. 
+
+        expert advices: {delimiter1}{advices}{delimiter1}
+     
+
+      Step 4: Change all personal information to the following. Do not incude them if they are -1 or empty: 
 
         name: {name}. \
 
@@ -226,13 +91,14 @@ def generate_basic_cover_letter(my_company_name, my_job_title, read_path=my_resu
 
         job position they are applying for: {job}. \
     
-      Step 4: {delimiter4} Generate the cover letter. Use information you filtered downn in steps 1 through 3. Do not make stuff up. 
+      Step 5: Generate the cover letter. 
     
       Use the following format:
         Step 1:{delimiter4} <step 1 reasoning>
         Step 2:{delimiter4} <step 2 reasoning>
         Step 3:{delimiter4} <step 3 reasoning>
-        Step 4:{delimiter4} <the cover letter you generate>
+        Step 4:{delimiter4} <step 4 reasoning>
+        Step 5:{delimiter4} <the cover letter you generate>
 
       Make sure to include {delimiter4} to separate every step.
 
@@ -284,14 +150,17 @@ def generate_basic_cover_letter(my_company_name, my_job_title, read_path=my_resu
                     company = my_company_name,
                     job = my_job_title,
                     content=resume_content,
+                    advices = advices,
                     job_description = job_description,
                     examples = cover_letter_examples,
                     delimiter = delimiter,
+                    delimiter1 = delimiter1, 
                     delimiter2 = delimiter2,
                     delimiter3 = delimiter3,
                     delimiter4 = delimiter4
     )
-    my_cover_letter = chat(cover_letter_message).content
+    # FOR THE FUTURE, THIS LLM HERE CAN BE CUSTOMLY TRAINED
+    my_cover_letter = llm(cover_letter_message).content
 
     my_cover_letter= my_cover_letter.split(delimiter4)[-1].strip()
 
@@ -313,8 +182,6 @@ def generate_basic_cover_letter(my_company_name, my_job_title, read_path=my_resu
 # Call the function to generate the cover letter
  
 if __name__ == '__main__':
-    # generate_basic_cover_letter(my_company_name, my_job_title)
-    # extract_personal_information(my_resume_file)
-    get_job_resources("AI Developer")
-    # fetch_cover_letter_samples(my_job_title)
+    generate_basic_cover_letter(my_company_name, my_job_title)
+
 
