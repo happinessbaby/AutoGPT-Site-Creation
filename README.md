@@ -21,3 +21,29 @@
 # What this project will become
 
 ### An AI Powered job hosting platform with AI-powered features such as a cover letter generator and a chatbot for helping people improve their resumes. The ultimate goal is creating a powerful AI powered job search engine.
+
+
+#### Cover Letter Generator
+
+-- What it is: User uploads his/her resume along with the job position and company they’re applying to and they’ll be given a personalized cover letter 
+
+-- Tools: LangChain, Flask, basic javascript
+
+
+
+
+#### Resume Chat Bot
+
+-- What it is: a chat-bot who has been trained to expertly assess resume will provide feedback on how a user’s resume can be improved; some obvious flaws such as missing fields, misspellings, grammar can already be easily spotted by any pretrained llm. HOWEVER, some things that need more human expertise such as from the HR people will need RLHF
+
+-- Tools: LangChain, vector store for a custom model, Streamlit for chat-bot
+    
+
+
+#### Job Search Engine
+
+-- What it is: a search engine powered by AI for matching people with job they want 
+
+-- Tools: LangChain, ElasticSearch, others TBD
+
+
