@@ -10,7 +10,7 @@ from common_utils import fetch_samples, get_web_resources
 from samples import resume_samples_dict
 from langchain.memory import ConversationBufferMemory
 from langchain.agents import ConversationalChatAgent, Tool, AgentExecutor
-from langchain_utils import create_QA_chain, create_qa_tools
+from langchain_utils import create_QA_chain, create_qa_tools, create_custom_llm_agent
 from feast import FeatureStore
 import pickle
 # from fastapi import HTTPException
@@ -37,30 +37,34 @@ class ChatController(object):
 
         self.llm = OpenAI(temperature=0, model_name="gpt-4", top_p=0.2, presence_penalty=0.4, frequency_penalty=0.2)
 
-        qa = create_QA_chain(self.llm, embeddings, "feast" )
+        qa = create_QA_chain(self.llm, embeddings, "chroma" )
 
         tools = create_qa_tools(qa)
 
-        system_msg = "You are a helpful assistant."
+        # system_msg = "You are a helpful assistant."
 
-        prefix = """Have a conversation with a human, answering the following questions as best you can. You have access to the following tools:"""
-        suffix = """Begin!"
+        # prefix = """Have a conversation with a human, answering the following questions as best you can. You have access to the following tools:"""
+        # suffix = """Begin!"
 
-        {chat_history}
-        Question: {input}
-        {agent_scratchpad}"""
+        # {chat_history}
+        # Question: {input}
+        # {agent_scratchpad}"""
 
-        agent = ConversationalChatAgent.from_llm_and_tools(
-            llm=self.llm,
-            tools=tools,
-            system_message=system_msg,
-            prefix=prefix,
-            suffix= suffix,
-        )
+        # This probably can be changed to Custom Agent class
+        # agent = ConversationalChatAgent.from_llm_and_tools(
+        #     llm=self.llm,
+        #     tools=tools,
+        #     system_message=system_msg,
+        #     prefix=prefix,
+        #     suffix= suffix,
+        # )
+        agent = create_custom_llm_agent(self.llm, tools)
 
         self.chat_agent = AgentExecutor.from_agent_and_tools(
             agent=agent, tools=tools, verbose=True, memory=ConversationBufferMemory(memory_key="chat_history", return_messages=True)
         )
+
+        return self.chat_agent
 
 
     def askAI(self, prompt: str, id: str):
@@ -70,7 +74,7 @@ class ChatController(object):
         #     raise HTTPException(status_code=400, detail="Not valid id.")
 
         # create a conversation memory and save it if it not exists 
-        # TBD: CHANGE THIS TO FEAST 
+        # can be changed to/incorporated into a streaming platform such as kafka
         if not os.path.isfile('conv_memory/'+id+'.pickle'):
             mem = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
             with open('conv_memory/' + id + '.pickle', 'wb') as handle:

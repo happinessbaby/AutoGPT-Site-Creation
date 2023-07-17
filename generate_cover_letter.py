@@ -167,6 +167,7 @@ def generate_basic_cover_letter(my_company_name, my_job_title, read_path=my_resu
     # Check potential harmful content in response
     if (check_content_safety(text_str=my_cover_letter)):   
         # Validate cover letter
+        # QUALITY CHECKING CAN BE FURTHER EXPANDED, COULD ALSO SET UP SOME METRICS
         if (evaluate_response(my_cover_letter)):
             # Write the cover letter to a file
             with open(save_path, 'w') as f:
