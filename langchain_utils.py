@@ -22,6 +22,7 @@ from langchain.chains.summarize import load_summarize_chain
 from langchain.vectorstores import Chroma
 from langchain import PromptTemplate
 from langchain.chains import RetrievalQA
+from langchain.memory import ConversationBufferMemory
 from feast import FeatureStore
 
 
@@ -92,7 +93,7 @@ def create_db_tools(db_chain, name):
         Tool(
         name="PineCone DB",
         func=db_chain.run,
-        description="useful for when you need to answer questions about FooBar. Input should be in the form of a question containing full context",
+        description="useful for when you need to answer questions about PineCone DB. Input should be in the form of a question containing full context",
     ),
     ]
     return tool
@@ -196,7 +197,10 @@ def create_custom_llm_agent(llm, tools):
 
     Begin!
 
-    Question: {input}
+    {chat_history}
+
+
+    Question: {question}
     {agent_scratchpad}"""
 
 
@@ -205,11 +209,12 @@ def create_custom_llm_agent(llm, tools):
     tools=tools,
     # This omits the `agent_scratchpad`, `tools`, and `tool_names` variables because those are generated dynamically
     # This includes the `intermediate_steps` variable because that is needed
-    input_variables=["input", "intermediate_steps"]
+    input_variables=["chat_history", "question", "intermediate_steps"]
     )
     output_parser = CustomOutputParser()
     # LLM chain consisting of the LLM and a prompt
-    llm_chain = LLMChain(llm=llm, prompt=prompt)
+    memory = ConversationBufferMemory(memory_key="chat_history", k=50, return_messages=True, input_key="question" )
+    llm_chain = LLMChain(llm=llm, prompt=prompt, memory=memory)
     tool_names = [tool.name for tool in tools]
 
     agent = LLMSingleActionAgent(
@@ -218,9 +223,9 @@ def create_custom_llm_agent(llm, tools):
         stop=["\nObservation:"], 
         allowed_tools=tool_names
     )
-    agent_executor = AgentExecutor.from_agent_and_tools(agent=agent, tools=tools, verbose=True)
+    # agent_executor = AgentExecutor.from_agent_and_tools(agent=agent, tools=tools, verbose=True)
 
-    return agent_executor
+    return agent
 
 def get_summary(llm, docs):
     chain = load_summarize_chain(llm, chain_type="map_reduce")

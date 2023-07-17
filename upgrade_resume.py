@@ -10,8 +10,8 @@ from common_utils import fetch_samples, get_web_resources
 from samples import resume_samples_dict
 from langchain.memory import ConversationBufferMemory
 from langchain.agents import ConversationalChatAgent, Tool, AgentExecutor
-from langchain_utils import create_QA_chain, create_qa_tools
-from feast import FeatureStore
+from langchain_utils import create_QA_chain, create_qa_tools, create_custom_llm_agent
+# from feast import FeatureStore
 import pickle
 # from fastapi import HTTPException
 # from bson import ObjectId
@@ -31,46 +31,50 @@ delimiter4 = "****"
 
 class ChatController(object):
     def __init__(self):
-        self.create_chat_agent()
+        self._create_chat_agent()
 
-    def create_chat_agent(self):
+    def _create_chat_agent(self):
 
         self.llm = OpenAI(temperature=0, model_name="gpt-4", top_p=0.2, presence_penalty=0.4, frequency_penalty=0.2)
 
-        qa = create_QA_chain(self.llm, embeddings, "feast" )
+        qa = create_QA_chain(self.llm, embeddings, "chroma" )
 
         tools = create_qa_tools(qa)
 
-        system_msg = "You are a helpful assistant."
+        # system_msg = "You are a helpful assistant."
 
-        prefix = """Have a conversation with a human, answering the following questions as best you can. You have access to the following tools:"""
-        suffix = """Begin!"
+        # prefix = """Have a conversation with a human, answering the following questions as best you can. You have access to the following tools:"""
+        # suffix = """Begin!"
 
-        {chat_history}
-        Question: {input}
-        {agent_scratchpad}"""
+        # {chat_history}
+        # Question: {input}
+        # {agent_scratchpad}"""
 
-        agent = ConversationalChatAgent.from_llm_and_tools(
-            llm=self.llm,
-            tools=tools,
-            system_message=system_msg,
-            prefix=prefix,
-            suffix= suffix,
-        )
+        # This probably can be changed to Custom Agent class
+        # agent = ConversationalChatAgent.from_llm_and_tools(
+        #     llm=self.llm,
+        #     tools=tools,
+        #     system_message=system_msg,
+        #     prefix=prefix,
+        #     suffix= suffix,
+        # )
+        agent = create_custom_llm_agent(self.llm, tools)
 
         self.chat_agent = AgentExecutor.from_agent_and_tools(
             agent=agent, tools=tools, verbose=True, memory=ConversationBufferMemory(memory_key="chat_history", return_messages=True)
         )
 
+        # return self.chat_agent
 
-    def askAI(self, prompt: str, id: str):
+
+    def askAI(self, id, question, callbacks=None):
         # try:
         #     objId = ObjectId(id)
         # except:
         #     raise HTTPException(status_code=400, detail="Not valid id.")
 
         # create a conversation memory and save it if it not exists 
-        # TBD: CHANGE THIS TO FEAST 
+        # can be changed to/incorporated into a streaming platform such as kafka
         if not os.path.isfile('conv_memory/'+id+'.pickle'):
             mem = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
             with open('conv_memory/' + id + '.pickle', 'wb') as handle:
@@ -84,7 +88,8 @@ class ChatController(object):
 
         # for could not parse LLM output
         try:
-            response = self.chat_agent.run(input=prompt)
+            # response = self.chat_agent.run(input=prompt)
+            response = self.chat_agent.run(question, callbacks=callbacks)
         except ValueError as e:
             response = str(e)
             if not response.startswith("Could not parse LLM output: `"):
