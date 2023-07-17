@@ -15,7 +15,7 @@ openai.api_key = os.environ['OPENAI_API_KEY']
 
 st_callback = StreamlitCallbackHandler(st.container())
 new_chat = ChatController()
-chat_agent = new_chat.create_chat_agent()
+# chat_agent = new_chat.create_chat_agent()
 
 # Initialize chat history
 if "messages" not in st.session_state:
@@ -83,10 +83,10 @@ if key in st.session_state and shadow_key not in st.session_state:
 
 with st.form(key="form"):
     prefilled = st.selectbox("Sample questions", sorted(SAVED_SESSIONS.keys())) or ""
-    mrkl_input = st.text_input("Or, ask your own question", key=shadow_key)
-    st.session_state[key] = mrkl_input
-    if not mrkl_input:
-        mrkl_input = prefilled
+    question = st.text_input("Or, ask your own question", key=shadow_key)
+    st.session_state[key] = question
+    if not question:
+        question = prefilled
     submit_clicked = st.form_submit_button("Submit Question")
 
 
@@ -106,12 +106,12 @@ if with_clear_container(submit_clicked):
         # collapse_completed_thoughts=collapse_completed_thoughts,
     )
 
-    question_container.write(f"**Question:** {mrkl_input}")
+    question_container.write(f"**Question:** {question}")
 
     # If we've saved this question, play it back instead of actually running LangChain
     # (so that we don't exhaust our API calls unnecessarily)
-    if mrkl_input in SAVED_SESSIONS:
-        session_name = SAVED_SESSIONS[mrkl_input]
+    if question in SAVED_SESSIONS:
+        session_name = SAVED_SESSIONS[question]
         session_path = Path(__file__).parent / "runs" / session_name
         print(f"Playing saved session: {session_path}")
         answer = playback_callbacks(
@@ -119,5 +119,6 @@ if with_clear_container(submit_clicked):
         )
         res.write(f"**Answer:** {answer}")
     else:
-        answer = chat_agent.run(mrkl_input, callbacks=[streamlit_handler])
+        # answer = chat_agent.run(mrkl_input, callbacks=[streamlit_handler])
+        answer = new_chat.askAI("123", question, callbacks=[streamlit_handler])
         res.write(f"**Answer:** {answer}")
