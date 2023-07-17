@@ -1,4 +1,7 @@
 # Creating a functional site using AutoGPT
+
+"AI is the new electricity" - Andrew NG
+
 ### setting up AutoGPT
 - If you followed the [setup page][https://docs.agpt.co/setup/] and ran into problems, I got a few troubleshooting tips
   - When you download their latest release [https://github.com/Significant-Gravitas/Auto-GPT], note the python version required. Currently it's 3.10 or later. If your virtual environment has a python version that does not meet the requirement, you will run into multiple problems. So make sure to specify the right python version when you create your environment!
@@ -7,9 +10,40 @@
   - The very first time before activating your virtual environment, I suggest you run "pip install -r requirements.txt" first. Although AutoGPT should automatically run requirements.txt the very first time when it sees you don't have required packages installed, sometimes it doesn't, which means you'll have to manually pip install every package (not suggested!)
 
 ### knowing AutoGPT's limitations
-- It is an AI assistance that needs human assistance. This could be the start of human-AI collaboration, which could be where future is going with AI. Imagine we each have a personal AI assistant that helps us run our lives. Before it can assist us, however, we need to help it understand our needs and wishes. It will get confused if you're confused on what you want to do. 
-
+- It is an AI assistance that needs human assistance. This could be the start of human-AI collaboration, which could be where future is going with AI. Imagine we each have a personal AI assistant that helps us run our lives.
+ 
 
 ### what I want it to do for me
-#### create a functional webpage that uses OpenAI's LLM models for content creation
-#### extra: maintain the site and monitor the budget
+#### create a functional webpage that uses OpenAI's LLM models for content creation (this part I have mostly given up. I ended up coding everything without its help )
+#### extra: maintain the site and monitor the budget (still hopeful this can be achieved)
+
+
+# What this project will become
+
+### An AI Powered job hosting platform with AI-powered features such as a cover letter generator and a chatbot for helping people improve their resumes. The ultimate goal is creating a powerful AI powered job search engine.
+
+
+#### Cover Letter Generator
+
+-- What it is: User uploads his/her resume along with the job position and company they’re applying to and they’ll be given a personalized cover letter 
+
+-- Tools: LangChain, Flask, basic javascript
+
+
+
+
+#### Resume Chat Bot
+
+-- What it is: a chat-bot who has been trained to expertly assess resume will provide feedback on how a user’s resume can be improved; some obvious flaws such as missing fields, misspellings, grammar can already be easily spotted by any pretrained llm. HOWEVER, some things that need more human expertise such as from the HR people will need RLHF
+
+-- Tools: LangChain, vector store for a custom model, Streamlit for chat-bot
+    
+
+
+#### Job Search Engine
+
+-- What it is: a search engine powered by AI for matching people with job they want 
+
+-- Tools: LangChain, ElasticSearch, others TBD
+
+
