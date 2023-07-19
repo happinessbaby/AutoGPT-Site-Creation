@@ -1,16 +1,22 @@
 import os
-from openai_api import get_completion
+from openai_api import evaluate_response
 from langchain.chat_models import ChatOpenAI
 from langchain.llms import OpenAI
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
 from langchain import PromptTemplate
-from basic_utils import read_txt
+from basic_utils import read_txt, check_content_safety
 from common_utils import fetch_samples, get_web_resources
 from samples import resume_samples_dict
-from langchain.memory import ConversationBufferMemory
 from langchain.agents import ConversationalChatAgent, Tool, AgentExecutor
-from langchain_utils import create_QA_chain, create_qa_tools, create_custom_llm_agent
+from langchain_utils import create_QA_chain, create_qa_tools, CustomOutputParser, CustomPromptTemplate
+from langchain.prompts import BaseChatPromptTemplate
+from langchain.agents import Tool, AgentExecutor, LLMSingleActionAgent, AgentOutputParser
+from langchain.schema import AgentAction, AgentFinish, HumanMessage
+from typing import List, Union
+import re
+from langchain import LLMChain
+from langchain.memory import ConversationSummaryBufferMemory
 # from feast import FeatureStore
 import pickle
 # from fastapi import HTTPException
@@ -29,28 +35,43 @@ delimiter2 = "////"
 delimiter3 = "<<<<"
 delimiter4 = "****"
 
+my_job_title = 'AI developer'
+my_resume_file = 'resume_samples/resume2023v2.txt'
+
 class ChatController(object):
-    def __init__(self):
+
+
+    def __init__(self, advice_file):
+        self.advice = read_txt(advice_file)
+        self.llm = OpenAI(temperature=0, model_name="gpt-4", top_p=0.2, presence_penalty=0.4, frequency_penalty=0.2)
         self._create_chat_agent()
+
 
     def _create_chat_agent(self):
 
-        self.llm = OpenAI(temperature=0, model_name="gpt-4", top_p=0.2, presence_penalty=0.4, frequency_penalty=0.2)
 
         qa = create_QA_chain(self.llm, embeddings, "chroma" )
 
         tools = create_qa_tools(qa)
 
-        # system_msg = "You are a helpful assistant."
+        # system_msg = "You are a helpful assistant who evaluates a human's resume and provides resume advices."
 
-        # prefix = """Have a conversation with a human, answering the following questions as best you can. You have access to the following tools:"""
+        # prefix = """Have a conversation with a human, answering the following questions as best you can. You have access to the following tools: 
+        
+        # {tools}
+        
+        # An initial assessment of the resume has been done. The assessment is is delimited with {delimiter} characters. 
+        
+        # Use it as a reference when answering questions.
+        
+        # """
         # suffix = """Begin!"
 
         # {chat_history}
         # Question: {input}
         # {agent_scratchpad}"""
 
-        # This probably can be changed to Custom Agent class
+        # # This probably can be changed to Custom Agent class
         # agent = ConversationalChatAgent.from_llm_and_tools(
         #     llm=self.llm,
         #     tools=tools,
@@ -58,13 +79,72 @@ class ChatController(object):
         #     prefix=prefix,
         #     suffix= suffix,
         # )
-        agent = create_custom_llm_agent(self.llm, tools)
+
+            # Set up the base template
+    
+        agent = self.create_custom_llm_agent(tools)
+        
+        memory = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", max_token_limit=650, return_messages=True, input_key="question")
 
         self.chat_agent = AgentExecutor.from_agent_and_tools(
-            agent=agent, tools=tools, verbose=True, memory=ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+            agent=agent, tools=tools, verbose=True, memory=memory
         )
 
-        # return self.chat_agent
+
+    def create_custom_llm_agent(self, tools):
+
+        system_msg = "You are a helpful assistant who evaluates a human's resume and provides resume advices."
+
+        template = """Complete the objective as best you can. You have access to the following tools:
+
+            {tools}
+
+            Use the following format:
+
+            Question: the input question you must answer
+            Thought: you should always think about what to do
+            Action: the action to take, should be one of [{tool_names}]
+            Action Input: the input to the action
+            Observation: the result of the action
+            ... (this Thought/Action/Action Input/Observation can repeat N times)
+            Thought: I now know the final answer
+            Final Answer: the final answer to the original input question
+
+            An initial assessment of the resume has been done. The assessment is delimited with {delimiter} characters.
+
+            Use it as a reference when answering questions.
+
+            assessment: {delimiter}{assessment}{delimiter}
+
+            Begin!
+
+            {chat_history}
+
+            Question: {question}
+            {agent_scratchpad}"""
+
+        prompt = CustomPromptTemplate(
+            template=template,
+            tools=tools,
+            system_msg=system_msg,
+            # This omits the `agent_scratchpad`, `tools`, and `tool_names` variables because those are generated dynamically
+            # This includes the `intermediate_steps` variable because that is needed
+            input_variables=["delimiter", "assessment", "chat_history", "question", "intermediate_steps"],
+        )
+        output_parser = CustomOutputParser()
+        # LLM chain consisting of the LLM and a prompt
+        # memory = ConversationBufferMemory(memory_key="chat_history", k=50, return_messages=True, input_key="question" )
+        llm_chain = LLMChain(llm=self.llm, prompt=prompt)
+        tool_names = [tool.name for tool in tools]
+
+        agent = LLMSingleActionAgent(
+            llm_chain=llm_chain, 
+            output_parser=output_parser,
+            stop=["\nObservation:"], 
+            allowed_tools=tool_names
+        )
+
+        return agent
 
 
     def askAI(self, id, question, callbacks=None):
@@ -76,7 +156,7 @@ class ChatController(object):
         # create a conversation memory and save it if it not exists 
         # can be changed to/incorporated into a streaming platform such as kafka
         if not os.path.isfile('conv_memory/'+id+'.pickle'):
-            mem = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+            mem = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", input_key="question",return_messages=True)
             with open('conv_memory/' + id + '.pickle', 'wb') as handle:
                 pickle.dump(mem, handle, protocol=pickle.HIGHEST_PROTOCOL)
         else:
@@ -89,7 +169,8 @@ class ChatController(object):
         # for could not parse LLM output
         try:
             # response = self.chat_agent.run(input=prompt)
-            response = self.chat_agent.run(question, callbacks=callbacks)
+            # response = self.chat_agent.run(question, callbacks=callbacks)
+            response = self.chat_agent({"question": question, "delimiter":delimiter, "assessment":self.advice}, callbacks=callbacks)
         except ValueError as e:
             response = str(e)
             if not response.startswith("Could not parse LLM output: `"):
@@ -103,15 +184,14 @@ class ChatController(object):
             pickle.dump(mem, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
         return {"answer": response}
-
-
+    
 
 
     
 
-def basic_upgrade_resume(resume_file, my_job_title):
+def basic_upgrade_resume(my_job_title, read_path = my_resume_file, res_path="advice.txt"):
 
-    resume = read_txt(resume_file)
+    resume = read_txt(read_path)
     query  = f"""Find out what a {my_job_title} does and the skills and responsibilities involved. """
     job_description = get_web_resources(llm, query)
     resume_advices = get_web_resources(llm, "what makes a bad resume and how to improve")
@@ -174,15 +254,20 @@ def basic_upgrade_resume(resume_file, my_job_title):
         delimiter4 = delimiter4, 
         
     )
-    my_advices = llm(upgrade_resume_message).content
-    print(my_advices)
-    return my_advices
+    my_advice = llm(upgrade_resume_message).content
+
+    # Check potential harmful content in response
+    if (check_content_safety(text_str=my_advice)):   
+        # Write the cover letter to a file
+        with open(res_path, 'w') as f:
+            try:
+                f.write(my_advice)
+                print("ALL SUCCESS")
+            except Exception as e:
+                print("FAILED")
+                # Error logging
 
 
-
-
-my_job_title = 'AI developer'
-my_resume_file = 'resume_samples/resume2023v2.txt'
 
 if __name__ == '__main__':
-    basic_upgrade_resume(my_resume_file, my_job_title)
+    basic_upgrade_resume(my_job_title)

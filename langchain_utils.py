@@ -177,56 +177,6 @@ def create_python_agent(llm):
 
 
 
-def create_custom_llm_agent(llm, tools):
-    # Set up the base template
-    template = """Complete the objective as best you can. You have access to the following tools:
-
-    {tools}
-
-    Use the following format:
-
-    Question: the input question you must answer
-    Thought: you should always think about what to do
-    Action: the action to take, should be one of [{tool_names}]
-    Action Input: the input to the action
-    Observation: the result of the action
-    ... (this Thought/Action/Action Input/Observation can repeat N times)
-    Thought: I now know the final answer
-    Final Answer: the final answer to the original input question
-
-
-    Begin!
-
-    {chat_history}
-
-
-    Question: {question}
-    {agent_scratchpad}"""
-
-
-    prompt = CustomPromptTemplate(
-    template=template,
-    tools=tools,
-    # This omits the `agent_scratchpad`, `tools`, and `tool_names` variables because those are generated dynamically
-    # This includes the `intermediate_steps` variable because that is needed
-    input_variables=["chat_history", "question", "intermediate_steps"]
-    )
-    output_parser = CustomOutputParser()
-    # LLM chain consisting of the LLM and a prompt
-    memory = ConversationBufferMemory(memory_key="chat_history", k=50, return_messages=True, input_key="question" )
-    llm_chain = LLMChain(llm=llm, prompt=prompt, memory=memory)
-    tool_names = [tool.name for tool in tools]
-
-    agent = LLMSingleActionAgent(
-        llm_chain=llm_chain, 
-        output_parser=output_parser,
-        stop=["\nObservation:"], 
-        allowed_tools=tool_names
-    )
-    # agent_executor = AgentExecutor.from_agent_and_tools(agent=agent, tools=tools, verbose=True)
-
-    return agent
-
 def get_summary(llm, docs):
     chain = load_summarize_chain(llm, chain_type="map_reduce")
     summary = chain.run(docs)
@@ -240,7 +190,7 @@ def add_embedding(embeddings, text):
 
 
 
-# Set up a prompt template
+# # Set up a prompt template
 class CustomPromptTemplate(BaseChatPromptTemplate):
     # The template to use
     template: str
