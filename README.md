@@ -25,40 +25,45 @@
 
 #### Cover Letter Generator
 
-Where user uploads his/her resume along with the job position and company they’re applying to and they’ll be given a personalized cover letter 
+Where user uploads his/her resume along with the job position and company they’re applying to and they’ll be given a personalized cover letter. This uses some basic LangChain functionalities. 
 
 
 
 
 #### Resume Chat Bot
 
-A chat-bot that has been trained to expertly assess resume will provide feedback on how a user’s resume can be improved; some obvious flaws such as missing fields, misspellings, grammar can already be easily spotted by any pretrained llm. HOWEVER, some things that need more human expertise such as from the HR people will need RLHF
+A chat-bot that has been trained to expertly assess resume will provide feedback on how a user’s resume can be improved; some obvious flaws such as missing fields, misspellings, grammar can already be easily spotted by any pretrained llm. HOWEVER, some things that need more human expertise will need RLHF (not feasible, will try vector store embedding instead)
     
 
 
 #### Job Search Engine
 
-A search engine powered by AI for matching people with job they want 
+A search engine powered by AI for matching people with job they want (welcome any collaboration on this)
 
 
 
 
-##### How to Run
+#### How to Run
+everything is still a work in progress
 
-- w/ frontend: run these 2 commands in 2 separate terminals
+- Cover letter generator w/ frontend: run these 2 commands in 2 separate terminals
 ````
  python3 -m celery -A backend_flask  worker -l INFO 
 
  python3 backend_flask.py
 
 ````
+- Resume advisor chatbot w/ frontend
+````
+ streamlit run backend_streamlit.py
+````
 
-- w/o frontend for individual feature testing:
+- Individual feature testing w/o frontend:
 
 ```
 cover letter generator: python3 generate_cover_letter.py
 
-resume advisor: streamlit run upgrade_resume.py
+resume advisor w/o chatbot: python3 upgrade_resume.py
 ```
 
 
