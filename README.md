@@ -24,6 +24,13 @@
 
 [Refer to document for more detail](./designs/concepts.odt)
 
+All features will be connected to a chatbot, so there will be only two main interfaces. Page 1 is the entry point and page 2 is the chatbot.
+![page 1](./designs/page1.png)
+![page 2](./designs/page2.png)
+
+everything is still a work in progress. 
+
+
 
 #### Cover Letter Generator
 
@@ -47,7 +54,6 @@ A search engine powered by AI for matching people with job they want (welcome an
 
 
 #### How to Run
-everything is still a work in progress
 
 - Cover letter generator w/ frontend: run these 2 commands in 2 separate terminals
 ````
