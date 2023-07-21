@@ -26,9 +26,11 @@
 
 All features will be connected to a chatbot, so there will be only two main interfaces. Page 1 is the entry point and page 2 is the chatbot.
 ![page 1](./designs/page1.png)
+page 1
 ![page 2](./designs/page2.png)
+page 2
 
-everything is still a work in progress. 
+everything is still a work in progress
 
 
 
@@ -72,7 +74,7 @@ A search engine powered by AI for matching people with job they want (welcome an
 ```
 cover letter generator: python3 generate_cover_letter.py
 
-resume advisor w/o chatbot: python3 upgrade_resume.py
+resume advisor: python3 upgrade_resume.py
 ```
 
 
