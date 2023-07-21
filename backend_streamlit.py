@@ -9,7 +9,7 @@ import os
 import uuid
 from io import StringIO
 from langchain.callbacks import StreamlitCallbackHandler
-from upgrade_resume import ChatController
+from career_advisor import ChatController
 from callbacks.capturing_callback_handler import playback_callbacks
 from basic_utils import convert_to_txt, check_content_safety, read_txt
 from upgrade_resume import evaluate_resume
@@ -102,9 +102,9 @@ class Chat():
                 # st.session_state.messages.append({"role": "assistant", "content": full_response})
 
             SAMPLE_QUESTIONS = {
-                "What are some general advices for writing an outstanding resume?": "general_advices.pickle",
-                "What are some things I could be doing terribly wrong with my resume?": "bad_resume.pickle",
-                "Can you help me write a cover letter?": "test123.pickle"
+                "What are some general advices for writing an outstanding resume?": "./general_questions/general_advices.pickle",
+                "What are some things I could be doing terribly wrong with my resume?": "./general_questions/bad_resume.pickle",
+                "help me write a cover letter?": "./general_questions/coverletter.pickle"
             }
 
             # key = "input"
@@ -119,15 +119,15 @@ class Chat():
 
             with st.sidebar:
                 st.title('Career Chat 🧸')
-                # st.markdown('''
-                # ## About
-                # This app is an LLM-powered chatbot built using:
-                # - [Streamlit](<https://streamlit.io/>)
-                # - [HugChat](<https://github.com/Soulter/hugging-chat-api>)
-                # - [OpenAssistant/oasst-sft-6-llama-30b-xor](<https://huggingface.co/OpenAssistant/oasst-sft-6-llama-30b-xor>) LLM model
+                st.markdown('''
+                ## About
+                Hi, my name is Tebi, your AI career advisor. I can help you: 
+                            
+                - Upgrade your resume
+                - Write a cover letter
+                - Search for a open job position
                 
-                # 💡 Note: No API key required!
-                # ''')
+                Pick from the list of general questions for quick navigation. ''')
                 add_vertical_space(5)
                 # st.write('Made with ❤️ (<https://youtube.com/dataprofessor>)')
 
@@ -299,5 +299,5 @@ if __name__ == '__main__':
     # create_chatbot()
     advisor = Chat()
     # asyncio.run(advisor.initialize())
-    advisor.initialize()
-    # advisor.create_chatbot()
+    # advisor.initialize()
+    advisor.create_chatbot()

@@ -23,6 +23,8 @@ from langchain.vectorstores import Chroma
 from langchain import PromptTemplate
 from langchain.chains import RetrievalQA
 from langchain.memory import ConversationBufferMemory
+import subprocess
+import sys
 from feast import FeatureStore
 
 
@@ -66,6 +68,18 @@ def create_qa_tools(qa_chain):
     ]
     return tools
 
+def create_doc_tools(doc):
+    index = get_index(doc)
+    tools = [
+        Tool(
+        name = f"{doc} Document",
+        func = lambda q: str(index.query(q)),
+        description="Useful for giving personalized answers",
+        return_direct=True,
+        )
+    ]
+    return tools
+
 
 def create_search_tools(name, top_n):
     if (name=="google"):
@@ -97,6 +111,17 @@ def create_db_tools(db_chain, name):
     ),
     ]
     return tool
+
+# def create_process_tools(file_name):
+#     tool = [
+#         Tool(
+#         name = "Python Process",
+#         func = subprocess.run([f"{sys.executable}", f"{file_name}"]),
+#         description="useful for when you are asked to write a cover letter",
+#         ),
+#     ]
+#     return tool
+
 
 
 def create_QA_chain(chat, embeddings, db_type, docs=None, chain_type="stuff"):
