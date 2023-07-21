@@ -22,6 +22,8 @@
 
 ### An AI Powered job hosting platform with AI-powered features such as a cover letter generator and a chatbot for helping people improve their resumes. The ultimate goal is creating a powerful AI powered job search engine.
 
+[Refer to document for more detail](./designs/concepts.odt)
+
 
 #### Cover Letter Generator
 
@@ -39,6 +41,7 @@ A chat-bot that has been trained to expertly assess resume will provide feedback
 #### Job Search Engine
 
 A search engine powered by AI for matching people with job they want (welcome any collaboration on this)
+
 
 
 
