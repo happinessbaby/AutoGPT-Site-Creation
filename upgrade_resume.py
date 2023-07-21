@@ -9,7 +9,7 @@ from basic_utils import read_txt, check_content_safety
 from common_utils import fetch_samples, get_web_resources
 from samples import resume_samples_dict
 from langchain.agents import ConversationalChatAgent, Tool, AgentExecutor
-from langchain_utils import create_QA_chain, create_qa_tools, CustomOutputParser, CustomPromptTemplate
+from langchain_utils import create_QA_chain, create_qa_tools, create_doc_tools, CustomOutputParser, CustomPromptTemplate
 from langchain.prompts import BaseChatPromptTemplate
 from langchain.agents import Tool, AgentExecutor, LLMSingleActionAgent, AgentOutputParser
 from langchain.schema import AgentAction, AgentFinish, HumanMessage
@@ -42,8 +42,10 @@ class ChatController(object):
 
 
     def __init__(self, advice_file):
-        self.advice = read_txt(advice_file)
+        # self.advice = read_txt(advice_file)
+        self.advice_file = advice_file
         self.llm = OpenAI(temperature=0, model_name="gpt-4", top_p=0.2, presence_penalty=0.4, frequency_penalty=0.2)
+        self.tools = []
         self._create_chat_agent()
 
 
@@ -52,7 +54,9 @@ class ChatController(object):
 
         qa = create_QA_chain(self.llm, embeddings, "chroma" )
 
-        tools = create_qa_tools(qa)
+        self.tools = create_qa_tools(qa)
+
+        self.tools += create_doc_tools(self.advice_file)
 
         # system_msg = "You are a helpful assistant who evaluates a human's resume and provides resume advices."
 
@@ -82,18 +86,18 @@ class ChatController(object):
 
             # Set up the base template
     
-        agent = self.create_custom_llm_agent(tools)
+        agent = self.create_custom_llm_agent()
         
         memory = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", max_token_limit=650, return_messages=True, input_key="question")
 
         self.chat_agent = AgentExecutor.from_agent_and_tools(
-            agent=agent, tools=tools, verbose=True, memory=memory
+            agent=agent, tools=self.tools, verbose=True, memory=memory
         )
 
 
-    def create_custom_llm_agent(self, tools):
+    def create_custom_llm_agent(self):
 
-        system_msg = "You are a helpful assistant who evaluates a human's resume and provides resume advices."
+        system_msg = "You are a helpful, polite, and mindful assistant who evaluates people's resume and provides feedbacks."
 
         template = """Complete the objective as best you can. You have access to the following tools:
 
@@ -110,11 +114,6 @@ class ChatController(object):
             Thought: I now know the final answer
             Final Answer: the final answer to the original input question
 
-            An initial assessment of the resume has been done. The assessment is delimited with {delimiter} characters.
-
-            Use it as a reference when answering questions.
-
-            assessment: {delimiter}{assessment}{delimiter}
 
             Begin!
 
@@ -123,19 +122,20 @@ class ChatController(object):
             Question: {question}
             {agent_scratchpad}"""
 
+
         prompt = CustomPromptTemplate(
             template=template,
-            tools=tools,
+            tools=self.tools,
             system_msg=system_msg,
             # This omits the `agent_scratchpad`, `tools`, and `tool_names` variables because those are generated dynamically
             # This includes the `intermediate_steps` variable because that is needed
-            input_variables=["delimiter", "assessment", "chat_history", "question", "intermediate_steps"],
+            input_variables=["chat_history", "question", "intermediate_steps"],
         )
         output_parser = CustomOutputParser()
         # LLM chain consisting of the LLM and a prompt
         # memory = ConversationBufferMemory(memory_key="chat_history", k=50, return_messages=True, input_key="question" )
         llm_chain = LLMChain(llm=self.llm, prompt=prompt)
-        tool_names = [tool.name for tool in tools]
+        tool_names = [tool.name for tool in self.tools]
 
         agent = LLMSingleActionAgent(
             llm_chain=llm_chain, 
@@ -155,22 +155,22 @@ class ChatController(object):
 
         # create a conversation memory and save it if it not exists 
         # can be changed to/incorporated into a streaming platform such as kafka
-        if not os.path.isfile('conv_memory/'+id+'.pickle'):
-            mem = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", input_key="question",return_messages=True)
-            with open('conv_memory/' + id + '.pickle', 'wb') as handle:
-                pickle.dump(mem, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        else:
-            # load the memory according to the user id
-            with open('conv_memory/'+id+'.pickle', 'rb') as handle:
-                mem = pickle.load(handle)
+        # if not os.path.isfile('conv_memory/'+id+'.pickle'):
+        #     mem = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", input_key="question",return_messages=True)
+        #     with open('conv_memory/' + id + '.pickle', 'wb') as handle:
+        #         pickle.dump(mem, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        # else:
+        #     # load the memory according to the user id
+        #     with open('conv_memory/'+id+'.pickle', 'rb') as handle:
+        #         mem = pickle.load(handle)
 
-        self.chat_agent.memory = mem
+        # self.chat_agent.memory = mem
 
         # for could not parse LLM output
         try:
             # response = self.chat_agent.run(input=prompt)
-            # response = self.chat_agent.run(question, callbacks=callbacks)
-            response = self.chat_agent({"question": question, "delimiter":delimiter, "assessment":self.advice}, callbacks=callbacks)
+            response = self.chat_agent.run(question, callbacks=callbacks)
+            # response = self.chat_agent({"question": question, "delimiter":delimiter, "assessment":self.advice}, callbacks=callbacks)
         except ValueError as e:
             response = str(e)
             if not response.startswith("Could not parse LLM output: `"):
@@ -180,16 +180,16 @@ class ChatController(object):
                 "Could not parse LLM output: `").removesuffix("`")
 
         # save memory after response
-        with open('conv_memory/' + id + '.pickle', 'wb') as handle:
-            pickle.dump(mem, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        # with open('conv_memory/' + id + '.pickle', 'wb') as handle:
+        #     pickle.dump(mem, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-        return {"answer": response}
+        return response
     
 
 
     
 
-def basic_upgrade_resume(my_job_title, read_path = my_resume_file, res_path="advice.txt"):
+def evaluate_resume(my_job_title, read_path = my_resume_file, res_path="advice.txt"):
 
     resume = read_txt(read_path)
     query  = f"""Find out what a {my_job_title} does and the skills and responsibilities involved. """
@@ -270,4 +270,4 @@ def basic_upgrade_resume(my_job_title, read_path = my_resume_file, res_path="adv
 
 
 if __name__ == '__main__':
-    basic_upgrade_resume(my_job_title)
+    evaluate_resume(my_job_title)

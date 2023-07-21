@@ -1,4 +1,6 @@
 import streamlit as st
+from streamlit_chat import message
+from streamlit_extras.add_vertical_space import add_vertical_space
 from pathlib import Path
 import random
 import time
@@ -10,8 +12,13 @@ from langchain.callbacks import StreamlitCallbackHandler
 from upgrade_resume import ChatController
 from callbacks.capturing_callback_handler import playback_callbacks
 from basic_utils import convert_to_txt, check_content_safety, read_txt
-from upgrade_resume import basic_upgrade_resume
+from upgrade_resume import evaluate_resume
 from dotenv import load_dotenv, find_dotenv
+import asyncio
+import concurrent.futures
+import subprocess
+import sys
+from multiprocessing import Process, Queue, Value
 
 
 _ = load_dotenv(find_dotenv()) # read local .env file
@@ -22,127 +29,178 @@ upload_path = "./uploads"
 result_path = "./static"
 
 
-class ResumeAdvisor():
+
+
+class Chat():
 
     def __init__(self):
-        self.advice_file = "./static/advice.txt"
+        self.id = "advice"
+
+
+    # def _initialize_page(self):
+    #     if 'page' not in st.session_state: st.session_state.page = 0
+    # def nextPage(): st.session_state.page += 1
+    # def firstPage(): st.session_state.page = 0
 
 
     def create_chatbot(self):
 
-        # st_callback = StreamlitCallbackHandler(st.container())
-        new_chat = ChatController(self.advice_file)
-        # chat_agent = new_chat.create_chat_agent()
+        with placeholder.container():
 
-        # Initialize chat history
-        if "messages" not in st.session_state:
-            st.session_state.messages = []
+            # st_callback = StreamlitCallbackHandler(st.container())
+            file = os.path.join(result_path, self.id+".txt")
+            new_chat = ChatController(file)
+            # chat_agent = new_chat.create_chat_agent()
 
-
-        # Check if 'key' already exists in session_state
-        # If not, then initialize it
-        # if 'key' not in st.session_state:
-        #     st.session_state['key'] = 'value'
-
-        # Set a default model
-        # if "openai_model" not in st.session_state:
-        #     st.session_state["openai_model"] = "gpt-3.5-turbo"
-
-        st.title("Resume Advisor")
-
-        # expand_new_thoughts = st.sidebar.checkbox(
-        #     "Expand New Thoughts",
-        #     value=True,
-        #     help="True if LLM thoughts should be expanded by default",
-        # )
+            # Initialize chat history
+            # if "messages" not in st.session_state:
+            #     st.session_state.messages = []
 
 
-        # Display chat messages from history on app rerun
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+            # Check if 'key' already exists in session_state
+            # If not, then initialize it
+            if 'key' not in st.session_state:
+                st.session_state['key'] = 'value'
 
-        # Accept user input
-        # if prompt := st.chat_input("What is up?"):
-            # # Add user message to chat history
-            # st.session_state.messages.append({"role": "user", "content": prompt})
-            # # Display user message in chat message container
-            # with st.chat_message("user"):
-            #     st.markdown(prompt)
-            # # Display assistant response in chat message container
-            # with st.chat_message("assistant"):
-            #     message_placeholder = st.empty()
-            #     full_response = ""
-            #     for response in openai.ChatCompletion.create(
-            #         model=st.session_state["openai_model"],
-            #         messages=[{"role": m["role"], "content": m["content"]} for m in st.session_state.messages],
-            #             stream=True,
-            #      ):
-            #         full_response += response.choices[0].delta.get("content", "")
-            #         message_placeholder.markdown(full_response + "▌")
-            #     message_placeholder.markdown(full_response)
-            # st.session_state.messages.append({"role": "assistant", "content": full_response})
+            # Set a default model
+            # if "openai_model" not in st.session_state:
+            #     st.session_state["openai_model"] = "gpt-3.5-turbo"
 
-        # to be replaced with chat memory
-        # SAVED_SESSIONS = {
-        #     "Who is Leo DiCaprio's girlfriend? What is her current age raised to the 0.43 power?": "leo.pickle",
-        #     "What is the full name of the artist who recently released an album called "
-        #     "'The Storm Before the Calm' and are they in the FooBar database? If so, what albums of theirs "
-        #     "are in the FooBar database?": "alanis.pickle",
-        # }
-        SAMPLE_QUESTIONS = {
-            "What are some basic steps I can take to improve my resume?": "basic_tips.pickle",
-            "What are some things I could be doing terribly wrong with my resume?": "bad_resume.pickle",
-        }
+            # st.title("Career Advisor")
 
-        key = "input"
-        shadow_key = "_input"
+            # expand_new_thoughts = st.sidebar.checkbox(
+            #     "Expand New Thoughts",
+            #     value=True,
+            #     help="True if LLM thoughts should be expanded by default",
+            # )
 
 
-        if key in st.session_state and shadow_key not in st.session_state:
-            st.session_state[shadow_key] = st.session_state[key]
+            # Display chat messages from history on app rerun
+            # for message in st.session_state.messages:
+            #     with st.chat_message(message["role"]):
+            #         st.markdown(message["content"])
 
-        with st.form(key="my_chatbot"):
-            prefilled = st.selectbox("Sample questions", sorted(SAMPLE_QUESTIONS.keys())) or ""
-            question = st.text_input("Or, ask your own question", key=shadow_key)
-            st.session_state[key] = question
-            if not question:
+            # Accept user input
+            # if prompt := st.chat_input("What is up?"):
+                # # Add user message to chat history
+                # st.session_state.messages.append({"role": "user", "content": prompt})
+                # # Display user message in chat message container
+                # with st.chat_message("user"):
+                #     st.markdown(prompt)
+                # # Display assistant response in chat message container
+                # with st.chat_message("assistant"):
+                #     message_placeholder = st.empty()
+                #     full_response = ""
+                #     for response in openai.ChatCompletion.create(
+                #         model=st.session_state["openai_model"],
+                #         messages=[{"role": m["role"], "content": m["content"]} for m in st.session_state.messages],
+                #             stream=True,
+                #      ):
+                #         full_response += response.choices[0].delta.get("content", "")
+                #         message_placeholder.markdown(full_response + "▌")
+                #     message_placeholder.markdown(full_response)
+                # st.session_state.messages.append({"role": "assistant", "content": full_response})
+
+            SAMPLE_QUESTIONS = {
+                "What are some general advices for writing an outstanding resume?": "general_advices.pickle",
+                "What are some things I could be doing terribly wrong with my resume?": "bad_resume.pickle",
+                "Can you help me write a cover letter?": "test123.pickle"
+            }
+
+            # key = "input"
+            # shadow_key = "_input"
+            key = self.id
+            shadow_key = f"_{self.id}"
+
+
+            if key in st.session_state and shadow_key not in st.session_state:
+                st.session_state[shadow_key] = st.session_state[key]
+
+
+            with st.sidebar:
+                st.title('Career Chat 🧸')
+                # st.markdown('''
+                # ## About
+                # This app is an LLM-powered chatbot built using:
+                # - [Streamlit](<https://streamlit.io/>)
+                # - [HugChat](<https://github.com/Soulter/hugging-chat-api>)
+                # - [OpenAssistant/oasst-sft-6-llama-30b-xor](<https://huggingface.co/OpenAssistant/oasst-sft-6-llama-30b-xor>) LLM model
+                
+                # 💡 Note: No API key required!
+                # ''')
+                add_vertical_space(5)
+                # st.write('Made with ❤️ (<https://youtube.com/dataprofessor>)')
+
+                with st.form(key="question_selector"):
+                    prefilled = st.selectbox("General questions", sorted(SAMPLE_QUESTIONS.keys())) or ""
+                    # question = st.text_input("Or, ask your own question", key=shadow_key)
+                    # st.session_state[key] = question
+                    # if not question:
+                        # question = prefilled
+                    submit_clicked = st.form_submit_button("Submit Question")
+
+            # Generate empty lists for generated and past.
+            ## past stores User's questions
+            if 'questions' not in st.session_state:
+                st.session_state['questions'] = [""]
+            ## generated stores AI generated responses
+            if 'responses' not in st.session_state:
+                advice = read_txt(file)
+                st.session_state['responses'] = [f"I'm your career advisor. Here's my initial analysis of your resume:{advice}.\n\n Feel free to ask me more about my analysis or other questions that you have. "]
+
+            # question_container = st.empty()
+            # results_container = st.empty()
+            question_container = st.container()
+            results_container = st.container()
+
+
+            # User input
+            ## Function for taking user provided prompt as input
+            def get_text():
+                input_text = st.text_input("Ask a specific question: ", "", key="input")
+                return input_text
+            ## Applying the user input box
+            with question_container:
+                user_input = get_text()
+
+            # A hack to "clear" the previous result when submitting a new prompt.
+            # from clear_results import with_clear_container
+
+            if submit_clicked:
+                res = results_container.container()
+                streamlit_handler = StreamlitCallbackHandler(
+                    parent_container=res,
+                )
                 question = prefilled
-            submit_clicked = st.form_submit_button("Submit Question")
-
-
-        question_container = st.empty()
-        results_container = st.empty()
-
-        # A hack to "clear" the previous result when submitting a new prompt.
-        from clear_results import with_clear_container
-
-        if with_clear_container(submit_clicked):
-            # Create our StreamlitCallbackHandler
-            res = results_container.container()
-            streamlit_handler = StreamlitCallbackHandler(
-                parent_container=res,
-                # max_thought_containers=int(max_thought_containers),
-                # expand_new_thoughts=expand_new_thoughts,
-                # collapse_completed_thoughts=collapse_completed_thoughts,
-            )
-
-            question_container.write(f"**Question:** {question}")
-
-            # If we've saved this question, play it back instead of actually running LangChain
-            # (so that we don't exhaust our API calls unnecessarily)
-            if question in SAMPLE_QUESTIONS:
                 session_name = SAMPLE_QUESTIONS[question]
-                session_path = Path(__file__).parent / "runs" / session_name
+                session_path = Path(__file__).parent / "conv_memory" / session_name
                 print(f"Playing saved session: {session_path}")
-                answer = playback_callbacks(
+                response = playback_callbacks(
                     [streamlit_handler], str(session_path), max_pause_time=3
                 )
-                res.write(f"**Answer:** {answer}")
-            else:
+                st.session_state.questions.append(question)
+                st.session_state.responses.append(response)
+
+            if user_input:
+                res = results_container.container()
+                streamlit_handler = StreamlitCallbackHandler(
+                    parent_container=res,
+                    # max_thought_containers=int(max_thought_containers),
+                    # expand_new_thoughts=expand_new_thoughts,
+                    # collapse_completed_thoughts=collapse_completed_thoughts,
+                )
+                question = user_input
                 # answer = chat_agent.run(mrkl_input, callbacks=[streamlit_handler])
-                answer = new_chat.askAI("1234", question, callbacks=[streamlit_handler])
-                res.write(f"**Answer:** {answer}")
+                response = new_chat.askAI("1234", question, callbacks=[streamlit_handler])
+                st.session_state.questions.append(question)
+                st.session_state.responses.append(response)
+
+            if st.session_state['responses']:
+                for i in range(len(st.session_state['responses'])):
+                    message(st.session_state['questions'][i], is_user=True, key=str(i) + '_user')
+                    message(st.session_state['responses'][i], key=str(i))
+                
+
 
 
 
@@ -158,8 +216,10 @@ class ResumeAdvisor():
                     key="job",
                 )
 
-                if text_input:
-                    st.write("Thanks for letting me know!")
+
+
+                # if text_input:
+                #     st.write("Thanks for letting me know!")
 
             # with col2:
             #     st.text_input(
@@ -177,36 +237,67 @@ class ResumeAdvisor():
 
                 submit_button = st.form_submit_button(label='Send to resume advisor')
                 if submit_button:
-                    show_progress()
-                    file_ext = Path(uploaded_file.name).suffix
-                    file_id = str(uuid.uuid4())
-                    filename = file_id+file_ext
-                    # uploaded_file.name = filename
-                    save_path = os.path.join(upload_path, filename)
-                    with open(save_path, 'wb') as f:
-                        f.write(uploaded_file.getvalue())
-                    read_path =  os.path.join(upload_path, Path(filename).stem+'.txt')
-                    convert_to_txt(save_path, read_path)
-                    if (Path(read_path).exists()):
-                        # Check for content safety
-                        if (check_content_safety(file=read_path)):
-                            res_path = os.path.join(result_path, os.path.basename(read_path))
-                            self.advice_file = res_path
-                            basic_upgrade_resume(text_input, read_path = read_path, res_path = res_path)
+                    # loop = asyncio.get_running_loop()
+                    # 3. Run in a custom process pool:
+                    # with concurrent.futures.ProcessPoolExecutor() as pool:
+                    #     result = await loop.run_in_executor(pool, self.assess(uploaded_file, text_input))
+                    #     print('custom process pool', result)
+                    # queue = Queue()
+                    self.id = str(uuid.uuid4())
+                    p = Process(target=self.assess, args=(uploaded_file, text_input,))
+                    p.start()
+                    # subprocess.run([f"{sys.executable}", "assess.py"])
+                    self.show_progress()
+                    p.join() # this blocks until the process terminates
+                    # result = queue.get()
+                    # print(result)
+                        
 
 
-def show_progress():
-    progress_text = "Your resume advisor is on its way."
-    my_bar = st.progress(0, text=progress_text)
-    # to do replaced with real background progress
-    for percent_complete in range(100):
-        time.sleep(0.1)
-        my_bar.progress(percent_complete + 1, text=progress_text)
+    def assess(self, uploaded_file, text_input,):
+        file_ext = Path(uploaded_file.name).suffix
+        filename = self.id+file_ext
+        # uploaded_file.name = filename
+        save_path = os.path.join(upload_path, filename)
+        with open(save_path, 'wb') as f:
+            f.write(uploaded_file.getvalue())
+        read_path =  os.path.join(upload_path, Path(filename).stem+'.txt')
+        convert_to_txt(save_path, read_path)
+        if (Path(read_path).exists()):
+            # Check for content safety
+            if (check_content_safety(file=read_path)):
+                res_path = os.path.join(result_path, os.path.basename(read_path))
+                evaluate_resume(text_input, read_path = read_path, res_path = res_path)
+
+    def show_progress(self):
+
+        with placeholder.container():
+
+            progress_text = "Your career advisor is on its way."
+            my_bar = st.progress(0, text=progress_text)
+            # to do replaced with real background progress
+            for percent_complete in range(100):
+                time.sleep(1)
+                my_bar.progress(percent_complete + 1, text=progress_text)
+                if Path(os.path.join(result_path, self.id+".txt")).is_file():
+                    self.create_chatbot()
+
+            # st.spinner('Your assistant is on its way...')
+            # timer=60
+            # while timer>0:
+            #     if Path(self.advice_file).is_file():
+            #         st.success('Done!')
+            #         self.create_chatbot()
+            #     timer-=1
+
+
+    
 
 
 
 if __name__ == '__main__':
     # create_chatbot()
-    advisor = ResumeAdvisor()
-    # advisor.initialize()
-    advisor.create_chatbot()
+    advisor = Chat()
+    # asyncio.run(advisor.initialize())
+    advisor.initialize()
+    # advisor.create_chatbot()
