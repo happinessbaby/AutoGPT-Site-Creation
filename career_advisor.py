@@ -1,5 +1,6 @@
 
 import os
+from pathlib import Path
 from openai_api import evaluate_response
 from langchain.chat_models import ChatOpenAI
 from langchain.llms import OpenAI
@@ -23,13 +24,14 @@ import pickle
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
 
+advice_path = "./static/advice"
+
 
 class ChatController(object):
 
 
-    def __init__(self, advice_file=None):
-        # self.advice = read_txt(advice_file)
-        self.advice_file = advice_file
+    def __init__(self, userid):
+        self.userid = userid
         self.llm = OpenAI(temperature=0, model_name="gpt-4", top_p=0.2, presence_penalty=0.4, frequency_penalty=0.2)
         self.embeddings = OpenAIEmbeddings()
         self.tools = []
@@ -43,9 +45,11 @@ class ChatController(object):
 
         self.tools = create_qa_tools(qa)
 
-        if (self.advice_file!=None):
+        advice_file = os.path.join(advice_path, self.userid+".txt")
 
-            self.tools += create_doc_tools(self.advice_file)
+        if (Path(advice_file).is_file()):
+
+            self.tools += create_doc_tools(advice_file)
 
         # self.tools += create_process_tools("generate_cover_letter.py")
 
@@ -138,7 +142,7 @@ class ChatController(object):
         return agent
 
 
-    def askAI(self, id, question, callbacks=None):
+    def askAI(self, userid, question, callbacks=None):
         # try:
         #     objId = ObjectId(id)
         # except:
