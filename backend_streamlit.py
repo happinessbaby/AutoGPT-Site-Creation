@@ -57,7 +57,7 @@ class Chat():
                 st.session_state["userid"] = str(uuid.uuid4())
                 print(st.session_state.userid)
 
-            new_chat = ChatController()
+            new_chat = ChatController(st.session_state.userid)
 
 
             # chat_agent = new_chat.create_chat_agent()
@@ -190,7 +190,7 @@ class Chat():
                         # st.write(stringio)
 
                     submit_button = st.form_submit_button(label='Submit')
-                    from clear_results import with_clear_container
+
                     if submit_button and uploaded_file is not None and job is not None:
                         if "job" not in st.session_state:
                             st.session_state["job"] = job
@@ -243,7 +243,7 @@ class Chat():
                             else:
                                 print(st.session_state.job)
                                 print(st.session_state.userid)
-                                response = "Sure! Just uploade your resume and I'll give help you with it. "
+                                response = "Sure! Just uploade your resume and I'll help you with it. "
                         else: 
                             session_path = Path(__file__).parent / "general_questions" / session_name
                             print(f"Playing saved session: {session_path}")

@@ -24,11 +24,8 @@
 
 [Refer to document for more detail](./designs/concepts.odt)
 
-All features will be connected to a chatbot, so there will be only two main interfaces. Page 1 is the entry point and page 2 is the chatbot.
-![page 1](./designs/page1.png)
-page 1
-![page 2](./designs/page2.png)
-page 2
+All features will be connected to a chatbot UI.
+![page](./designs/page.png)
 
 everything is still a work in progress
 
