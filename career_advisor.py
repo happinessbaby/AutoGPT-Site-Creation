@@ -23,17 +23,15 @@ import pickle
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
 
-llm = ChatOpenAI(temperature=0.0)
-# llm = OpenAI(temperature=0, top_p=0.2, presence_penalty=0.4, frequency_penalty=0.2)
-embeddings = OpenAIEmbeddings()
 
 class ChatController(object):
 
 
-    def __init__(self, advice_file):
+    def __init__(self, advice_file=None):
         # self.advice = read_txt(advice_file)
         self.advice_file = advice_file
         self.llm = OpenAI(temperature=0, model_name="gpt-4", top_p=0.2, presence_penalty=0.4, frequency_penalty=0.2)
+        self.embeddings = OpenAIEmbeddings()
         self.tools = []
         self._create_chat_agent()
 
@@ -41,11 +39,13 @@ class ChatController(object):
     def _create_chat_agent(self):
 
 
-        qa = create_QA_chain(self.llm, embeddings, "chroma" )
+        qa = create_QA_chain(self.llm, self.embeddings, "chroma" )
 
         self.tools = create_qa_tools(qa)
 
-        self.tools += create_doc_tools(self.advice_file)
+        if (self.advice_file!=None):
+
+            self.tools += create_doc_tools(self.advice_file)
 
         # self.tools += create_process_tools("generate_cover_letter.py")
 
@@ -88,7 +88,7 @@ class ChatController(object):
 
     def create_custom_llm_agent(self):
 
-        system_msg = "You are a helpful, polite, and mindful assistant who evaluates people's resume and provides feedbacks."
+        system_msg = "You are a helpful, polite assistant who evaluates people's resume and provides feedbacks."
 
         template = """Complete the objective as best you can. You have access to the following tools:
 

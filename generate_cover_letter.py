@@ -25,13 +25,12 @@ delimiter3 = '---'
 delimiter4 = '////'
 
 # test run defaults, change for yours
-my_job_title = 'software developer'
-my_company_name = 'DoAI'
-my_resume_file = 'resume_samples/resume2023v2.txt'
+my_job_title = 'accountant'
+my_resume_file = 'resume_samples/sample1.txt'
 
 
 
-def generate_basic_cover_letter(my_company_name, my_job_title, read_path=my_resume_file, save_path= "cover_letter.txt"):
+def generate_basic_cover_letter(my_job_title, company="abc", read_path=my_resume_file, save_path= "./static/cover_letter.txt"):
     
     resume_content = read_txt(read_path)
     # Get personal information from resume
@@ -147,7 +146,7 @@ def generate_basic_cover_letter(my_company_name, my_job_title, read_path=my_resu
                     email = personal_info_dict.get('email'),
                     phone = personal_info_dict.get('phone'),
                     date = date.today(),
-                    company = my_company_name,
+                    company = company,
                     job = my_job_title,
                     content=resume_content,
                     advices = advices,
@@ -167,7 +166,6 @@ def generate_basic_cover_letter(my_company_name, my_job_title, read_path=my_resu
     # Check potential harmful content in response
     if (check_content_safety(text_str=my_cover_letter)):   
         # Validate cover letter
-        # QUALITY CHECKING CAN BE FURTHER EXPANDED, COULD ALSO SET UP SOME METRICS
         if (evaluate_response(my_cover_letter)):
             # Write the cover letter to a file
             with open(save_path, 'w') as f:
@@ -178,11 +176,12 @@ def generate_basic_cover_letter(my_company_name, my_job_title, read_path=my_resu
                 except Exception as e:
                     print("FAILED")
                     # Error logging
+    
         
 
 # Call the function to generate the cover letter
  
 if __name__ == '__main__':
-    generate_basic_cover_letter(my_company_name, my_job_title)
+    generate_basic_cover_letter(my_job_title)
 
 

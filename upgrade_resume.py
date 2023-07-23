@@ -23,12 +23,12 @@ delimiter2 = "////"
 delimiter3 = "<<<<"
 delimiter4 = "****"
 
-my_job_title = 'AI developer'
-my_resume_file = 'resume_samples/resume2023v2.txt'
+my_job_title = 'accountant'
+my_resume_file = 'resume_samples/sample1.txt'
 
 
     
-def evaluate_resume(my_job_title, read_path = my_resume_file, res_path="advice.txt"):
+def evaluate_resume(my_job_title, read_path = my_resume_file, res_path="./static/advice.txt"):
 
     resume = read_txt(read_path)
     query  = f"""Find out what a {my_job_title} does and the skills and responsibilities involved. """

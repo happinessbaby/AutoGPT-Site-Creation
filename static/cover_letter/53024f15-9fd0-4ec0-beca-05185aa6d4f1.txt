@@ -1,0 +1,56 @@
+Step 1: The following information is useful to generate the cover letter as it aligns with the job description of an accountant:
+- Summary of Qualifications
+- Education
+- Professional Accomplishments
+- Work History
+- Professional Affiliation
+- Computer Skills
+
+Step 2: From the example cover letters, the following information is useful to generate the cover letter:
+- Contact Information
+- Opening Statement
+- Relevant Skills and Experience
+- Interest in the Company and Position
+- Closing Statement
+
+Step 3: A good cover letter should include a specific addressee, a strong opening statement, concise content, customization to the job, and personalization.
+
+Step 4: 
+- Name: -1
+- Email: imasample1@xxx.com
+- Phone Number: (402) 292-2345
+- Today's Date: 2023-07-22
+- Company: ABC
+- Job Position: Accountant
+
+Step 5:
+####
+1234 North 55 Street
+Bellevue, Nebraska 68005
+(402) 292-2345
+imasample1@xxx.com
+
+July 22, 2023
+
+ABC Company
+123 Main Street
+Bellevue, Nebraska 68000
+
+Dear Hiring Manager,
+
+I am writing to apply for the Accountant position at ABC Company. With over six years of experience in accounting and financial management, along with a solid academic background, I am confident in my ability to contribute to your organization's success.
+
+As outlined in my attached resume, I have a Bachelor of Science degree in Accounting, which I am currently pursuing at Bellevue University. My coursework has provided me with a strong foundation in financial management and analytical skills. I have a proven track record of handling multiple projects and producing high-quality work in fast-paced, deadline-oriented environments.
+
+During my previous roles, I have successfully developed and maintained accounting records for multiple bank accounts, prepared financial statements, and generated payroll reports. I have also been involved in comprehensive audits of financial operations and have experience in formulating budgets and implementing depreciation/amortization schedules. Additionally, I have converted manual accounting systems to computerized systems and have successfully reprogrammed software to meet specific requirements.
+
+I am a member of the IMA Bellevue University Student Chapter, which has allowed me to stay updated on the latest industry trends and network with professionals in the field. My computer skills include proficiency in MS Office, QuickBooks, and basic knowledge of MS Access, SQL, Visual Basic, and C++.
+
+I am impressed by ABC Company's reputation for excellence and would be honored to contribute to your team. Your emphasis on accuracy, compliance, and various accounting functions aligns perfectly with my skills and experience. I am confident that my attention to detail, problem-solving abilities, and dedication to producing accurate financial records would make me a valuable asset to your organization.
+
+Thank you for considering my application. I would welcome the opportunity to discuss how my qualifications align with the Accountant position at ABC Company in more detail. I can be reached at (402) 292-2345 or imasample1@xxx.com. I look forward to the possibility of contributing to your team and helping ABC Company achieve its financial goals.
+
+Sincerely,
+
+[Your Name]
+####
