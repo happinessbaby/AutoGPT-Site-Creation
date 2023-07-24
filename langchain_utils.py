@@ -1,5 +1,5 @@
 from langchain.agents.react.base import DocstoreExplorer
-from langchain.document_loaders import TextLoader
+from langchain.document_loaders import TextLoader, DirectoryLoader
 from langchain.docstore.wikipedia import Wikipedia
 from langchain.vectorstores import DocArrayInMemorySearch
 from langchain.indexes import VectorstoreIndexCreator
@@ -21,15 +21,29 @@ from langchain import LLMChain
 from langchain.chains.summarize import load_summarize_chain
 from langchain.vectorstores import Chroma
 from langchain import PromptTemplate
-from langchain.chains import RetrievalQA
+from langchain.chains import RetrievalQA, RetrievalQAWithSourcesChain
 from langchain.memory import ConversationBufferMemory
+from langchain.chains.qa_with_sources import load_qa_with_sources_chain
 import subprocess
 import sys
+import os
 from feast import FeatureStore
+from langchain.text_splitter import CharacterTextSplitter
+from langchain.vectorstores.redis import Redis
+from langchain.embeddings import OpenAIEmbeddings
 
 
 # You may need to update the path depending on where you stored it
 feast_repo_path = "."
+redis_password=os.getenv('REDIS_PASSWORD')
+
+def split_doc():
+    loader = DirectoryLoader("./web_data/", glob="*.txt")
+    documents = loader.load()
+    text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
+    docs = text_splitter.split_documents(documents)
+    return docs
+
 
 def get_index(file):
     loader = TextLoader(file, encoding='utf8')
@@ -56,13 +70,13 @@ def create_wiki_tools():
     return tools
 
 def create_qa_tools(qa_chain):
-    # _index = get_index(document)
     tools = [
         Tool(
             name="QA Document",
-            # func=lambda q: str(_index.query(q)),
-            func = qa_chain.run,
-            description="Useful for answering questions found in documents",
+            # func = qa_chain.run,
+            func = qa_chain.__call__,
+            coroutine=qa_chain.acall, #if you want to use async
+            description="Useful for answering general questions",
             return_direct=True,
         ),
     ]
@@ -74,7 +88,7 @@ def create_doc_tools(doc):
         Tool(
         name = f"{doc} Document",
         func = lambda q: str(index.query(q)),
-        description="Useful for giving personalized answers",
+        description="Useful for answering personalized questions",
         return_direct=True,
         )
     ]
@@ -122,21 +136,13 @@ def create_db_tools(db_chain, name):
 #     ]
 #     return tool
 
+def create_QA_chain(chat, embeddings, docs, chain_type="stuff"):
 
-
-def create_QA_chain(chat, embeddings, db_type, docs=None, chain_type="stuff"):
-    if (db_type=="chroma"):
-        persist_directory = 'myvectordb'
-        vectorstore = Chroma(persist_directory=persist_directory, embedding_function = embeddings)
-    elif (db_type=="inmemory"):
-        vectorstore = DocArrayInMemorySearch.from_documents(
+    db = DocArrayInMemorySearch.from_documents(
         docs, 
         embeddings
-    )
-    elif (db_type == "feast"):
-        vectorstore = FeatureStore(repo_path=feast_repo_path)
+        )
 
-        
     prompt_template = """If the context is not relevant, 
     please answer the question by using your own knowledge about the topic
     
@@ -153,11 +159,40 @@ def create_QA_chain(chat, embeddings, db_type, docs=None, chain_type="stuff"):
 
     qa = RetrievalQA.from_chain_type(
         llm=chat, 
-        chain_type=chain_type, 
-        retriever=vectorstore.as_retriever(), 
+        chain_type=chain_type,
+        # can also pass in a "search_type" to as_retriever() 
+        retriever=db.as_retriever(), 
         verbose=True, 
         chain_type_kwargs=chain_type_kwargs,
     )
+
+    return qa
+
+
+
+def create_QASource_chain(chat, embeddings, db_type, docs=None, chain_type="stuff"):
+    if (db_type=="chroma"):
+        persist_directory = 'myvectordb'
+        vectorstore = Chroma(persist_directory=persist_directory, embedding_function = embeddings)
+    # elif (db_type=="inmemory"):
+    #     vectorstore = DocArrayInMemorySearch.from_documents(
+    #     docs, 
+    #     embeddings
+    #     )
+    elif (db_type == "feast"):
+        vectorstore = FeatureStore(repo_path=feast_repo_path)
+
+    elif (db_type == "redis"):
+        # Load from existing index
+        vectorstore = Redis.from_existing_index(
+            embeddings, redis_url=f"redis://:{redis_password}@localhost:6379", index_name="redis_index"
+        )
+
+    qa_chain= load_qa_with_sources_chain(chat, chain_type=chain_type) 
+
+    qa = RetrievalQAWithSourcesChain(combine_documents_chain=qa_chain, retriever=vectorstore.as_retriever(),
+                                     reduce_k_below_max_tokens=True, max_tokens_limit=3375,
+                                     return_source_documents=True)
 
     return qa
 
@@ -200,6 +235,25 @@ def create_python_agent(llm):
     )
     return agent
 
+def create_redis_index(docs, embeddings = OpenAIEmbeddings(), source="", index_name="redis_index"):
+    texts = [d.page_content for d in docs]
+    # metadatas = [d.metadata for d in docs]
+    metadatas=[{"source": str(i)} for i in range(len(texts))]
+
+    rds, keys = Redis.from_texts_return_keys(
+        texts, embeddings, metadatas = metadatas, redis_url=f"redis://:{redis_password}@localhost:6379", index_name=index_name
+    )
+    return rds, keys
+
+def add_redis_index(docs, embeddings = OpenAIEmbeddings(), source='', index_name="redis_index"):
+    rds = Redis.from_existing_index(
+            embeddings, redis_url=f"redis://:{redis_password}@localhost:6379", index_name=index_name
+        )
+    metadatas =  [{"source":source}]
+    rds.add_texts(docs, metadatas=metadatas)
+
+def delete_redis_keys(keys):
+    Redis.delete(keys, redis_url=f"redis://:{redis_password}@localhost:6379")
 
 
 def get_summary(llm, docs):

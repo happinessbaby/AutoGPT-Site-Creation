@@ -8,7 +8,7 @@ from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
 from langchain import PromptTemplate
 from langchain.agents import ConversationalChatAgent, Tool, AgentExecutor
-from langchain_utils import create_QA_chain, create_qa_tools, create_doc_tools, CustomOutputParser, CustomPromptTemplate
+from langchain_utils import create_QA_chain, create_QASource_chain, create_qa_tools, create_doc_tools, create_search_tools, CustomOutputParser, CustomPromptTemplate
 from langchain.prompts import BaseChatPromptTemplate
 from langchain.agents import Tool, AgentExecutor, LLMSingleActionAgent, AgentOutputParser
 from langchain.schema import AgentAction, AgentFinish, HumanMessage
@@ -16,6 +16,8 @@ from typing import List, Union
 import re
 from langchain import LLMChain
 from langchain.memory import ConversationSummaryBufferMemory
+from langchain.agents import initialize_agent
+from langchain.agents import AgentType
 # from feast import FeatureStore
 import pickle
 # from fastapi import HTTPException
@@ -41,17 +43,22 @@ class ChatController(object):
     def _create_chat_agent(self):
 
 
-        qa = create_QA_chain(self.llm, self.embeddings, "chroma" )
+        qa = create_QASource_chain(self.llm, self.embeddings, "redis" )
 
+        # vector store tool
         self.tools = create_qa_tools(qa)
 
         advice_file = os.path.join(advice_path, self.userid+".txt")
 
+        # self-referencing tool
         if (Path(advice_file).is_file()):
 
             self.tools += create_doc_tools(advice_file)
 
-        # self.tools += create_process_tools("generate_cover_letter.py")
+        # web tool
+        # self.tools += create_search_tools("google", 10)
+
+        # OPTION 1: agent=ConversationalChatAgent.from_llm_and_tools
 
         # system_msg = "You are a helpful assistant who evaluates a human's resume and provides resume advices."
 
@@ -66,12 +73,10 @@ class ChatController(object):
         # """
         # suffix = """Begin!"
 
-        # {chat_history}
         # Question: {input}
         # {agent_scratchpad}"""
 
-        # # This probably can be changed to Custom Agent class
-        # agent = ConversationalChatAgent.from_llm_and_tools(
+        # self.chat_agent = ConversationalChatAgent.from_llm_and_tools(
         #     llm=self.llm,
         #     tools=tools,
         #     system_message=system_msg,
@@ -80,11 +85,16 @@ class ChatController(object):
         # )
 
             # Set up the base template
+
     
         agent = self.create_custom_llm_agent()
         
         memory = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", max_token_limit=650, return_messages=True, input_key="question")
 
+        # OPTION 2: agent = initialize_agent(agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION)
+        # self.chat_agent  = initialize_agent(self.tools, self.llm, agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION, verbose=True, memory=memory)
+
+        # OPTION 3: agent = LLMSingleActionAgent
         self.chat_agent = AgentExecutor.from_agent_and_tools(
             agent=agent, tools=self.tools, verbose=True, memory=memory
         )
