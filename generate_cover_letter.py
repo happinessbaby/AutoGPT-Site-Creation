@@ -30,7 +30,7 @@ my_resume_file = 'resume_samples/sample1.txt'
 
 
 
-def generate_basic_cover_letter(my_job_title, company="abc", read_path=my_resume_file, res_path= "./static/cover_letter.txt"):
+def generate_basic_cover_letter(my_job_title, company="abc", read_path=my_resume_file, res_path= "./static/cover_letter/cover_letter.txt"):
     
     resume_content = read_txt(read_path)
     # Get personal information from resume

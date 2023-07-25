@@ -6,7 +6,7 @@ from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
 from langchain import PromptTemplate
 from basic_utils import read_txt, check_content_safety
-from common_utils import fetch_samples, get_web_resources
+from common_utils import fetch_samples, get_web_resources, retrieve_from_vectorstore
 from samples import resume_samples_dict
 
 
@@ -29,12 +29,13 @@ my_resume_file = 'resume_samples/sample1.txt'
 
 
     
-def evaluate_resume(my_job_title, read_path = my_resume_file, res_path="./static/advice.txt"):
+def evaluate_resume(my_job_title, read_path = my_resume_file, res_path="./static/advice/advice.txt"):
 
     resume = read_txt(read_path)
     query  = f"""Find out what a {my_job_title} does and the skills and responsibilities involved. """
     job_description = get_web_resources(llm, query)
-    resume_advices = get_web_resources(llm, "what makes a bad resume and how to improve")
+    # resume_advices = get_web_resources(llm, "what makes a bad resume and how to improve")
+    resume_advices = retrieve_from_vectorstore(llm, embeddings, "what makes a bad resume and how to improve")
     resume_samples = fetch_samples(llm, embeddings, my_job_title, resume_samples_dict)
 
     template_string = """" Your task is to analyze the weaknesses of a resume and ways to improve it. 
@@ -61,7 +62,7 @@ def evaluate_resume(my_job_title, read_path = my_resume_file, res_path="./static
 
         sample: {delimiter2}{samples}{delimiter2}
 
-    Step 3: An resume advisor has also given some advices on what makes a bad resume and how to write good resume. The advises are delimited with {delimiter3} characters.
+    Step 4: An resume advisor has also given some advices on what makes a bad resume and how to write good resume. The advises are delimited with {delimiter3} characters.
     
         Uses these advices to generate a list of suggestions for fields and content in previous steps. 
 
@@ -74,6 +75,7 @@ def evaluate_resume(my_job_title, read_path = my_resume_file, res_path="./static
         Step 1:{delimiter} <step 1 reasoning>
         Step 2:{delimiter} <step 2 reasoning>
         Step 3:{delimiter} <step 3 reasoning>
+        step 4:{delimiter} <step 4 reasoning>
 
 
       Make sure to include {delimiter} to separate every step.

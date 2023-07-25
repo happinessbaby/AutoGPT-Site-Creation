@@ -158,13 +158,16 @@ def create_db_tools(db_chain, name):
 #     ]
 #     return tool
 
-def create_QA_chain(chat, embeddings, docs, chain_type="stuff"):
-
-    db = DocArrayInMemorySearch.from_documents(
-        docs, 
-        embeddings
+def create_QA_chain(chat, embeddings, docs=None, chain_type="stuff", db_type = "docarray", index_name="redis_index"):
+    if (db_type=="docarray"):
+        db = DocArrayInMemorySearch.from_documents(
+            docs, 
+            embeddings
+            )
+    elif (db_type == "redis"):
+        db = Redis.from_existing_index(
+            embeddings, redis_url=redis_url, index_name=index_name
         )
-
     prompt_template = """If the context is not relevant, 
     please answer the question by using your own knowledge about the topic
     
