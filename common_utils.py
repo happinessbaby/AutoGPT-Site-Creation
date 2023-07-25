@@ -14,7 +14,7 @@ from langchain.agents import AgentType
 from langchain.chains import RetrievalQA
 from pathlib import Path
 from basic_utils import check_content_safety, read_txt, retrieve_web_content
-from langchain_utils import create_wiki_tools, create_search_tools, create_QA_chain, split_doc, create_redis_index, add_redis_index
+from langchain_utils import create_wiki_tools, create_search_tools, create_QA_chain, create_qa_tools, split_doc, create_redis_index, add_redis_index
 from langchain import PromptTemplate
 import sys
 
@@ -96,7 +96,7 @@ def find_similar_jobs(llm, embeddings, job_title):
     loader = CSVLoader(file_path="jobs.csv")
     docs = loader.load()
 
-    qa_stuff = create_QA_chain(llm, embeddings, docs, chain_type="stuff")
+    qa_stuff = create_QA_chain(llm, embeddings, docs=docs, db_type = "docarray")
 
     query = f"""List all the jobs related to or the same as {job_title} in a markdown table.
     
@@ -123,14 +123,8 @@ def get_web_resources(llm, query, top=10):
         handle_parsing_errors=True,
         verbose = True,
         )
-    agent_executor = AgentExecutor.from_agent_and_tools(
-        agent=agent.agent,
-        tools = tools,
-        verbose = True,
-    )
-    # agent_executor = create_custom_llm_agent(llm, tools)
     try:
-        response = agent_executor.run(query)
+        response = agent.run(query)
         return response
     except ValueError as e:
         response = str(e)
@@ -140,6 +134,30 @@ def get_web_resources(llm, query, top=10):
         response = response.removeprefix(
             "Could not parse LLM output: `").removesuffix("`")
         return response
+    
+
+def retrieve_from_vectorstore(llm, embeddings, query):
+    qa_stuff = create_QA_chain(llm, embeddings, db_type="redis")
+    # Option 1: qa tool + react 
+    # Option 1 seems to give better advices 
+    tools = create_qa_tools(qa_stuff)
+    agent = initialize_agent(tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=True)
+    try:
+        response = agent.run(query)
+        return response
+    except ValueError as e:
+        response = str(e)
+        if not response.startswith("Could not parse LLM output: `"):
+            print(e)
+            raise e
+        response = response.removeprefix(
+            "Could not parse LLM output: `").removesuffix("`")
+        return response
+    response = agent.run(query)
+    # Option 2
+    # response = qa_stuff.run(query)
+
+
     
 
 
