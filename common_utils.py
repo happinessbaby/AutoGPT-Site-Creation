@@ -143,18 +143,6 @@ def get_web_resources(llm, query, top=10):
     
 
 
-def build_vectorstore():
-    link = 'https://www.themuse.com/advice/43-resume-tips-that-will-help-you-get-hired'
-    retrieve_web_content(link)
-    docs = split_doc()
-    rds, keys = create_redis_index(docs, source=link)
-    # add_redis_index(docs, source=link)
-
-
-
-
-if __name__ == '__main__':
-    build_vectorstore()
 
 
 

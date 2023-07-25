@@ -114,9 +114,9 @@ def retrieve_web_content(link):
 
     content = soup.get_text()
 
-    
+
     if content:
-        with open('content.txt', 'w') as file:
+        with open('./web_data/content.txt', 'w') as file:
             file.write(content)
             file.close()
             print('Content retrieved and written to file.')

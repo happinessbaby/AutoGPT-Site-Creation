@@ -21,9 +21,9 @@ from langchain import LLMChain
 from langchain.chains.summarize import load_summarize_chain
 from langchain.vectorstores import Chroma
 from langchain import PromptTemplate
-from langchain.chains import RetrievalQA, RetrievalQAWithSourcesChain
+from langchain.chains import RetrievalQA, RetrievalQAWithSourcesChain, TransformChain
 from langchain.memory import ConversationBufferMemory
-from langchain.chains.qa_with_sources import load_qa_with_sources_chain
+from langchain.chains.qa_with_sources import load_qa_with_sources_chain, stuff_prompt
 import subprocess
 import sys
 import os
@@ -31,22 +31,44 @@ from feast import FeatureStore
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.vectorstores.redis import Redis
 from langchain.embeddings import OpenAIEmbeddings
+from basic_utils import retrieve_web_content
+import redis
+import langchain
+from langchain.cache import RedisCache
+from langchain.cache import RedisSemanticCache
+import json
 
 
 # You may need to update the path depending on where you stored it
 feast_repo_path = "."
 redis_password=os.getenv('REDIS_PASSWORD')
+redis_url = f"redis://:{redis_password}@localhost:6379"
+redis_client = redis.Redis.from_url(redis_url)
+# standard cache
+# langchain.llm_cache = RedisCache(redis_client)
+# semantic cache
+# langchain.llm_cache = RedisSemanticCache(
+#     embedding=OpenAIEmbeddings(),
+#     redis_url=redis_url
+# )
 
-def split_doc():
-    loader = DirectoryLoader("./web_data/", glob="*.txt")
+def split_doc(path='./web_data/', path_type='dir'):
+    if (path_type=="file"):
+        loader = TextLoader(path)
+    elif (path_type=="dir"):
+        loader = DirectoryLoader(path, glob="*.txt")
     documents = loader.load()
     text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
     docs = text_splitter.split_documents(documents)
     return docs
 
 
-def get_index(file):
-    loader = TextLoader(file, encoding='utf8')
+def get_index(path = ".", path_type="file"):
+    if (path_type=="file"):
+        loader = TextLoader(path, encoding='utf8')
+    elif (path_type=="dir"):
+        loader = DirectoryLoader(path, glob="*.txt")
+    # loader = TextLoader(file, encoding='utf8')
     index = VectorstoreIndexCreator(
         vectorstore_cls=DocArrayInMemorySearch
     ).from_loaders([loader])
@@ -82,8 +104,8 @@ def create_qa_tools(qa_chain):
     ]
     return tools
 
-def create_doc_tools(doc):
-    index = get_index(doc)
+def create_doc_tools(doc, path_type):
+    index = get_index(doc, path_type)
     tools = [
         Tool(
         name = f"{doc} Document",
@@ -170,31 +192,38 @@ def create_QA_chain(chat, embeddings, docs, chain_type="stuff"):
 
 
 
-def create_QASource_chain(chat, embeddings, db_type, docs=None, chain_type="stuff"):
+def create_QASource_chain(chat, embeddings, db_type, docs=None, chain_type="stuff", index_name="redis_index"):
     if (db_type=="chroma"):
         persist_directory = 'myvectordb'
         vectorstore = Chroma(persist_directory=persist_directory, embedding_function = embeddings)
-    # elif (db_type=="inmemory"):
-    #     vectorstore = DocArrayInMemorySearch.from_documents(
-    #     docs, 
-    #     embeddings
-    #     )
     elif (db_type == "feast"):
         vectorstore = FeatureStore(repo_path=feast_repo_path)
-
     elif (db_type == "redis"):
         # Load from existing index
         vectorstore = Redis.from_existing_index(
-            embeddings, redis_url=f"redis://:{redis_password}@localhost:6379", index_name="redis_index"
+            embeddings, redis_url=redis_url, index_name=index_name
         )
 
-    qa_chain= load_qa_with_sources_chain(chat, chain_type=chain_type) 
+
+    qa_chain= load_qa_with_sources_chain(chat, chain_type=chain_type, prompt = stuff_prompt.PROMPT, document_prompt= stuff_prompt.EXAMPLE_PROMPT) 
+
+    # transform_chain = TransformChain(
+    #     input_variables=["text"], output_variables=["output_text"], transform=transform_func)
 
     qa = RetrievalQAWithSourcesChain(combine_documents_chain=qa_chain, retriever=vectorstore.as_retriever(),
                                      reduce_k_below_max_tokens=True, max_tokens_limit=3375,
                                      return_source_documents=True)
 
     return qa
+
+
+# tbd: parse the dict json in transform chain before passing into retrievalqaresourcechain
+def transform_func(inputs: dict) -> dict:
+    text = inputs["text"]
+    shortened_text = "\n\n".join(text.split("\n\n")[:3])
+    return {"output_text": shortened_text}
+
+
 
 
 def create_elastic_knn():
@@ -235,25 +264,29 @@ def create_python_agent(llm):
     )
     return agent
 
-def create_redis_index(docs, embeddings = OpenAIEmbeddings(), source="", index_name="redis_index"):
+def create_redis_index(docs, embedding, source, index_name):
     texts = [d.page_content for d in docs]
     # metadatas = [d.metadata for d in docs]
-    metadatas=[{"source": str(i)} for i in range(len(texts))]
+    metadatas=[{"source": source} for i in range(len(texts))]
+    print(metadatas)
 
     rds, keys = Redis.from_texts_return_keys(
-        texts, embeddings, metadatas = metadatas, redis_url=f"redis://:{redis_password}@localhost:6379", index_name=index_name
-    )
-    return rds, keys
+        texts, embedding, metadatas = metadatas, redis_url=redis_url, index_name=index_name
+    ) 
+    return rds
 
-def add_redis_index(docs, embeddings = OpenAIEmbeddings(), source='', index_name="redis_index"):
+def add_redis_index(texts, embedding, source, index_name):
     rds = Redis.from_existing_index(
-            embeddings, redis_url=f"redis://:{redis_password}@localhost:6379", index_name=index_name
+            embedding, redis_url=redis_url, index_name=index_name
         )
-    metadatas =  [{"source":source}]
-    rds.add_texts(docs, metadatas=metadatas)
+    metadatas=[{"source": source} for i in range(len(texts))]
+    print(rds.add_texts(texts, metadatas=metadatas))
 
 def delete_redis_keys(keys):
-    Redis.delete(keys, redis_url=f"redis://:{redis_password}@localhost:6379")
+    Redis.delete(keys, redis_url=redis_url)
+
+def drop_redis_index(index_name):
+    print(Redis.drop_index(index_name, delete_documents=True, redis_url=redis_url))
 
 
 def get_summary(llm, docs):
@@ -263,8 +296,8 @@ def get_summary(llm, docs):
 
 
 
-def add_embedding(embeddings, text):
-    query_embedding = embeddings.embed_query(text)
+def add_embedding(embedding, text):
+    query_embedding = embedding.embed_query(text)
     return query_embedding
 
 
@@ -314,3 +347,16 @@ class CustomOutputParser(AgentOutputParser):
         # Return the action and action input
         return AgentAction(tool=action, tool_input=action_input.strip(" ").strip('"'), log=llm_output)
     
+
+
+
+def build_vectorstore():
+    # retrieve_web_content(link)
+    docs = split_doc(path="./web_data/", path_type="dir")
+    link = 'https://www.themuse.com/advice/43-resume-tips-that-will-help-you-get-hired'
+    rds = create_redis_index(docs, OpenAIEmbeddings(), link, "redis_index")
+    # add_redis_index(docs, OpenAIEmbeddings, link, "redis_index")
+    print(rds)
+    
+
+build_vectorstore()

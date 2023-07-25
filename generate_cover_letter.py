@@ -14,8 +14,8 @@ from datetime import date
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
 
-
-llm = ChatOpenAI(temperature=0.0)
+# TBD: caching and serialization of llm
+llm = ChatOpenAI(temperature=0.0, cache=False)
 # llm = OpenAI(temperature=0, top_p=0.2, presence_penalty=0.4, frequency_penalty=0.2)
 embeddings = OpenAIEmbeddings()
 delimiter = "####"
@@ -30,7 +30,7 @@ my_resume_file = 'resume_samples/sample1.txt'
 
 
 
-def generate_basic_cover_letter(my_job_title, company="abc", read_path=my_resume_file, save_path= "./static/cover_letter.txt"):
+def generate_basic_cover_letter(my_job_title, company="abc", read_path=my_resume_file, res_path= "./static/cover_letter.txt"):
     
     resume_content = read_txt(read_path)
     # Get personal information from resume
@@ -168,9 +168,8 @@ def generate_basic_cover_letter(my_job_title, company="abc", read_path=my_resume
         # Validate cover letter
         if (evaluate_response(my_cover_letter)):
             # Write the cover letter to a file
-            with open(save_path, 'w') as f:
+            with open(res_path, 'w') as f:
                 try:
-                    my_cover_letter= my_cover_letter.split(delimiter4)[-1].strip()
                     f.write(my_cover_letter)
                     print("ALL SUCCESS")
                 except Exception as e:
