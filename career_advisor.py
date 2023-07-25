@@ -8,14 +8,17 @@ from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
 from langchain import PromptTemplate
 from langchain.agents import ConversationalChatAgent, Tool, AgentExecutor
-from langchain_utils import create_QA_chain, create_qa_tools, create_doc_tools, CustomOutputParser, CustomPromptTemplate
+from langchain_utils import create_QA_chain, create_QASource_chain, create_qa_tools, create_doc_tools, create_search_tools, CustomOutputParser, CustomPromptTemplate
 from langchain.prompts import BaseChatPromptTemplate
 from langchain.agents import Tool, AgentExecutor, LLMSingleActionAgent, AgentOutputParser
+from langchain.experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
 from langchain.schema import AgentAction, AgentFinish, HumanMessage
 from typing import List, Union
 import re
 from langchain import LLMChain
 from langchain.memory import ConversationSummaryBufferMemory
+from langchain.agents import initialize_agent
+from langchain.agents import AgentType
 # from feast import FeatureStore
 import pickle
 # from fastapi import HTTPException
@@ -32,7 +35,7 @@ class ChatController(object):
 
     def __init__(self, userid):
         self.userid = userid
-        self.llm = OpenAI(temperature=0, model_name="gpt-4", top_p=0.2, presence_penalty=0.4, frequency_penalty=0.2)
+        self.llm = ChatOpenAI(temperature=0, model_name="gpt-4", top_p=0.2, presence_penalty=0.4, frequency_penalty=0.2)
         self.embeddings = OpenAIEmbeddings()
         self.tools = []
         self._create_chat_agent()
@@ -41,53 +44,40 @@ class ChatController(object):
     def _create_chat_agent(self):
 
 
-        qa = create_QA_chain(self.llm, self.embeddings, "chroma" )
+        qa = create_QASource_chain(self.llm, self.embeddings, "redis" )
 
+        # vector store tool
         self.tools = create_qa_tools(qa)
 
         advice_file = os.path.join(advice_path, self.userid+".txt")
 
+        # self-referencing tool
         if (Path(advice_file).is_file()):
 
-            self.tools += create_doc_tools(advice_file)
+            self.tools += create_doc_tools(advice_file, path_type="file")
 
-        # self.tools += create_process_tools("generate_cover_letter.py")
+        # web tool
+        # self.tools += create_search_tools("google", 10)
 
-        # system_msg = "You are a helpful assistant who evaluates a human's resume and provides resume advices."
-
-        # prefix = """Have a conversation with a human, answering the following questions as best you can. You have access to the following tools: 
-        
-        # {tools}
-        
-        # An initial assessment of the resume has been done. The assessment is is delimited with {delimiter} characters. 
-        
-        # Use it as a reference when answering questions.
-        
-        # """
-        # suffix = """Begin!"
-
-        # {chat_history}
-        # Question: {input}
-        # {agent_scratchpad}"""
-
-        # # This probably can be changed to Custom Agent class
-        # agent = ConversationalChatAgent.from_llm_and_tools(
-        #     llm=self.llm,
-        #     tools=tools,
-        #     system_message=system_msg,
-        #     prefix=prefix,
-        #     suffix= suffix,
-        # )
-
-            # Set up the base template
     
-        agent = self.create_custom_llm_agent()
         
         memory = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", max_token_limit=650, return_messages=True, input_key="question")
 
-        self.chat_agent = AgentExecutor.from_agent_and_tools(
-            agent=agent, tools=self.tools, verbose=True, memory=memory
-        )
+        # OPTION 1: agent = CHAT_CONVERSATIONAL_REACT_DESCRIPTION
+        # self.chat_agent  = initialize_agent(self.tools, self.llm, agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION, verbose=True, memory=memory)
+
+        # OPTION 2: agent = custom LLMSingleActionAgent
+        # agent = self.create_custom_llm_agent()
+        # self.chat_agent = AgentExecutor.from_agent_and_tools(
+        #     agent=agent, tools=self.tools, verbose=True, memory=memory
+        # )
+
+        # Option 3: agent = Plant & Execute
+        planner = load_chat_planner(self.llm)
+        executor = load_agent_executor(self.llm, self.tools, verbose=True)
+        self.chat_agent = PlanAndExecute(planner=planner, executor=executor, verbose=True, memory=memory)
+
+        
 
 
     def create_custom_llm_agent(self):
@@ -128,7 +118,6 @@ class ChatController(object):
         )
         output_parser = CustomOutputParser()
         # LLM chain consisting of the LLM and a prompt
-        # memory = ConversationBufferMemory(memory_key="chat_history", k=50, return_messages=True, input_key="question" )
         llm_chain = LLMChain(llm=self.llm, prompt=prompt)
         tool_names = [tool.name for tool in self.tools]
 
@@ -163,9 +152,9 @@ class ChatController(object):
 
         # for could not parse LLM output
         try:
-            # response = self.chat_agent.run(input=prompt)
-            response = self.chat_agent.run(question, callbacks=callbacks)
-            # response = self.chat_agent({"question": question, "delimiter":delimiter, "assessment":self.advice}, callbacks=callbacks)
+            response = self.chat_agent.run(input=question)
+            # response = self.chat_agent.run(question, callbacks=callbacks)
+            # response = self.chat_agent({"question": question, "chat_history": []}, callbacks=callbacks)
         except ValueError as e:
             response = str(e)
             if not response.startswith("Could not parse LLM output: `"):

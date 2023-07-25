@@ -13,9 +13,10 @@ from langchain.tools.python.tool import PythonREPLTool
 from langchain.agents import AgentType
 from langchain.chains import RetrievalQA
 from pathlib import Path
-from basic_utils import check_content_safety, read_txt
-from langchain_utils import create_wiki_tools, create_document_tools, create_google_search_tools, create_custom_llm_agent, create_QA_chain
+from basic_utils import check_content_safety, read_txt, retrieve_web_content
+from langchain_utils import create_wiki_tools, create_search_tools, create_QA_chain, split_doc, create_redis_index, add_redis_index
 from langchain import PromptTemplate
+import sys
 
 
 
@@ -95,7 +96,7 @@ def find_similar_jobs(llm, embeddings, job_title):
     loader = CSVLoader(file_path="jobs.csv")
     docs = loader.load()
 
-    qa_stuff = create_QA_chain(llm, embeddings, "inmemory", docs=docs, chain_type="stuff")
+    qa_stuff = create_QA_chain(llm, embeddings, docs, chain_type="stuff")
 
     query = f"""List all the jobs related to or the same as {job_title} in a markdown table.
     
@@ -111,9 +112,9 @@ def find_similar_jobs(llm, embeddings, job_title):
 def get_web_resources(llm, query, top=10):
 
     # wiki_tools = create_wiki_tools()
-    tools = create_google_search_tools(top)
+    # SERPAPI has limited searches, for now, use plain google
+    tools = create_search_tools("google", top)
     # tools = wiki_tools+search_tools
-    # SERPAPI has limited searches, for now, skip
     agent= initialize_agent(
         tools, 
         llm, 
@@ -139,6 +140,9 @@ def get_web_resources(llm, query, top=10):
         response = response.removeprefix(
             "Could not parse LLM output: `").removesuffix("`")
         return response
+    
+
+
 
 
 

@@ -8,6 +8,9 @@ import uuid
 import markdown
 import csv
 from openai_api import get_moderation_flag, check_injection
+import bs4
+import urllib.request
+from urllib.request import Request, urlopen
 
 
 
@@ -96,6 +99,29 @@ def check_content_safety(file=None, text_str=None):
         return False
     else:
         return True
+    
+def retrieve_web_content(link):
+
+    req = Request(
+        url=link, 
+        headers={'User-Agent': 'Mozilla/5.0'}
+    )
+    try: 
+        webpage=str(urllib.request.urlopen(link).read())
+    except Exception: 
+        webpage = urlopen(req).read()
+    soup = bs4.BeautifulSoup(webpage, features="lxml")
+
+    content = soup.get_text()
+
+
+    if content:
+        with open('./web_data/content.txt', 'w') as file:
+            file.write(content)
+            file.close()
+            print('Content retrieved and written to file.')
+    else:
+        print('Failed to retrieve content from the URL.')
 
 
 

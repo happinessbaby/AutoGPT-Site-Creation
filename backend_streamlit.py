@@ -114,7 +114,8 @@ class Chat():
             SAMPLE_QUESTIONS = {
                 # "What are some general advices for writing an outstanding resume?": "general_advices.pickle",
                 # "What are some things I could be doing terribly wrong with my resume?": "bad_resume.pickle",
-                "help me write a cover letter": "coverletter"
+                "help me write a cover letter": "coverletter",
+                "help me with my resume": "resume"
             }
 
             # key = "input"
@@ -131,10 +132,10 @@ class Chat():
             # Generate empty lists for generated and past.
             ## past stores User's questions
             if 'questions' not in st.session_state:
-                st.session_state['questions'] = [""]
+                st.session_state['questions'] = list()
             ## generated stores AI generated responses
             if 'responses' not in st.session_state:
-                st.session_state['responses'] = [f"Hi, I'm your career advisor Tebi. How can I help you?"]
+                st.session_state['responses'] = list()
 
             # question_container = st.empty()
             # results_container = st.empty()
@@ -165,11 +166,11 @@ class Chat():
 
                 add_vertical_space(3)
 
-                st.markdown('''
-                    Upload your resume and fill out a few questions for a quick start
-                            ''')
+                # st.markdown('''
+                #     Upload your resume and fill out a few questions for a quick start
+                #             ''')
                        # A hack to "clear" the previous result when submitting a new prompt.
-                with st.form(key='my_form', clear_on_submit=True):
+                with st.form( key='my_form', clear_on_submit=True):
 
                     job = st.text_input(
                         "what position are you applying for?",
@@ -196,6 +197,16 @@ class Chat():
                             st.session_state["job"] = job
                         if "company" not in st.session_state:
                             st.session_state['company'] = company
+
+                        # Save resume file 
+                        file_ext = Path(uploaded_file.name).suffix
+                        filename = st.session_state.userid+file_ext
+                        save_path = os.path.join(upload_path, filename)
+                        with open(save_path, 'wb') as f:
+                            f.write(uploaded_file.getvalue())
+                        read_path =  os.path.join(upload_path, Path(filename).stem+'.txt')
+                        # Convert resume file to txt and save it to uploads
+                        convert_to_txt(save_path, read_path)
                         # loop = asyncio.get_running_loop()
                         # 3. Run in a custom process pool:
                         # with concurrent.futures.ProcessPoolExecutor() as pool:
@@ -206,15 +217,15 @@ class Chat():
                         # userid = self.id
                         # self.job = job
                         # self.company = company
-                        p = Process(target=self.assess, args=(st.session_state.userid, uploaded_file, st.session_state.job,))
-                        p.start()
+                        # p = Process(target=self.assess, args=(st.session_state.userid, uploaded_file, st.session_state.job,))
+                        # p.start()
+                        # p.join() # this blocks until the process terminates
                         # subprocess.run([f"{sys.executable}", "assess.py"])
                         # self.show_progress()
-                        p.join() # this blocks until the process terminates
                         # result = queue.get()
                         # print(result)
 
-                add_vertical_space(5)
+                add_vertical_space(3)
 
                 with st.form(key="question_selector"):
                     prefilled = st.selectbox("Quick navigation", sorted(SAMPLE_QUESTIONS.keys())) or ""
@@ -235,18 +246,27 @@ class Chat():
                             read_path = os.path.join(upload_path, st.session_state.userid+'.txt')
                             if Path(read_path).is_file():
                                 save_path = os.path.join(cover_letter_path, st.session_state.userid+'.txt')
-                                p = Process(target=generate_basic_cover_letter, args=(st.session_state.job, st.session_state.company, read_path, save_path))
+                                # p = Process(target=generate_basic_cover_letter, args=(st.session_state.job, st.session_state.company, read_path, save_path))
+                                p = Process(target=self.assess, args=(st.session_state.userid, st.session_state.job,st.session_state.company, "coverletter"))
                                 p.start()
                                 # progress feedbacks
                                 p.join()
                                 response = read_txt(save_path)
                             else:
-                                print(st.session_state.job)
-                                print(st.session_state.userid)
-                                response = "Sure! Just uploade your resume and I'll help you with it. "
+                                response = "Sure! Just fill out the resume form and I'll help you with it. "
+                        elif session_name=="resume":
+                            read_path = os.path.join(upload_path, st.session_state.userid+".txt")
+                            if Path(read_path).is_file():
+                                save_path = os.path.join(advice_path,  st.session_state.userid+'.txt')
+                                p = Process(target=self.assess, args=(st.session_state.userid, st.session_state.job,st.session_state.company, "resume"))
+                                p.start()
+                                p.join()
+                                response = read_txt(save_path)
+                            else:
+                                response = "Sure! Just fill out the resume form and I'll help you with it. "
                         else: 
                             session_path = Path(__file__).parent / "general_questions" / session_name
-                            print(f"Playing saved session: {session_path}")
+                            # print(f"Playing saved session: {session_path}")
                             response = playback_callbacks(
                                 [streamlit_handler], str(session_path), max_pause_time=3
                             )         
@@ -309,20 +329,25 @@ class Chat():
     #                 # print(result)
                         
 
-    def assess(self, userid, uploaded_file, text_input,):
-        file_ext = Path(uploaded_file.name).suffix
-        filename = userid+file_ext
-        # uploaded_file.name = filename
-        save_path = os.path.join(upload_path, filename)
-        with open(save_path, 'wb') as f:
-            f.write(uploaded_file.getvalue())
-        read_path =  os.path.join(upload_path, Path(filename).stem+'.txt')
-        convert_to_txt(save_path, read_path)
-        if (Path(read_path).exists()):
+    def assess(self, userid, job, company, task):
+        # file_ext = Path(uploaded_file.name).suffix
+        # filename = userid+file_ext
+        # # uploaded_file.name = filename
+        # save_path = os.path.join(upload_path, filename)
+        # with open(save_path, 'wb') as f:
+        #     f.write(uploaded_file.getvalue())
+        # read_path =  os.path.join(upload_path, Path(filename).stem+'.txt')
+        # convert_to_txt(save_path, read_path)
+        read_path = os.path.join(upload_path, userid+".txt")
+        if (task=="resume"):
             # Check for content safety
             if (check_content_safety(file=read_path)):
-                res_path = os.path.join(advice_path, os.path.basename(read_path))
-                evaluate_resume(text_input, read_path = read_path, res_path = res_path)
+                res_path = os.path.join(advice_path, userid+".txt")
+                evaluate_resume(job, read_path = read_path, res_path = res_path)
+        elif (task=="coverletter"):
+            res_path = os.path.join(cover_letter_path, userid+".txt")
+            generate_basic_cover_letter(job, company =company, read_path=read_path, res_path=res_path)
+    
 
 
 

@@ -13,7 +13,8 @@ from samples import resume_samples_dict
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
 
-llm = ChatOpenAI(temperature=0.0)
+# TBD: caching and serialization of llm
+llm = ChatOpenAI(temperature=0.0, cache=False)
 # llm = OpenAI(temperature=0, top_p=0.2, presence_penalty=0.4, frequency_penalty=0.2)
 embeddings = OpenAIEmbeddings()
 # randomize delimiters from a delimiters list to prevent prompt injection

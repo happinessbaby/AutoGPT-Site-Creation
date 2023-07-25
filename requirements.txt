@@ -19,4 +19,6 @@ streamlit-chat
 streamlit-extras
 gunicorn
 pinecone-client
+unstructured
+redis
 
