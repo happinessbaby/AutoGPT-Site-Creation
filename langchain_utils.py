@@ -37,6 +37,7 @@ import langchain
 from langchain.cache import RedisCache
 from langchain.cache import RedisSemanticCache
 import json
+from langchain.tools import tool
 
 
 # You may need to update the path depending on where you stored it
@@ -99,10 +100,12 @@ def create_qa_tools(qa_chain):
             func = qa_chain.__call__,
             coroutine=qa_chain.acall, #if you want to use async
             description="Useful for answering general questions",
-            return_direct=True,
+            # return_direct=True,
         ),
     ]
     return tools
+
+
 
 def create_doc_tools(doc, path_type):
     index = get_index(doc, path_type)
@@ -111,7 +114,7 @@ def create_doc_tools(doc, path_type):
         name = f"{doc} Document",
         func = lambda q: str(index.query(q)),
         description="Useful for answering personalized questions",
-        return_direct=True,
+        # return_direct=True,
         )
     ]
     return tools

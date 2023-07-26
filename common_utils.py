@@ -7,15 +7,16 @@ from langchain.prompts import ChatPromptTemplate
 from langchain.output_parsers import ResponseSchema
 from langchain.output_parsers import StructuredOutputParser
 from langchain.agents import load_tools, initialize_agent, Tool, AgentExecutor
-from langchain.document_loaders import CSVLoader
+from langchain.document_loaders import CSVLoader, TextLoader
 from langchain.vectorstores import DocArrayInMemorySearch
 from langchain.tools.python.tool import PythonREPLTool
 from langchain.agents import AgentType
 from langchain.chains import RetrievalQA
 from pathlib import Path
 from basic_utils import check_content_safety, read_txt, retrieve_web_content
-from langchain_utils import create_wiki_tools, create_search_tools, create_QA_chain, create_qa_tools, split_doc, create_redis_index, add_redis_index
+from langchain_utils import create_wiki_tools, create_search_tools, create_QA_chain, create_qa_tools, create_doc_tools, split_doc, create_redis_index, add_redis_index
 from langchain import PromptTemplate
+from langchain.experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
 import sys
 
 
@@ -108,32 +109,60 @@ def find_similar_jobs(llm, embeddings, job_title):
     return response
 
 
-# okay for basic version, but in the future, need a vecstore where all the information are saved and updated
 def get_web_resources(llm, query, top=10):
 
     # wiki_tools = create_wiki_tools()
     # SERPAPI has limited searches, for now, use plain google
     tools = create_search_tools("google", top)
     # tools = wiki_tools+search_tools
-    agent= initialize_agent(
-        tools, 
-        llm, 
-        # agent=AgentType.REACT_DOCSTORE,
-        agent="zero-shot-react-description",
-        handle_parsing_errors=True,
-        verbose = True,
-        )
-    try:
-        response = agent.run(query)
-        return response
-    except ValueError as e:
-        response = str(e)
-        if not response.startswith("Could not parse LLM output: `"):
-            print(e)
-            raise e
-        response = response.removeprefix(
-            "Could not parse LLM output: `").removesuffix("`")
-        return response
+    # Option 1: okay response
+    # agent= initialize_agent(
+    #     tools, 
+    #     llm, 
+    #     # agent=AgentType.REACT_DOCSTORE,
+    #     agent="zero-shot-react-description",
+    #     handle_parsing_errors=True,
+    #     verbose = True,
+    #     )
+    # try:
+    #     response = agent.run(query)
+    #     return response
+    # except ValueError as e:
+    #     response = str(e)
+    #     if not response.startswith("Could not parse LLM output: `"):
+    #         print(e)
+    #         raise e
+    #     response = response.removeprefix(
+    #         "Could not parse LLM output: `").removesuffix("`")
+    #     return response
+    # Option 2: better at providing details but slower
+    planner = load_chat_planner(llm)
+    executor = load_agent_executor(llm, tools, verbose=True)
+    agent = PlanAndExecute(planner=planner, executor=executor, verbose=True)
+    response = agent.run(query)
+    print(response)
+    return response
+
+
+    
+def get_job_relevancy(llm, embeddings, resume, query):
+
+    # loader = TextLoader(file_path=resume)
+    # docs = loader.load()
+
+    # qa = create_QA_chain(llm, embeddings, docs = docs)
+
+    # tools = create_qa_tools(qa)
+
+    tools = create_doc_tools(resume, "file")
+
+    agent = initialize_agent(
+    tools, llm, agent=AgentType.OPENAI_MULTI_FUNCTIONS, verbose=True
+    )
+    response = agent.run(query)
+    print(response)
+    return response
+
     
 
 def retrieve_from_vectorstore(llm, embeddings, query):
