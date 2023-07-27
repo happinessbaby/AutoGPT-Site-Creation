@@ -137,7 +137,7 @@ def extract_fields(resume, llm=OpenAI(temperature=0, cache=False)):
 #     print(response)
 #     return response
 
-def fetch_similar_samples(embeddings, job_title, samples,  llm=OpenAI(temperature=0, cache=False)):
+def fetch_similar_samples(embeddings, job_title, samples, query, llm=ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
     loader = CSVLoader(file_path="jobs.csv")
     docs = loader.load()
 
@@ -146,22 +146,42 @@ def fetch_similar_samples(embeddings, job_title, samples,  llm=OpenAI(temperatur
 
     # format_instructions = output_parser.get_format_instructions()
 
-    query = f"""List all the jobs related to or the same as {job_title}.
+    related_query = f"""List all the jobs related to or the same as {job_title}.
     
     Do not make up things not in the given context. """
 
-    jobs = qa_stuff.run(query)
+    jobs = qa_stuff.run(related_query)
 
-    sample_string = ""
+    # sample_string = ""
+    # jobs_list = jobs.split(" ")
+    # for job in jobs_list:
+    #     job = job[:-1] 
+    #     print(job)
+    #     if (samples.get(job)!=None):
+    #         sample = read_txt(samples.get(job))
+    #         sample_string = sample_string + "\n" + f" {delimiter3}\n{sample}\n{delimiter3}" + "\n\nexample:"   
+    # print(sample_string)
+    # return sample_string
     jobs_list = jobs.split(" ")
+    tools = []
     for job in jobs_list:
-        job = job[:-1] 
-        print(job)
-        if (samples.get(job)!=None):
-            sample = read_txt(samples.get(job))
-            sample_string = sample_string + "\n" + f" {delimiter3}\n{sample}\n{delimiter3}" + "\n\nexample:"   
-    print(sample_string)
-    return sample_string
+        job = job[:-1]
+        if (samples.get(job) != None):
+            docs = split_doc(samples.get(job), "file")
+            tool = create_doc_tools(docs, "file")
+            tools.extend(tool)
+    if tools:
+        agent = initialize_agent(
+            tools, llm, agent=AgentType.OPENAI_MULTI_FUNCTIONS, verbose=True
+            )
+        response = agent.run(query)
+        print(response)
+        return response
+    else:
+        return ""
+
+
+
 
 # instead fetching samples from dictionry, all resume samples will be saved then let use chain (map-reduce for example) to filter out the related resume
 def search_similar_samples():
@@ -172,14 +192,14 @@ def search_similar_samples():
 
 
 
-def get_web_resources(query, search_tool, top=10,  llm = OpenAI(temperature=0, model_name="text-davinci-002", cache=False)):
+def get_web_resources(query, search_tool, top=10,  llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
 
     # SERPAPI has limited searches, for now, use plain google
     if (search_tool=="google"):
         tools = create_search_tools("google", top)
     elif (search_tool=="wiki"):
         tools = create_wiki_tools()
-    # Option 1: okay response
+    # Option 1: ReACt decent enough, tend to summarize too much 
     agent= initialize_agent(
         tools, 
         llm, 
@@ -199,17 +219,17 @@ def get_web_resources(query, search_tool, top=10,  llm = OpenAI(temperature=0, m
         response = response.removeprefix(
             "Could not parse LLM output: `").removesuffix("`")
         return response
-    # Option 2: better at providing details but tend to be very slow and error prone
-    planner = load_chat_planner(llm)
-    executor = load_agent_executor(llm, tools, verbose=True)
-    agent = PlanAndExecute(planner=planner, executor=executor, verbose=True)
-    response = agent.run(query)
-    print(response)
-    return response
+    # Option 2: better at providing details but tend to be very slow and error prone and too many tokens
+    # planner = load_chat_planner(llm)
+    # executor = load_agent_executor(llm, tools, verbose=True)
+    # agent = PlanAndExecute(planner=planner, executor=executor, verbose=True)
+    # response = agent.run(query)
+    # print(response)
+    # return response
 
 
     
-def get_job_relevancy(resume, query, llm = ChatOpenAI(temperature=0, cache=False)):
+def get_job_relevancy(doc, query, doctype="file", llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
 
     # loader = TextLoader(file_path=resume)
     # docs = loader.load()
@@ -217,8 +237,8 @@ def get_job_relevancy(resume, query, llm = ChatOpenAI(temperature=0, cache=False
     # qa = create_QA_chain(llm, embeddings, docs = docs)
 
     # tools = create_qa_tools(qa)
+    tools = create_doc_tools(doc, doctype)
 
-    tools = create_doc_tools(resume, "file")
 
     agent = initialize_agent(
     tools, llm, agent=AgentType.OPENAI_MULTI_FUNCTIONS, verbose=True

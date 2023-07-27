@@ -31,7 +31,7 @@ my_resume_file = 'resume_samples/sample1.txt'
 
 
 
-def generate_basic_cover_letter(my_job_title, company="abc", read_path=my_resume_file, res_path= "./static/cover_letter/cover_letter.txt"):
+def generate_basic_cover_letter(my_job_title, company="openai", read_path=my_resume_file, res_path= "./static/cover_letter/cover_letter.txt"):
     
     resume_content = read_txt(read_path)
     # Get personal information from resume
@@ -52,7 +52,7 @@ def generate_basic_cover_letter(my_job_title, company="abc", read_path=my_resume
     company_description = get_web_resources(company_query, "wiki")
 
 
-    query_irrelevancy = f"""Determine all the irrelevant information contained in the resume document delimited with {delimiter} characters that are unrelated to {my_job_title} 
+    query_relevancy = f"""Determine the relevant and irrelevant information contained in the resume document delimited with {delimiter} characters.
 
       You are provided with a decription of the job requirement of {my_job_title}, which is delimited with {delimiter1} charactres. Use it as a guideline when forming your answer.
 
@@ -64,32 +64,28 @@ def generate_basic_cover_letter(my_job_title, company="abc", read_path=my_resume
 
       expert advices: {delimiter2}{advices}{delimiter2} \n
 
-      Generate a list of irrelevant information that should not be included in the cover letter.
+      Generate a list of irrelevant information that should not be included in the cover letter and a list of relevant information that should be included in the cover letter. 
 
         """
-    irrelevancy = get_job_relevancy(read_path, query_irrelevancy)
-    # Get cover letter examples
-    cover_letter_examples = fetch_similar_samples(embeddings, my_job_title, cover_letter_samples_dict)
-
-    query_relevancy = f""" 
-      Step 3: Research example cover letters provided. Each example is delimited with {delimiter3} characters.
-
-        From these examples, summarize the information that is useful for generating a cover letter.
-
-        You're also given expert advices, which is delimited with {delimiter} characters, on what to include in a cover letter. 
-
-       Generate a list of content that should be included in a cover letter.
-       
-       You should be base your judgment on the cover letter examples and the expert advices. 
-
-       expert advices: {delimiter}{advices}{delimiter} \n
-        
-        example: {cover_letter_examples}. \n
-
-      """
     relevancy = get_job_relevancy(read_path, query_relevancy)
-    
+    # Get cover letter examples
+    query_samples = f""" 
+      Step 3: Research sample cover letters provided.
 
+        You're also give two list of information delimiter with {delimiter1} characters. One is irrelevant and should not be included in the cover letter, The other list is relevant.
+
+        Based on what you know about how sample cover letters are written, fine-tune the two lists.
+
+        relevant and irrelevant lists: {delimiter1}{relevancy}{delimiter1} \n
+        
+      """
+    comparison = fetch_similar_samples(embeddings, my_job_title, cover_letter_samples_dict, query_samples)
+    if (comparison==""):
+        print("no cover letter samples for comparison")
+        comparison = relevancy
+
+
+    
 
     
     # Use an LLM to generate a cover letter that is specific to the resume file that is being read
@@ -100,27 +96,21 @@ def generate_basic_cover_letter(my_job_title, company="abc", read_path=my_resume
 
       Step1: The content you are to use as reference to create the cover letter is delimited with {delimiter} characters.
 
-        Always use this use a point of reference when asked what to include or what not to include in the cover letter. 
+        Always use this as a context when writing the cover letter. Do not write out of context and do not make anything up. 
 
         content: {delimiter}{content}{delimiter}. \n
 
-      Step 2: You are given a list of irrelevancy information delimited with {delimiter2} characters that is considered irrelevant to applying for {job}. 
-    
-        They should not be included in the cover letter. 
+      Step 2: You are given two lists of information delimited with {delimiter1} characters. One is irrelevant to applying for {job} and the other is relevant. 
+
+        Use them as a reference when determining what to include and what to not include in the cover letter. 
      
-        irrelevancy information: {delimiter2}{relevancy}{delimiter2}.  \n
+        information list: {delimiter2}{comparison}{delimiter2}.  \n
 
-      Step 3: You are given a list of relevancy information delimiter with {delimiter3} characters that should be included in the cover letter.
+      Step 3: You're provided with some company informtion delimited by {delimiter3} characters. Use it to make the cover letter more specific to the company.
 
-        If they exist in the content, they should be included in the cover letter.
-
-        relevancy information: {delimiter3}{irrelevancy}{delimiter3}. \n
-
-      Step 4: You're provided with some company informtion delimited by {delimiter5} characters. Use it to make the cover letter more specific to the company.
-
-        company information: {delimiter5}{company_description}{delimiter5} \n
+        company information: {delimiter3}{company_description}{delimiter3} \n
     
-      Step 5: Change all personal information of the cover letter to the following. Do not incude them if they are -1 or empty: 
+      Step 4: Change all personal information of the cover letter to the following. Do not incude them if they are -1 or empty: 
 
         name: {name}. \
 
@@ -134,7 +124,7 @@ def generate_basic_cover_letter(my_job_title, company="abc", read_path=my_resume
 
         job position they are applying for: {job}. \
     
-      Step 6: Generate the cover letter.
+      Step 5: Generate the cover letter.
     
       Use the following format:
         Step 1:{delimiter4} <step 1 reasoning>
@@ -157,15 +147,13 @@ def generate_basic_cover_letter(my_job_title, company="abc", read_path=my_resume
                     company = company,
                     job = my_job_title,
                     content=resume_content,
-                    irrelevancy = irrelevancy,
-                    relevancy = relevancy, 
+                    comparison = comparison, 
                     company_description = company_description,
                     delimiter = delimiter,
                     delimiter1 = delimiter1, 
                     delimiter2 = delimiter2,
                     delimiter3 = delimiter3,
                     delimiter4 = delimiter4,
-                    delimiter5 = delimiter5,
     )
     # FOR THE FUTURE, THIS LLM HERE CAN BE CUSTOMLY TRAINED
     my_cover_letter = llm(cover_letter_message).content
