@@ -1,13 +1,12 @@
 import os
-from openai_api import evaluate_response
+from openai_api import evaluate_response, check_content_safety
 from langchain.chat_models import ChatOpenAI
 from langchain.llms import OpenAI
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
 from langchain import PromptTemplate
-from basic_utils import read_txt, check_content_safety
-from common_utils import fetch_samples, get_web_resources, retrieve_from_vectorstore, get_job_relevancy
-from samples import resume_samples_dict
+from basic_utils import read_txt
+from common_utils import search_similar_samples, get_web_resources, retrieve_from_vectorstore, get_job_relevancy, extract_fields
 
 
 from dotenv import load_dotenv, find_dotenv
@@ -33,25 +32,35 @@ def evaluate_resume(my_job_title, read_path = my_resume_file, res_path="./static
 
     resume = read_txt(read_path)
 
-    query_job  = f"""Find out what a {my_job_title} does, including specific details of the skills and responsibilities involved."""
-    job_description = get_web_resources(llm, query_job)
+    resume_fields = extract_fields(resume)
+
+
+    resume_samples = f"""Research the content of sample resume provided. Each sample is delimited with {delimiter2} characters.
+
+        Compare them with the content delimited with {delimiter2} characters. and look for differences in the content of each field.
+        
+        sample: {delimiter2}{resume_samples}{delimiter2}"""
+    
+    query_job  = f"""Research what a {my_job_title} does, including details of the common skills, responsibilities, education, experience needed for the job."""
+    job_description = get_web_resources(query_job, "google")
 
     query_relevancy = f"""Determine all the irrelevant information contained in the resume document delimited with {delimiter} characters. 
 
         You are provided with the skills and responsibilities of {my_job_title}, which is delimited with {delimiter1} charactres, as a reference when forming your answer.
 
         resume document: {delimiter}{resume}{delimiter}
-        
+
         skills and responsibilities of {my_job_title}: {delimiter1}{job_description}{delimiter1} \n
 
         Generate a list of irrelevant information that should not be included in the resume. """
 
-    resume_relevancy = get_job_relevancy(llm, embeddings, read_path, query_relevancy)
+    resume_relevancy = get_job_relevancy(read_path, query_relevancy)
+
+    resume_samples = search_similar_samples(embeddings, my_job_title)
 
     query_advice =  "what makes a bad resume and how to improve"
-    resume_advices = retrieve_from_vectorstore(llm, embeddings, query_advice)
+    resume_advices = retrieve_from_vectorstore(embeddings, query_advice)
 
-    resume_samples = fetch_samples(llm, embeddings, my_job_title, resume_samples_dict)
 
     template_string = """" Your task is to analyze the weaknesses of a resume and ways to improve it. 
         

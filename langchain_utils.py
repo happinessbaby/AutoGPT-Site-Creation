@@ -31,13 +31,14 @@ from feast import FeatureStore
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.vectorstores.redis import Redis
 from langchain.embeddings import OpenAIEmbeddings
-from basic_utils import retrieve_web_content
 import redis
 import langchain
 from langchain.cache import RedisCache
 from langchain.cache import RedisSemanticCache
 import json
 from langchain.tools import tool
+from langchain.agents.agent_types import AgentType
+from langchain.agents.agent_toolkits import create_python_agent
 
 
 # You may need to update the path depending on where you stored it
@@ -161,7 +162,7 @@ def create_db_tools(db_chain, name):
 #     ]
 #     return tool
 
-def create_QA_chain(chat, embeddings, docs=None, chain_type="stuff", db_type = "docarray", index_name="redis_index"):
+def create_QA_chain(llm, embeddings, docs=None, chain_type="stuff", db_type = "docarray", index_name="redis_index", output_parse=None):
     if (db_type=="docarray"):
         db = DocArrayInMemorySearch.from_documents(
             docs, 
@@ -171,6 +172,8 @@ def create_QA_chain(chat, embeddings, docs=None, chain_type="stuff", db_type = "
         db = Redis.from_existing_index(
             embeddings, redis_url=redis_url, index_name=index_name
         )
+
+    output_parser =  output_parse
     prompt_template = """If the context is not relevant, 
     please answer the question by using your own knowledge about the topic
     
@@ -180,13 +183,13 @@ def create_QA_chain(chat, embeddings, docs=None, chain_type="stuff", db_type = "
     """
 
     PROMPT = PromptTemplate(
-        template=prompt_template, input_variables=["context", "question"]
+        template=prompt_template, input_variables=["context", "question"], output_parser=output_parser
     )
 
     chain_type_kwargs = {"prompt": PROMPT}
 
     qa = RetrievalQA.from_chain_type(
-        llm=chat, 
+        llm=llm, 
         chain_type=chain_type,
         # can also pass in a "search_type" to as_retriever() 
         retriever=db.as_retriever(), 
@@ -261,14 +264,6 @@ def create_elastic_knn():
     
     return knn_search
 
-
-def create_python_agent(llm):
-    agent = create_python_agent(
-    llm,
-    tool=PythonREPLTool(),
-    verbose=True
-    )
-    return agent
 
 def create_redis_index(docs, embedding, source, index_name):
     texts = [d.page_content for d in docs]
@@ -355,14 +350,3 @@ class CustomOutputParser(AgentOutputParser):
     
 
 
-
-def build_vectorstore():
-    # retrieve_web_content(link)
-    docs = split_doc(path="./web_data/", path_type="dir")
-    link = 'https://www.themuse.com/advice/43-resume-tips-that-will-help-you-get-hired'
-    rds = create_redis_index(docs, OpenAIEmbeddings(), link, "redis_index")
-    # add_redis_index(docs, OpenAIEmbeddings, link, "redis_index")
-    print(rds)
-    
-
-build_vectorstore()

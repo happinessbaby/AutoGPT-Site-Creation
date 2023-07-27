@@ -4,6 +4,7 @@ import openai
 import os
 import json
 from dotenv import load_dotenv, find_dotenv
+from basic_utils import read_txt
 
 
 _ = load_dotenv(find_dotenv()) # read local .env file
@@ -130,6 +131,17 @@ def evaluate_response(cover_letter):
 	else:
 		# return false for now, will have error handling here
 		return False
+	
+
+def check_content_safety(file=None, text_str=None):
+    if (file!=None):
+        text = read_txt(file)
+    elif (text_str!=None):
+        text = text_str
+    if (get_moderation_flag(text) or check_injection(text)):
+        return False
+    else:
+        return True
 	
 
 	
