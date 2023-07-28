@@ -11,7 +11,8 @@ from io import StringIO
 from langchain.callbacks import StreamlitCallbackHandler
 from career_advisor import ChatController
 from callbacks.capturing_callback_handler import playback_callbacks
-from basic_utils import convert_to_txt, check_content_safety, read_txt
+from basic_utils import convert_to_txt, read_txt, retrieve_web_content
+from openai_api import check_content_safety, evaluate_content
 from upgrade_resume import evaluate_resume
 from dotenv import load_dotenv, find_dotenv
 import asyncio
@@ -29,6 +30,7 @@ openai.api_key = os.environ['OPENAI_API_KEY']
 
 placeholder = st.empty()
 upload_path = "./uploads"
+posting_path = "./uploads/posting/"
 cover_letter_path = "./static/cover_letter"
 advice_path = "./static/advice"
 
@@ -172,17 +174,30 @@ class Chat():
                        # A hack to "clear" the previous result when submitting a new prompt.
                 with st.form( key='my_form', clear_on_submit=True):
 
-                    job = st.text_input(
-                        "what position are you applying for?",
-                        "",
-                        key="job",
-                    )
+                    col1, col2, col3= st.columns([5, 1, 5])
 
-                    company = st.text_input(
-                        "what company/companies do you want to work for?",
-                        "",
-                        key = "company"
-                    )
+                    with col1:
+                        job = st.text_input(
+                            "job title",
+                            "",
+                            key="job",
+                        )
+
+                        company = st.text_input(
+                            "company (optional)",
+                            "",
+                            key = "company"
+                        )
+                    
+                    with col2:
+                        st.text('or')
+                    
+                    with col3:
+                        posting = st.text_input(
+                            "job posting link",
+                            "",
+                            key = "posting"
+                        )
 
                     uploaded_file = st.file_uploader(label="Upload your resume", type=["pdf","odt", "docx","txt"])
                     # if uploaded_file is not None:
@@ -192,21 +207,45 @@ class Chat():
 
                     submit_button = st.form_submit_button(label='Submit')
 
-                    if submit_button and uploaded_file is not None and job is not None:
+                    if submit_button and uploaded_file is not None and (job is not None or posting is not None): 
                         if "job" not in st.session_state:
                             st.session_state["job"] = job
                         if "company" not in st.session_state:
                             st.session_state['company'] = company
 
+
                         # Save resume file 
                         file_ext = Path(uploaded_file.name).suffix
                         filename = st.session_state.userid+file_ext
-                        save_path = os.path.join(upload_path, filename)
-                        with open(save_path, 'wb') as f:
+                        resume_save_path = os.path.join(upload_path, filename)
+                        with open(resume_save_path, 'wb') as f:
                             f.write(uploaded_file.getvalue())
                         read_path =  os.path.join(upload_path, Path(filename).stem+'.txt')
                         # Convert resume file to txt and save it to uploads
-                        convert_to_txt(save_path, read_path)
+                        convert_to_txt(resume_save_path, read_path)
+
+                        if (check_content_safety(file=read_path)):
+                            if (evaluate_content(read_path, "resume")):
+                                st.write("resume uploaded")
+                            else:
+                                st.write("sorry, please make sure your file is correct.")
+                        else:
+                            st.write("sorry, that didn't work, please try again.")
+
+                        
+                        if posting:
+                            save_path = os.path.join(posting_path, st.session_state.userid+".txt")
+                            if (retrieve_web_content(posting, save_path = save_path)):
+                                if (evaluate_content(save_path, "job posting")):
+                                    st.write("link accepted")
+                                else:
+                                    st.write("sorry, please check the content of the link and try again. ")
+                            else:
+                                st.write("sorry, the system could not process the link. ")
+
+                            
+                
+
                         # loop = asyncio.get_running_loop()
                         # 3. Run in a custom process pool:
                         # with concurrent.futures.ProcessPoolExecutor() as pool:
@@ -340,13 +379,12 @@ class Chat():
         # convert_to_txt(save_path, read_path)
         read_path = os.path.join(upload_path, userid+".txt")
         if (task=="resume"):
-            # Check for content safety
-            if (check_content_safety(file=read_path)):
-                res_path = os.path.join(advice_path, userid+".txt")
-                evaluate_resume(job, read_path = read_path, res_path = res_path)
+            res_path = os.path.join(advice_path, userid+".txt")
+            evaluate_resume(job, read_path = read_path, res_path = res_path)
         elif (task=="coverletter"):
             res_path = os.path.join(cover_letter_path, userid+".txt")
-            generate_basic_cover_letter(job, company =company, read_path=read_path, res_path=res_path)
+            generate_basic_cover_letter(job, company =company, read_path=read_path, res_path=res_path, posting_path=os.path.join(posting_path, userid+".txt"))
+
     
 
 

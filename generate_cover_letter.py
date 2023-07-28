@@ -34,7 +34,7 @@ posting_path = "./uploads/posting/accountant.txt"
 
 
 
-def generate_basic_cover_letter(my_job_title, company="abc", read_path=my_resume_file, res_path= "./static/cover_letter/cover_letter.txt", posting_path=posting_path):
+def generate_basic_cover_letter(my_job_title, company="", read_path=my_resume_file, res_path= "./static/cover_letter/cover_letter.txt", posting_path=posting_path):
     
     resume_content = read_txt(read_path)
     # Get personal information from resume
@@ -48,6 +48,7 @@ def generate_basic_cover_letter(my_job_title, company="abc", read_path=my_resume
       posting_info_dict=extract_posting_information(posting)
       my_job_title = posting_info_dict["job"]
       company = posting_info_dict["company"]
+    print("JOB SPECIFICATION: {job_specification}")
 
     # Get advices on cover letter
     advice_query = "What to include and what not to include in a cover letter?"
@@ -60,10 +61,12 @@ def generate_basic_cover_letter(my_job_title, company="abc", read_path=my_resume
 
     # Get company descriptiong using Wikipedia lookup
     # for future probably will need to go into company site and scrape more information
-    company_query = f""" Research what kind of company {company} is, such as its culture, mission, and values.
-                        
-                        Look up the exact name of the company. If it doesn't exist or the search result does not return a company, output you don't know"""
-    company_description = get_web_resources(company_query, "wiki")
+    company_description=""
+    if (company!=""):
+      company_query = f""" Research what kind of company {company} is, such as its culture, mission, and values.
+                          
+                          Look up the exact name of the company. If it doesn't exist or the search result does not return a company, output you don't know"""
+      company_description = get_web_resources(company_query, "wiki")
 
 
     query_relevancy = f"""Determine the relevant and irrelevant information contained in the resume document delimited with {delimiter} characters.
