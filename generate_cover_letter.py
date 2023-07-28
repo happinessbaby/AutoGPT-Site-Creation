@@ -1,15 +1,16 @@
 # Import the necessary modules
 import os
-from openai_api import get_completion, evaluate_response, check_content_safety
+from openai_api import get_completion, evaluate_content, check_content_safety
 from langchain.chat_models import ChatOpenAI
 from langchain.llms import OpenAI
 from langchain import PromptTemplate
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
 from basic_utils import read_txt
-from common_utils import extract_personal_information, get_web_resources, fetch_similar_samples, retrieve_from_vectorstore, get_job_relevancy
+from common_utils import extract_personal_information, get_web_resources, fetch_similar_samples, get_job_relevancy, retrieve_from_db, get_summary, extract_posting_information
 from samples import cover_letter_samples_dict
 from datetime import date
+from pathlib import Path
 
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
@@ -28,25 +29,38 @@ delimiter5 = '~~~~'
 # test run defaults, change for yours
 my_job_title = 'accountant'
 my_resume_file = 'resume_samples/sample1.txt'
+cover_letter_advice_path = "./web_data/cover_letter/"
+posting_path = "./uploads/posting/accountant.txt"
 
 
 
-def generate_basic_cover_letter(my_job_title, company="openai", read_path=my_resume_file, res_path= "./static/cover_letter/cover_letter.txt"):
+def generate_basic_cover_letter(my_job_title, company="abc", read_path=my_resume_file, res_path= "./static/cover_letter/cover_letter.txt", posting_path=posting_path):
     
     resume_content = read_txt(read_path)
     # Get personal information from resume
     personal_info_dict = extract_personal_information(resume_content)
 
+    # TODO: Job positin and company name can be extracted from job posting so no need to have both text inputs and posting link
+    job_specification = ""
+    if (Path(posting_path).is_file()):
+      job_specification = get_summary(posting_path)
+      posting = read_txt(posting_path)
+      posting_info_dict=extract_posting_information(posting)
+      my_job_title = posting_info_dict["job"]
+      company = posting_info_dict["company"]
+
     # Get advices on cover letter
     advice_query = "What to include and what not to include in a cover letter?"
-    advices = retrieve_from_vectorstore(embeddings, advice_query, index_name="redis_cl_test")
+    # advices = retrieve_from_vectorstore(embeddings, advice_query, index_name="redis_cover_letter_advice")
+    advices = retrieve_from_db(cover_letter_advice_path, advice_query)
   
     # Get job description using Google serach
     job_query  = f"""Research what a {my_job_title} does and output a detailed description of the common skills, responsibilities, education, experience needed. """
     job_description = get_web_resources(job_query, "google")
 
     # Get company descriptiong using Wikipedia lookup
-    company_query = f""" Research what kind of company {company} is, such as its culture, mission, and values, and the products or services that it offers.
+    # for future probably will need to go into company site and scrape more information
+    company_query = f""" Research what kind of company {company} is, such as its culture, mission, and values.
                         
                         Look up the exact name of the company. If it doesn't exist or the search result does not return a company, output you don't know"""
     company_description = get_web_resources(company_query, "wiki")
@@ -100,15 +114,19 @@ def generate_basic_cover_letter(my_job_title, company="openai", read_path=my_res
 
         content: {delimiter}{content}{delimiter}. \n
 
-      Step 2: You are given two lists of information delimited with {delimiter1} characters. One is irrelevant to applying for {job} and the other is relevant. 
+      Step 2: You are given two lists of information delimited with {delimiter2} characters. One is irrelevant to applying for {job} and the other is relevant. 
 
         Use them as a reference when determining what to include and what to not include in the cover letter. 
      
         information list: {delimiter2}{comparison}{delimiter2}.  \n
 
-      Step 3: You're provided with some company informtion delimited by {delimiter3} characters. Use it to make the cover letter more specific to the company.
+      Step 3: You're provided with some company informtion delimited by {delimiter3} characters and job specification from this company's job listing delimited with {delimiter1} characters.
+
+      Use them to make the cover letter more specific to the company and job position
 
         company information: {delimiter3}{company_description}{delimiter3} \n
+
+        job specification: {delimiter1}{job_specification}{delimiter1} \n
     
       Step 4: Change all personal information of the cover letter to the following. Do not incude them if they are -1 or empty: 
 
@@ -149,6 +167,7 @@ def generate_basic_cover_letter(my_job_title, company="openai", read_path=my_res
                     content=resume_content,
                     comparison = comparison, 
                     company_description = company_description,
+                    job_specification = job_specification, 
                     delimiter = delimiter,
                     delimiter1 = delimiter1, 
                     delimiter2 = delimiter2,
@@ -163,14 +182,16 @@ def generate_basic_cover_letter(my_job_title, company="openai", read_path=my_res
     # Check potential harmful content in response
     if (check_content_safety(text_str=my_cover_letter)):   
         # Validate cover letter
-        if (evaluate_response(my_cover_letter)):
+        if (evaluate_content(my_cover_letter, "cover letter")):
             # Write the cover letter to a file
             with open(res_path, 'w') as f:
                 try:
                     f.write(my_cover_letter)
                     print("ALL SUCCESS")
+                    return True
                 except Exception as e:
                     print("FAILED")
+                    return False
                     # Error logging
     
         

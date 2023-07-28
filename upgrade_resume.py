@@ -1,12 +1,12 @@
 import os
-from openai_api import evaluate_response, check_content_safety
+from openai_api import evaluate_content, check_content_safety
 from langchain.chat_models import ChatOpenAI
 from langchain.llms import OpenAI
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
 from langchain import PromptTemplate
 from basic_utils import read_txt
-from common_utils import search_similar_samples, get_web_resources, retrieve_from_vectorstore, get_job_relevancy, extract_fields
+from common_utils import search_similar_samples, get_web_resources, retrieve_from_db, get_job_relevancy, extract_fields
 
 
 from dotenv import load_dotenv, find_dotenv
@@ -25,6 +25,7 @@ delimiter4 = "****"
 
 my_job_title = 'prompt engineer'
 my_resume_file = 'resume_samples/sample1.txt'
+resume_advice_path = './web_data/resume/'
 
 
     
@@ -33,13 +34,9 @@ def evaluate_resume(my_job_title, read_path = my_resume_file, res_path="./static
     resume = read_txt(read_path)
 
     resume_fields = extract_fields(resume)
-
-
-    resume_samples = f"""Research the content of sample resume provided. Each sample is delimited with {delimiter2} characters.
-
-        Compare them with the content delimited with {delimiter2} characters. and look for differences in the content of each field.
-        
-        sample: {delimiter2}{resume_samples}{delimiter2}"""
+ 
+    query_advice =  "what makes a bad resume and how to improve"
+    resume_advices = retrieve_from_db(resume_advice_path, query_advice)
     
     query_job  = f"""Research what a {my_job_title} does, including details of the common skills, responsibilities, education, experience needed for the job."""
     job_description = get_web_resources(query_job, "google")
@@ -56,10 +53,13 @@ def evaluate_resume(my_job_title, read_path = my_resume_file, res_path="./static
 
     resume_relevancy = get_job_relevancy(read_path, query_relevancy)
 
+    resume_samples = f"""Research the content of sample resume provided. Each sample is delimited with {delimiter2} characters.
+
+        Compare them with the content delimited with {delimiter2} characters. and look for differences in the content of each field.
+        
+        sample: {delimiter2}{resume_samples}{delimiter2}"""
     resume_samples = search_similar_samples(embeddings, my_job_title)
 
-    query_advice =  "what makes a bad resume and how to improve"
-    resume_advices = retrieve_from_vectorstore(embeddings, query_advice)
 
 
     template_string = """" Your task is to analyze the weaknesses of a resume and ways to improve it. 

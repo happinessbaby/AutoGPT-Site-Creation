@@ -1,6 +1,6 @@
 from basic_utils import read_txt
 from openai_api import get_completion
-from openai_api import get_completion, evaluate_response
+from openai_api import get_completion
 from langchain.chat_models import ChatOpenAI
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
@@ -14,12 +14,18 @@ from langchain.agents import AgentType
 from langchain.chains import RetrievalQA
 from pathlib import Path
 from basic_utils import read_txt
-from langchain_utils import create_wiki_tools, create_search_tools, create_QA_chain, create_qa_tools, create_doc_tools, split_doc, create_redis_index, add_redis_index
+from langchain_utils import create_wiki_tools, create_search_tools, create_QA_chain, create_qa_tools, create_doc_tools, split_doc, retrieve_redis_vectorstore, get_index
 from langchain import PromptTemplate
 from langchain.experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
 from langchain.agents.agent_toolkits import create_python_agent
 from langchain.output_parsers import CommaSeparatedListOutputParser
+from langchain.chains.summarize import load_summarize_chain
 from langchain.llms import OpenAI
+from langchain.agents.agent_toolkits import (
+    create_vectorstore_agent,
+    VectorStoreToolkit,
+    VectorStoreInfo,
+)
 import sys
 
 
@@ -73,6 +79,40 @@ def extract_personal_information(resume,  llm = ChatOpenAI(temperature=0, model=
     print(personal_info_dict.get('email'))
     return personal_info_dict
 
+def extract_posting_information(posting, llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
+    job_schema = ResponseSchema(name="job",
+                             description="Extract the job position of the job listing. If this information is not found, output -1")
+    company_schema = ResponseSchema(name="company",
+                                        description="Extract the company name of the job listing. If this information is not found, output -1")
+    
+    response_schemas = [job_schema, 
+                        company_schema]
+
+    output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
+    format_instructions = output_parser.get_format_instructions()
+    template_string = """For the following text, delimited with {delimiter} chracters, extract the following information:
+
+    job: Extract the job positiong of the job posting. If this information is not found, output -1\
+
+    company: Extract the company name of the job posting. If this information is not found, output -1\
+
+
+    text: {delimiter}{text}{delimiter}
+
+    {format_instructions}
+    """
+
+    prompt = ChatPromptTemplate.from_template(template=template_string)
+    messages = prompt.format_messages(text=posting, 
+                                format_instructions=format_instructions,
+                                delimiter=delimiter)
+
+    
+    response = llm(messages)
+    posting_info_dict = output_parser.parse(response.content)
+    print(posting_info_dict.get('job'))
+    return posting_info_dict
+
 
 def extract_fields(resume, llm=OpenAI(temperature=0, cache=False)):
 
@@ -95,47 +135,12 @@ def extract_fields(resume, llm=OpenAI(temperature=0, cache=False)):
     
     _input = prompt.format(delimiter=delimiter, resume = resume)
     response = llm(_input)
+    print(response)
     return response
     
 
 
 
-# def fetch_samples(llm, embeddings, job_title, samples):
-
-#     table = find_similar_jobs(llm, embeddings, job_title)
-
-#     prompt = f"""Extract the Job Title values in the markdown table: {table}.
-    
-#     Output your answer as a comma separated list. If there is no table, return -1. """
-
-#     jobs = get_completion(prompt)
-#     sample_string = ""
-#     print(jobs)
-#     if (jobs!=-1):
-#         jobs_list = jobs.split(",")
-#         for job in jobs_list:
-#             if (samples.get(job)!=None):
-#                 sample = read_txt(samples.get(job))
-#                 sample_string = sample_string + "\n" + f" {delimiter3}\n{sample}\n{delimiter3}" + "\n\nexample:"   
-#     # print(sample_string)
-#     return sample_string
-
-
-# def find_similar_jobs(llm, embeddings, job_title):
-
-#     loader = CSVLoader(file_path="jobs.csv")
-#     docs = loader.load()
-
-#     qa_stuff = create_QA_chain(llm, embeddings, docs=docs, db_type = "docarray")
-
-#     query = f"""List all the jobs related to or the same as {job_title} in a markdown table.
-    
-#     Do not make up things not in the given context. """
-    
-
-#     response = qa_stuff.run(query)
-#     print(response)
-#     return response
 
 def fetch_similar_samples(embeddings, job_title, samples, query, llm=ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
     loader = CSVLoader(file_path="jobs.csv")
@@ -151,6 +156,7 @@ def fetch_similar_samples(embeddings, job_title, samples, query, llm=ChatOpenAI(
     Do not make up things not in the given context. """
 
     jobs = qa_stuff.run(related_query)
+    print(jobs)
 
     # sample_string = ""
     # jobs_list = jobs.split(" ")
@@ -178,13 +184,17 @@ def fetch_similar_samples(embeddings, job_title, samples, query, llm=ChatOpenAI(
         print(response)
         return response
     else:
+        print("NO SIMILAR SAMPLES FOUND")
         return ""
 
 
 
 
-# instead fetching samples from dictionry, all resume samples will be saved then let use chain (map-reduce for example) to filter out the related resume
+# instead fetching samples from dictionry, all resume samples will be saved then use chain (map-reduce for example) to filter out the related resume
 def search_similar_samples():
+
+    
+
     return None
 
 
@@ -246,29 +256,56 @@ def get_job_relevancy(doc, query, doctype="file", llm = ChatOpenAI(temperature=0
     response = agent.run(query)
     print(response)
     return response
-
     
 
-def retrieve_from_vectorstore(embeddings, query,  llm=OpenAI(temperature=0, cache=False), db_type = "redis", index_name="redis_index"):
-    qa_stuff = create_QA_chain(llm, embeddings, db_type=db_type, index_name=index_name)
-    # Option 1: qa tool + react 
-    # Option 1 seems to give better advices 
-    tools = create_qa_tools(qa_stuff)
-    agent = initialize_agent(tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=True)
-    try:
-        response = agent.run(query)
-        return response
-    except ValueError as e:
-        response = str(e)
-        if not response.startswith("Could not parse LLM output: `"):
-            print(e)
-            raise e
-        response = response.removeprefix(
-            "Could not parse LLM output: `").removesuffix("`")
-        return response
-    response = agent.run(query)
-    # Option 2
-    # response = qa_stuff.run(query)
+def retrieve_from_db(path, query, llm=OpenAI()):
+    index = get_index(path=path, path_type='dir')
+    # Create a question-answering chain using the index
+    chain = RetrievalQA.from_chain_type(llm, chain_type="stuff", retriever=index.vectorstore.as_retriever(), input_key="question")
+    response = chain.run(query)
+    print(response)
+    return response
+
+    
+def get_summary(doc_path, llm=OpenAI()):
+    docs = split_doc(path=doc_path, path_type="file")
+    prompt_template = """Identity the job position, company then provide a summary of the following job posting:
+
+        {text} \n
+
+        Do not include information irrelevant to this specific position.
+
+    """
+      
+    PROMPT = PromptTemplate(template=prompt_template, input_variables=["text"])
+
+    chain = load_summarize_chain(llm, chain_type="stuff", prompt=PROMPT)
+    response = chain.run(docs)
+    print(response)
+    return response
+
+# def retrieve_from_vectorstore(embeddings, query,  llm=OpenAI(temperature=0, cache=False), db_type = "redis", index_name="redis_resume_advice"):
+
+
+#     qa_stuff = create_QA_chain(llm, embeddings, db_type=db_type, index_name=index_name)
+#     # Option 1: qa tool + react 
+#     # Option 1 seems to give better advices 
+#     tools = create_qa_tools(qa_stuff)
+#     agent = initialize_agent(tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=True)
+#     try:
+#         response = agent.run(query)
+#         return response
+#     except ValueError as e:
+#         response = str(e)
+#         if not response.startswith("Could not parse LLM output: `"):
+#             print(e)
+#             raise e
+#         response = response.removeprefix(
+#             "Could not parse LLM output: `").removesuffix("`")
+#         return response
+    # response = agent.run(query)
+    # # Option 2
+    # # response = qa_stuff.run(query)
 
 
     

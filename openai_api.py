@@ -106,9 +106,9 @@ def check_injection(message):
 	
 
 # Could also implement a scoring system_message to provide model with feedback
-def evaluate_response(cover_letter):
+def evaluate_content(content, content_type):
 	system_message = f"""
-		You are an assistant that evaluates whether the content contains a cover letter. 
+		You are an assistant that evaluates whether the content contains a {content_type} 
 
 		Respond with a Y or N character, with no punctuation:
 		Y - if the content contains a cover letter
@@ -119,7 +119,7 @@ def evaluate_response(cover_letter):
 	
 	messages = [
     {'role': 'system', 'content': system_message},
-    {'role': 'user', 'content': cover_letter}
+    {'role': 'user', 'content': content}
 	]	
 	
 	response = get_completion_from_messages(messages, max_tokens=1)

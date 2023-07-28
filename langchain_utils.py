@@ -265,7 +265,7 @@ def create_elastic_knn():
     return knn_search
 
 
-def create_redis_index(docs, embedding, source, index_name):
+def create_redis_index_with_source(docs, embedding, source, index_name):
     texts = [d.page_content for d in docs]
     # metadatas = [d.metadata for d in docs]
     metadatas=[{"source": source} for i in range(len(texts))]
@@ -276,6 +276,12 @@ def create_redis_index(docs, embedding, source, index_name):
     ) 
     return rds
 
+def create_redis_index(docs, embeddings, index_name):
+    rds = Redis.from_documents(
+        docs, embeddings, redis_url=redis_url, index_name=index_name
+    )
+    return rds
+
 def add_redis_index(texts, embedding, source, index_name):
     rds = Redis.from_existing_index(
             embedding, redis_url=redis_url, index_name=index_name
@@ -283,17 +289,14 @@ def add_redis_index(texts, embedding, source, index_name):
     metadatas=[{"source": source} for i in range(len(texts))]
     print(rds.add_texts(texts, metadatas=metadatas))
 
-def delete_redis_keys(keys):
-    Redis.delete(keys, redis_url=redis_url)
+def retrieve_redis_vectorstore(embeddings, index_name):
+
+    return Redis.from_existing_index(
+        embeddings, redis_url=redis_url, index_name=index_name
+    )
 
 def drop_redis_index(index_name):
     print(Redis.drop_index(index_name, delete_documents=True, redis_url=redis_url))
-
-
-def get_summary(llm, docs):
-    chain = load_summarize_chain(llm, chain_type="map_reduce")
-    summary = chain.run(docs)
-    return summary
 
 
 
