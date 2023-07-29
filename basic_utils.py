@@ -6,6 +6,9 @@ import pypandoc
 import uuid
 import markdown
 import csv
+import bs4
+import urllib.request
+from urllib.request import Request, urlopen
 
 
 
@@ -66,6 +69,40 @@ def markdown_table_to_dict(markdown_table):
         result.append(item)
 
     return result
+
+class AppURLopener(urllib.request.FancyURLopener):
+    version = "Mozilla/5.0"
+
+def retrieve_web_content(link, save_path="./web_data/test.txt"):
+
+    req = Request(
+        url=link, 
+        headers={'User-Agent': 'Mozilla/5.0'}
+    )
+    try: 
+        webpage=str(urllib.request.urlopen(link).read())
+    except Exception: 
+        # webpage = urlopen(req).read()
+        opener = AppURLopener()
+        webpage = opener.open(link)
+    soup = bs4.BeautifulSoup(webpage, features="lxml")
+
+    content = soup.get_text()
+
+    if content:
+        with open(save_path, 'w') as file:
+            file.write(content)
+            file.close()
+            print('Content retrieved and written to file.')
+            return True
+    else:
+        print('Failed to retrieve content from the URL.')
+        return False
+
+if __name__=="__main__":
+    retrieve_web_content(
+        "https://www.google.com/search?q=accountant+job+posting&oq=accountant+job+posting&gs_lcrp=EgZjaHJvbWUqBwgAEAAYgAQyBwgAEAAYgAQyBwgBEAAYgAQyBwgCEAAYgAQyBwgDEAAYgAQyBwgEEAAYgAQyBwgFEAAYgAQyCggGEAAYhgMYigUyCggHEAAYhgMYigXSAQgzNTc2ajBqN6gCALACAA&sourceid=chrome&ie=UTF-8&ibp=htl;jobs&sa=X&ved=2ahUKEwjZ4KPy1bGAAxWvOkQIHUCTAHMQkd0GegQIJRAB#fpstate=tldetail&htivrt=jobs&htiq=accountant+job+posting&htidocid=d18qY4tf7BQAAAAAAAAAAA%3D%3D&sxsrf=AB5stBh4sXF7HWPyg6G5alg1IAJfXhu1eQ:1690556544124",
+        save_path = "./uploads/posting/accountant.txt")
 
 
 

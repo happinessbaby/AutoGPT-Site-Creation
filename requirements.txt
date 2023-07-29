@@ -21,4 +21,5 @@ gunicorn
 pinecone-client
 unstructured
 redis
+faiss-cpu
 

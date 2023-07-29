@@ -108,10 +108,12 @@ def check_injection(message):
 # Could also implement a scoring system_message to provide model with feedback
 def evaluate_content(content, content_type):
 	system_message = f"""
-		You are an assistant that evaluates whether the content contains a {content_type} 
+		You are an assistant that evaluates whether the content contains a {content_type}.
+		 
+		  There may be other irrelevant content. Ignore them and ignore all formatting. 
 
 		Respond with a Y or N character, with no punctuation:
-		Y - if the content contains a cover letter
+		Y - if the content contains a {content_type}. it's okay if the content contains other things. 
 		N - otherwise
 
 		Output a single letter only.

@@ -39,8 +39,12 @@ import json
 from langchain.tools import tool
 from langchain.agents.agent_types import AgentType
 from langchain.agents.agent_toolkits import create_python_agent
+from langchain.chains import RetrievalQA
+from langchain.vectorstores import FAISS
+from pydantic import BaseModel, Field
 
-
+from dotenv import load_dotenv, find_dotenv
+_ = load_dotenv(find_dotenv()) # read local .env file
 # You may need to update the path depending on where you stored it
 feast_repo_path = "."
 redis_password=os.getenv('REDIS_PASSWORD')
@@ -58,7 +62,7 @@ def split_doc(path='./web_data/', path_type='dir'):
     if (path_type=="file"):
         loader = TextLoader(path)
     elif (path_type=="dir"):
-        loader = DirectoryLoader(path, glob="*.txt")
+        loader = DirectoryLoader(path, glob="*.txt", recursive=True)
     documents = loader.load()
     text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
     docs = text_splitter.split_documents(documents)
@@ -142,12 +146,16 @@ def create_search_tools(name, top_n):
         ]
     return tool
 
-def create_db_tools(db_chain, name):
+class DocumentInput(BaseModel):
+    question: str = Field()
+
+def create_db_tools(llm, retriever, name):
     tool = [
         Tool(
-        name="PineCone DB",
-        func=db_chain.run,
-        description="useful for when you need to answer questions about PineCone DB. Input should be in the form of a question containing full context",
+        args_schema=DocumentInput,
+        name=name,
+        description="useful when you want to answer questions about samples",
+        func=RetrievalQA.from_chain_type(llm=llm, retriever=retriever),
     ),
     ]
     return tool
@@ -201,7 +209,7 @@ def create_QA_chain(llm, embeddings, docs=None, chain_type="stuff", db_type = "d
 
 
 
-def create_QASource_chain(chat, embeddings, db_type, docs=None, chain_type="stuff", index_name="redis_index"):
+def create_QASource_chain(chat, embeddings, db_type, docs=None, chain_type="stuff", index_name="redis_web_advice"):
     if (db_type=="chroma"):
         persist_directory = 'myvectordb'
         vectorstore = Chroma(persist_directory=persist_directory, embedding_function = embeddings)
@@ -350,6 +358,29 @@ class CustomOutputParser(AgentOutputParser):
         action_input = match.group(2)
         # Return the action and action input
         return AgentAction(tool=action, tool_input=action_input.strip(" ").strip('"'), log=llm_output)
+    
+
+
+
+
+    
+    
+def create_vector_store(index_name, path, path_type="file", source=None):
+    # retrieve_web_content(link)
+    docs = split_doc(path=path, path_type=path_type)
+    if (source!=None):
+        rds = create_redis_index_with_source(docs, OpenAIEmbeddings(), source, index_name)
+    else:
+        rds = create_redis_index(docs, OpenAIEmbeddings(), index_name)
+    # add_redis_index(docs, OpenAIEmbeddings, link, "redis_index")
+    print(rds)
+
+    
+
+
+
+if __name__ == '__main__':
+    create_vector_store("redis_web_advice", "./web_data/", path_type="dir" )
     
 
 

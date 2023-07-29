@@ -1,6 +1,6 @@
 from basic_utils import read_txt
 from openai_api import get_completion
-from openai_api import get_completion
+from openai_api import get_completion, get_completion_from_messages
 from langchain.chat_models import ChatOpenAI
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
@@ -14,7 +14,7 @@ from langchain.agents import AgentType
 from langchain.chains import RetrievalQA
 from pathlib import Path
 from basic_utils import read_txt
-from langchain_utils import create_wiki_tools, create_search_tools, create_QA_chain, create_qa_tools, create_doc_tools, split_doc, retrieve_redis_vectorstore, get_index
+from langchain_utils import create_wiki_tools, create_search_tools, create_db_tools, create_QA_chain, create_qa_tools, create_doc_tools, split_doc, retrieve_redis_vectorstore, get_index
 from langchain import PromptTemplate
 from langchain.experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
 from langchain.agents.agent_toolkits import create_python_agent
@@ -26,7 +26,9 @@ from langchain.agents.agent_toolkits import (
     VectorStoreToolkit,
     VectorStoreInfo,
 )
+from langchain.vectorstores import FAISS
 import sys
+import re
 
 
 
@@ -137,26 +139,56 @@ def extract_fields(resume, llm=OpenAI(temperature=0, cache=False)):
     response = llm(_input)
     print(response)
     return response
+
     
+def search_related_samples(job_title, directory):
+    # related_jobs = get_completion(f"Generate a list of job titles that are similar to {job_title} or relevant to {job_title}")
+    # print(related_jobs)
+
+    system_message = f"""
+		You are an assistant that evaluates whether the job position described in the content is related to {job_title} or relevant to {job_title}. 
+
+		Respond with a Y or N character, with no punctuation:
+		Y - if the content contains a cover letter
+		N - otherwise
+
+		Output a single letter only.
+		"""
+    related_files = []
+    for path in  Path(directory).glob('**/*'):
+        # 1. extract job from sample resume/cover letter and do a similarity search with job_title
+        # 2. for similar jobs, compare the sample with the user's and determine areas of improvement
+        file = str(path)
+        content = read_txt(file)
+        messages = [
+        {'role': 'system', 'content': system_message},
+        {'role': 'user', 'content': content}
+        ]	
+        
+        response = get_completion_from_messages(messages, max_tokens=1)
+        if (response=="Y"):
+            related_files.append(file)
+    return related_files
 
 
 
 
-def fetch_similar_samples(embeddings, job_title, samples, query, llm=ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
-    loader = CSVLoader(file_path="jobs.csv")
-    docs = loader.load()
+def compare_samples(job_title, query, directory, llm=ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
+    # loader = CSVLoader(file_path="jobs.csv")
+    # docs = loader.load()
 
-    output_parser = CommaSeparatedListOutputParser()
-    qa_stuff = create_QA_chain(llm, embeddings, docs=docs, db_type = "docarray", output_parse = output_parser)
+    # output_parser = CommaSeparatedListOutputParser()
+    # qa_stuff = create_QA_chain(llm, embeddings, docs=docs, db_type = "docarray", output_parse = output_parser)
 
-    # format_instructions = output_parser.get_format_instructions()
+    # # format_instructions = output_parser.get_format_instructions()
 
-    related_query = f"""List all the jobs related to or the same as {job_title}.
+    # similarity_query = f"""List all the jobs titles that are similar to {job_title} or relevant to {job_title}.
     
-    Do not make up things not in the given context. """
+    # Do not make up things not in the given context. """
 
-    jobs = qa_stuff.run(related_query)
-    print(jobs)
+    # jobs = qa_stuff.run(similarity_query)
+    # print(jobs)
+    
 
     # sample_string = ""
     # jobs_list = jobs.split(" ")
@@ -168,34 +200,31 @@ def fetch_similar_samples(embeddings, job_title, samples, query, llm=ChatOpenAI(
     #         sample_string = sample_string + "\n" + f" {delimiter3}\n{sample}\n{delimiter3}" + "\n\nexample:"   
     # print(sample_string)
     # return sample_string
-    jobs_list = jobs.split(" ")
-    tools = []
-    for job in jobs_list:
-        job = job[:-1]
-        if (samples.get(job) != None):
-            docs = split_doc(samples.get(job), "file")
-            tool = create_doc_tools(docs, "file")
+    related_files = search_related_samples(job_title, directory)
+    print(related_files)
+    if (related_files):
+        tools = []
+        for file in related_files:
+            docs = split_doc(file, "file")
+            retriever = FAISS.from_documents(docs, OpenAIEmbeddings()).as_retriever()
+            tool = create_db_tools(llm, retriever, Path(file).name )
             tools.extend(tool)
-    if tools:
+        # Option 1: OpenAI multi functions
         agent = initialize_agent(
             tools, llm, agent=AgentType.OPENAI_MULTI_FUNCTIONS, verbose=True
             )
         response = agent.run(query)
         print(response)
         return response
+        # Option 2: Plan and Execute
+        planner = load_chat_planner(llm)
+        executor = load_agent_executor(llm, tools, verbose=True)
+        agent = PlanAndExecute(planner=planner, executor=executor, verbose=True)
+        response = agent.run(query)
+        print(response)
+        return response
     else:
-        print("NO SIMILAR SAMPLES FOUND")
         return ""
-
-
-
-
-# instead fetching samples from dictionry, all resume samples will be saved then use chain (map-reduce for example) to filter out the related resume
-def search_similar_samples():
-
-    
-
-    return None
 
 
 
@@ -230,12 +259,12 @@ def get_web_resources(query, search_tool, top=10,  llm = ChatOpenAI(temperature=
             "Could not parse LLM output: `").removesuffix("`")
         return response
     # Option 2: better at providing details but tend to be very slow and error prone and too many tokens
-    # planner = load_chat_planner(llm)
-    # executor = load_agent_executor(llm, tools, verbose=True)
-    # agent = PlanAndExecute(planner=planner, executor=executor, verbose=True)
-    # response = agent.run(query)
-    # print(response)
-    # return response
+    planner = load_chat_planner(llm)
+    executor = load_agent_executor(llm, tools, verbose=True)
+    agent = PlanAndExecute(planner=planner, executor=executor, verbose=True)
+    response = agent.run(query)
+    print(response)
+    return response
 
 
     
@@ -273,7 +302,7 @@ def get_summary(doc_path, llm=OpenAI()):
 
         {text} \n
 
-        Do not include information irrelevant to this specific position.
+        Focus on roles and skills involved for this job. Do not include information irrelevant to this specific position.
 
     """
       
@@ -308,7 +337,6 @@ def get_summary(doc_path, llm=OpenAI()):
     # # response = qa_stuff.run(query)
 
 
-    
 
 
 
