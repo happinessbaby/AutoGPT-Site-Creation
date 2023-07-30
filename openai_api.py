@@ -4,6 +4,7 @@ import openai
 import os
 import json
 from dotenv import load_dotenv, find_dotenv
+from basic_utils import read_txt
 
 
 _ = load_dotenv(find_dotenv()) # read local .env file
@@ -105,12 +106,14 @@ def check_injection(message):
 	
 
 # Could also implement a scoring system_message to provide model with feedback
-def evaluate_response(cover_letter):
+def evaluate_content(content, content_type):
 	system_message = f"""
-		You are an assistant that evaluates whether the content contains a cover letter. 
+		You are an assistant that evaluates whether the content contains a {content_type}.
+		 
+		  There may be other irrelevant content. Ignore them and ignore all formatting. 
 
 		Respond with a Y or N character, with no punctuation:
-		Y - if the content contains a cover letter
+		Y - if the content contains a {content_type}. it's okay if the content contains other things. 
 		N - otherwise
 
 		Output a single letter only.
@@ -118,7 +121,7 @@ def evaluate_response(cover_letter):
 	
 	messages = [
     {'role': 'system', 'content': system_message},
-    {'role': 'user', 'content': cover_letter}
+    {'role': 'user', 'content': content}
 	]	
 	
 	response = get_completion_from_messages(messages, max_tokens=1)
@@ -130,6 +133,17 @@ def evaluate_response(cover_letter):
 	else:
 		# return false for now, will have error handling here
 		return False
+	
+
+def check_content_safety(file=None, text_str=None):
+    if (file!=None):
+        text = read_txt(file)
+    elif (text_str!=None):
+        text = text_str
+    if (get_moderation_flag(text) or check_injection(text)):
+        return False
+    else:
+        return True
 	
 
 	

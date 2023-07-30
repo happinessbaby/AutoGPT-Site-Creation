@@ -31,14 +31,20 @@ from feast import FeatureStore
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.vectorstores.redis import Redis
 from langchain.embeddings import OpenAIEmbeddings
-from basic_utils import retrieve_web_content
 import redis
 import langchain
 from langchain.cache import RedisCache
 from langchain.cache import RedisSemanticCache
 import json
+from langchain.tools import tool
+from langchain.agents.agent_types import AgentType
+from langchain.agents.agent_toolkits import create_python_agent
+from langchain.chains import RetrievalQA
+from langchain.vectorstores import FAISS
+from pydantic import BaseModel, Field
 
-
+from dotenv import load_dotenv, find_dotenv
+_ = load_dotenv(find_dotenv()) # read local .env file
 # You may need to update the path depending on where you stored it
 feast_repo_path = "."
 redis_password=os.getenv('REDIS_PASSWORD')
@@ -56,7 +62,7 @@ def split_doc(path='./web_data/', path_type='dir'):
     if (path_type=="file"):
         loader = TextLoader(path)
     elif (path_type=="dir"):
-        loader = DirectoryLoader(path, glob="*.txt")
+        loader = DirectoryLoader(path, glob="*.txt", recursive=True)
     documents = loader.load()
     text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
     docs = text_splitter.split_documents(documents)
@@ -99,10 +105,12 @@ def create_qa_tools(qa_chain):
             func = qa_chain.__call__,
             coroutine=qa_chain.acall, #if you want to use async
             description="Useful for answering general questions",
-            return_direct=True,
+            # return_direct=True,
         ),
     ]
     return tools
+
+
 
 def create_doc_tools(doc, path_type):
     index = get_index(doc, path_type)
@@ -111,7 +119,7 @@ def create_doc_tools(doc, path_type):
         name = f"{doc} Document",
         func = lambda q: str(index.query(q)),
         description="Useful for answering personalized questions",
-        return_direct=True,
+        # return_direct=True,
         )
     ]
     return tools
@@ -138,12 +146,16 @@ def create_search_tools(name, top_n):
         ]
     return tool
 
-def create_db_tools(db_chain, name):
+class DocumentInput(BaseModel):
+    question: str = Field()
+
+def create_db_tools(llm, retriever, name):
     tool = [
         Tool(
-        name="PineCone DB",
-        func=db_chain.run,
-        description="useful for when you need to answer questions about PineCone DB. Input should be in the form of a question containing full context",
+        args_schema=DocumentInput,
+        name=name,
+        description="useful when you want to answer questions about samples",
+        func=RetrievalQA.from_chain_type(llm=llm, retriever=retriever),
     ),
     ]
     return tool
@@ -158,13 +170,18 @@ def create_db_tools(db_chain, name):
 #     ]
 #     return tool
 
-def create_QA_chain(chat, embeddings, docs, chain_type="stuff"):
-
-    db = DocArrayInMemorySearch.from_documents(
-        docs, 
-        embeddings
+def create_QA_chain(llm, embeddings, docs=None, chain_type="stuff", db_type = "docarray", index_name="redis_index", output_parse=None):
+    if (db_type=="docarray"):
+        db = DocArrayInMemorySearch.from_documents(
+            docs, 
+            embeddings
+            )
+    elif (db_type == "redis"):
+        db = Redis.from_existing_index(
+            embeddings, redis_url=redis_url, index_name=index_name
         )
 
+    output_parser =  output_parse
     prompt_template = """If the context is not relevant, 
     please answer the question by using your own knowledge about the topic
     
@@ -174,13 +191,13 @@ def create_QA_chain(chat, embeddings, docs, chain_type="stuff"):
     """
 
     PROMPT = PromptTemplate(
-        template=prompt_template, input_variables=["context", "question"]
+        template=prompt_template, input_variables=["context", "question"], output_parser=output_parser
     )
 
     chain_type_kwargs = {"prompt": PROMPT}
 
     qa = RetrievalQA.from_chain_type(
-        llm=chat, 
+        llm=llm, 
         chain_type=chain_type,
         # can also pass in a "search_type" to as_retriever() 
         retriever=db.as_retriever(), 
@@ -192,7 +209,7 @@ def create_QA_chain(chat, embeddings, docs, chain_type="stuff"):
 
 
 
-def create_QASource_chain(chat, embeddings, db_type, docs=None, chain_type="stuff", index_name="redis_index"):
+def create_QASource_chain(chat, embeddings, db_type, docs=None, chain_type="stuff", index_name="redis_web_advice"):
     if (db_type=="chroma"):
         persist_directory = 'myvectordb'
         vectorstore = Chroma(persist_directory=persist_directory, embedding_function = embeddings)
@@ -256,15 +273,7 @@ def create_elastic_knn():
     return knn_search
 
 
-def create_python_agent(llm):
-    agent = create_python_agent(
-    llm,
-    tool=PythonREPLTool(),
-    verbose=True
-    )
-    return agent
-
-def create_redis_index(docs, embedding, source, index_name):
+def create_redis_index_with_source(docs, embedding, source, index_name):
     texts = [d.page_content for d in docs]
     # metadatas = [d.metadata for d in docs]
     metadatas=[{"source": source} for i in range(len(texts))]
@@ -275,6 +284,12 @@ def create_redis_index(docs, embedding, source, index_name):
     ) 
     return rds
 
+def create_redis_index(docs, embeddings, index_name):
+    rds = Redis.from_documents(
+        docs, embeddings, redis_url=redis_url, index_name=index_name
+    )
+    return rds
+
 def add_redis_index(texts, embedding, source, index_name):
     rds = Redis.from_existing_index(
             embedding, redis_url=redis_url, index_name=index_name
@@ -282,17 +297,14 @@ def add_redis_index(texts, embedding, source, index_name):
     metadatas=[{"source": source} for i in range(len(texts))]
     print(rds.add_texts(texts, metadatas=metadatas))
 
-def delete_redis_keys(keys):
-    Redis.delete(keys, redis_url=redis_url)
+def retrieve_redis_vectorstore(embeddings, index_name):
+
+    return Redis.from_existing_index(
+        embeddings, redis_url=redis_url, index_name=index_name
+    )
 
 def drop_redis_index(index_name):
     print(Redis.drop_index(index_name, delete_documents=True, redis_url=redis_url))
-
-
-def get_summary(llm, docs):
-    chain = load_summarize_chain(llm, chain_type="map_reduce")
-    summary = chain.run(docs)
-    return summary
 
 
 
@@ -350,13 +362,25 @@ class CustomOutputParser(AgentOutputParser):
 
 
 
-def build_vectorstore():
+
+    
+    
+def create_vector_store(index_name, path, path_type="file", source=None):
     # retrieve_web_content(link)
-    docs = split_doc(path="./web_data/", path_type="dir")
-    link = 'https://www.themuse.com/advice/43-resume-tips-that-will-help-you-get-hired'
-    rds = create_redis_index(docs, OpenAIEmbeddings(), link, "redis_index")
+    docs = split_doc(path=path, path_type=path_type)
+    if (source!=None):
+        rds = create_redis_index_with_source(docs, OpenAIEmbeddings(), source, index_name)
+    else:
+        rds = create_redis_index(docs, OpenAIEmbeddings(), index_name)
     # add_redis_index(docs, OpenAIEmbeddings, link, "redis_index")
     print(rds)
+
     
 
-build_vectorstore()
+
+
+if __name__ == '__main__':
+    create_vector_store("redis_web_advice", "./web_data/", path_type="dir" )
+    
+
+

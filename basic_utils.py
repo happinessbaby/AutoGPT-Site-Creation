@@ -2,34 +2,15 @@
 import os
 import fitz
 from pathlib import Path
-import magic
 import pypandoc
 import uuid
 import markdown
 import csv
-from openai_api import get_moderation_flag, check_injection
 import bs4
 import urllib.request
 from urllib.request import Request, urlopen
 
 
-
-# def check_file_type(filename):
-#     mime = magic.Magic(mime=True)
-#     file_extension = os.path.splitext(filename)[1]
-#     mime_type = mime.from_file(filename)
-#     # Perform actions based on the file type
-#     if file_extension == '.pdf' or mime_type == 'application/pdf':
-#         return "pdf"
-#     elif file_extension == 'txt' or mime_type == 'text/plain':
-#         return "txt"
-#     elif file_extension=='.docx' or file_extension=='.odt' or mime_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
-#         return "doc"
-#     elif file_extension==".csv":
-#         return "csv"
-#     else:
-#         raise Exception("File type not supported")
-    
 
 def convert_to_txt(file, output_path):
     file_ext = os.path.splitext(file)[1]
@@ -89,18 +70,10 @@ def markdown_table_to_dict(markdown_table):
 
     return result
 
+class AppURLopener(urllib.request.FancyURLopener):
+    version = "Mozilla/5.0"
 
-def check_content_safety(file=None, text_str=None):
-    if (file!=None):
-        text = read_txt(file)
-    elif (text_str!=None):
-        text = text_str
-    if (get_moderation_flag(text) or check_injection(text)):
-        return False
-    else:
-        return True
-    
-def retrieve_web_content(link):
+def retrieve_web_content(link, save_path="./web_data/test.txt"):
 
     req = Request(
         url=link, 
@@ -109,19 +82,34 @@ def retrieve_web_content(link):
     try: 
         webpage=str(urllib.request.urlopen(link).read())
     except Exception: 
-        webpage = urlopen(req).read()
+        # webpage = urlopen(req).read()
+        opener = AppURLopener()
+        webpage = opener.open(link)
     soup = bs4.BeautifulSoup(webpage, features="lxml")
 
     content = soup.get_text()
 
-
     if content:
-        with open('./web_data/content.txt', 'w') as file:
+        with open(save_path, 'w') as file:
             file.write(content)
             file.close()
             print('Content retrieved and written to file.')
+            return True
     else:
         print('Failed to retrieve content from the URL.')
+        return False
+
+if __name__=="__main__":
+    retrieve_web_content(
+        "https://www.google.com/search?q=accountant+job+posting&oq=accountant+job+posting&gs_lcrp=EgZjaHJvbWUqBwgAEAAYgAQyBwgAEAAYgAQyBwgBEAAYgAQyBwgCEAAYgAQyBwgDEAAYgAQyBwgEEAAYgAQyBwgFEAAYgAQyCggGEAAYhgMYigUyCggHEAAYhgMYigXSAQgzNTc2ajBqN6gCALACAA&sourceid=chrome&ie=UTF-8&ibp=htl;jobs&sa=X&ved=2ahUKEwjZ4KPy1bGAAxWvOkQIHUCTAHMQkd0GegQIJRAB#fpstate=tldetail&htivrt=jobs&htiq=accountant+job+posting&htidocid=d18qY4tf7BQAAAAAAAAAAA%3D%3D&sxsrf=AB5stBh4sXF7HWPyg6G5alg1IAJfXhu1eQ:1690556544124",
+        save_path = "./uploads/posting/accountant.txt")
+
+
+
+    
+
+    
+
 
 
 

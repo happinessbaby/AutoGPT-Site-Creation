@@ -1,15 +1,16 @@
 # Import the necessary modules
 import os
-from openai_api import get_completion, evaluate_response
+from openai_api import get_completion, evaluate_content, check_content_safety
 from langchain.chat_models import ChatOpenAI
 from langchain.llms import OpenAI
 from langchain import PromptTemplate
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
-from basic_utils import check_content_safety, read_txt
-from common_utils import extract_personal_information, fetch_samples, get_web_resources
+from basic_utils import read_txt
+from common_utils import extract_personal_information, get_web_resources,  get_job_relevancy, retrieve_from_db, get_summary, extract_posting_information, compare_samples
 from samples import cover_letter_samples_dict
 from datetime import date
+from pathlib import Path
 
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
@@ -23,25 +24,90 @@ delimiter1 = "****"
 delimiter2 = "'''"
 delimiter3 = '---'
 delimiter4 = '////'
+delimiter5 = '~~~~'
 
 # test run defaults, change for yours
 my_job_title = 'accountant'
 my_resume_file = 'resume_samples/sample1.txt'
+cover_letter_advice_path = "./web_data/cover_letter/"
+posting_path = "./uploads/posting/accountant.txt"
+cover_letter_samples_path = "./sample_cover_letters/"
 
 
 
-def generate_basic_cover_letter(my_job_title, company="abc", read_path=my_resume_file, res_path= "./static/cover_letter.txt"):
+def generate_basic_cover_letter(my_job_title, company="", read_path=my_resume_file, res_path= "./static/cover_letter/cover_letter.txt", posting_path=""):
     
     resume_content = read_txt(read_path)
     # Get personal information from resume
-    personal_info_dict = extract_personal_information(llm, resume_content)
-    # Get job description
-    query  = f"""Find out what a {my_job_title} does and the skills and responsibilities involved. """
-    job_description = get_web_resources(llm, query)
+    personal_info_dict = extract_personal_information(resume_content)
+
+    job_specification = ""
+    if (Path(posting_path).is_file()):
+      job_specification = get_summary(posting_path)
+      posting = read_txt(posting_path)
+      posting_info_dict=extract_posting_information(posting)
+      my_job_title = posting_info_dict["job"]
+      company = posting_info_dict["company"]
+  
+    # Get job description using Google serach
+    job_query  = f"""Research what a {my_job_title} does and output a detailed description of the common skills, responsibilities, education, experience needed. """
+    job_description = get_web_resources(job_query, "google")
+
+    # Get company descriptiong using Wikipedia lookup
+    # for future probably will need to go into company site and scrape more information
+    company_description=""
+    if (company!=""):
+      company_query = f""" Research what kind of company {company} is, such as its culture, mission, and values.
+                          
+                          Look up the exact name of the company. If it doesn't exist or the search result does not return a company, output you don't know"""
+      company_description = get_web_resources(company_query, "wiki")
+
+
+    query_relevancy = f"""Determine the relevant and irrelevant information contained in the resume document delimited with {delimiter} characters.
+
+      You are  provided with job specification for an opening position, delimiter with {delimiter2} characters. They are delimited with {delimiter2} characters. 
+      
+      Use it as a primarily guidelines when generating your answer. 
+
+      You are also provided with a general job decription of the requirement of {my_job_title}, which is delimited with {delimiter1} charactres. 
+      
+      Use it as a secondary guideline when forming your answer.
+
+      If job specification is not provided, use general job description as your primarily guideline. 
+
+
+      resume document: {delimiter}{resume_content}{delimiter} \n
+
+      job specification: {delimiter2}{job_specification}{delimiter2} \n
+
+      general job description: {delimiter1}{job_description}{delimiter1} \n
+
+
+      Generate a list of irrelevant information that should not be included in the cover letter and a list of relevant information that should be included in the cover letter. 
+
+        """
+    relevancy = get_job_relevancy(read_path, query_relevancy)
+
     # Get advices on cover letter
-    advices = get_web_resources(llm, "what to include in a good cover letter")
+    advice_query = """Find answers to the following questions:
+
+    1. What are some best practices when writing a cover letter?
+    2. what is the average word count of a cover letter?
+    3. what keywords are important in a cover letter? """
+    # advices = retrieve_from_vectorstore(embeddings, advice_query, index_name="redis_cover_letter_advice")
+    advices = retrieve_from_db(cover_letter_advice_path, advice_query)
     # Get cover letter examples
-    cover_letter_examples = fetch_samples(llm, embeddings, my_job_title, cover_letter_samples_dict)
+    query_samples = f""" 
+      Research sample cover letters provided. 
+
+      Reference the samples to answer the following questions: 
+
+      what should I put in my cover letter? \n
+
+      """
+    # practices = compare_samples(my_job_title,  query_samples, cover_letter_samples_path, "cover letter")
+
+
     
     # Use an LLM to generate a cover letter that is specific to the resume file that is being read
 
@@ -49,34 +115,32 @@ def generate_basic_cover_letter(my_job_title, company="abc", read_path=my_resume
 
     template_string2 = """Generate a cover letter for a person applying for {job} at {company} using the following information. 
 
-      The content you are to use as reference to create the cover letter is delimited with {delimiter} characters.
+        The content you are to use as reference to create the cover letter is delimited with {delimiter} characters.
 
-        content: {delimiter}{content}{delimiter}. \
-    
-      Step 1: Read the content and determine which information in the content is useful to generate the cover letter. 
-      
-        Usefulness of the information should be based on how close it is to {job}'s job description. 
-      
-        The job description is delimited with {delimiter2} characters
+        Always use this as a context when writing the cover letter. Do not write out of context and do not make anything up. 
 
-        job description: {delimiter2}{job_description}{delimiter2}. \
-    
-      Step 2: Research example cover letters provided. Each example is delimited with {delimiter3} characters.
+        content: {delimiter}{content}{delimiter}. \n
 
-        From these examples, determine which information in the content is useful to generate the cover letter.
+      Step 1: You are given two lists of information delimited with {delimiter2} characters. One is irrelevant to applying for {job} and the other is relevant. 
 
-        Usefulness should be based on how common they appear in these cover letter examples. 
-        
-         example: {examples}. \
-         
-      Step 3:  Some expert advices are also provided as basic guidelines. Expert advices are delimited with {delimiter1} characters. 
-
-        Selectively filter down information in Step 1 and Step 2. 
-
-        expert advices: {delimiter1}{advices}{delimiter1}
+        Use them as a reference when determining what to include and what not to include in the cover letter. 
      
+        information list: {delimiter2}{relevancy}{delimiter2}.  \n
 
-      Step 4: Change all personal information to the following. Do not incude them if they are -1 or empty: 
+      Step 2: You're given a list of best practices when writing the cover letter. It is delimited with {delimiter1} characters.
+      
+        Use it as a guideline when generating the cover letter.
+
+        best practices: {delimiter1}{practices}{delimiter1}. \n
+
+      Step 3: You're provided with some company informtion delimited by {delimiter3} characters. 
+
+        Use it to make the cover letter cater to the company. 
+
+        company information: {delimiter3}{company_description}{delimiter3}.  \n
+
+    
+      Step 4: Change all personal information of the cover letter to the following. Do not incude them if they are -1 or empty: 
 
         name: {name}. \
 
@@ -90,7 +154,7 @@ def generate_basic_cover_letter(my_job_title, company="abc", read_path=my_resume
 
         job position they are applying for: {job}. \
     
-      Step 5: Generate the cover letter. 
+      Step 5: Generate the cover letter using what you've learned in Step 1 through Step 4. Do not make stuff up. 
     
       Use the following format:
         Step 1:{delimiter4} <step 1 reasoning>
@@ -100,44 +164,8 @@ def generate_basic_cover_letter(my_job_title, company="abc", read_path=my_resume
         Step 5:{delimiter4} <the cover letter you generate>
 
       Make sure to include {delimiter4} to separate every step.
-
-
     """
     
-    # template_string = """Generate a cover letter for a person applying to a job using the following information. 
-
-    #   The content you use to make this cover letter personalized is delimited with {delimiter} characters.
-      
-    # A job description for the job {job} they are applying to is delimited with {delimiter2} characters. 
-
-    # Reference job description to only includes information that is relevant to {job}. Do not make things up. 
-
-    # Some examples of good cover letters are provided and each example is delimited with {delimiter3} characteres.  
-
-    # Reference the examples as a stylistic guide only. 
-
-    # Personal information needs to be changed to as follows. Do not include them if they are -1 or empty:
-
-    # name: {name}. \
-
-    # email: {email}. \
-
-    # phone number: {phone}. \
-    
-    # today's date: {date}. \
-    
-    # company they are applying to: {company}. \
-
-    # job position they are applying for: {job}. \
-
-    # content: {delimiter}{content}{delimiter}. \
-
-    # job description: {delimiter2}{job_description}{delimiter2}. \
-
-    # example: {examples}. 
-
-    # """
-
     prompt_template = ChatPromptTemplate.from_template(template_string2)
     # print(prompt_template.messages[0].prompt.input_variables)
 
@@ -149,32 +177,39 @@ def generate_basic_cover_letter(my_job_title, company="abc", read_path=my_resume
                     company = company,
                     job = my_job_title,
                     content=resume_content,
-                    advices = advices,
-                    job_description = job_description,
-                    examples = cover_letter_examples,
+                    relevancy=relevancy, 
+                    practices = advices, 
+                    company_description = company_description, 
                     delimiter = delimiter,
                     delimiter1 = delimiter1, 
                     delimiter2 = delimiter2,
                     delimiter3 = delimiter3,
-                    delimiter4 = delimiter4
+                    delimiter4 = delimiter4,
     )
-    # FOR THE FUTURE, THIS LLM HERE CAN BE CUSTOMLY TRAINED
+
     my_cover_letter = llm(cover_letter_message).content
 
-    my_cover_letter= my_cover_letter.split(delimiter4)[-1].strip()
+    # my_cover_letter= my_cover_letter.split(delimiter4)[-1].strip()
 
     # Check potential harmful content in response
     if (check_content_safety(text_str=my_cover_letter)):   
-        # Validate cover letter
-        if (evaluate_response(my_cover_letter)):
+        # TODO: to be replaced assess_output()
+        if (evaluate_content(my_cover_letter, "cover letter")):
             # Write the cover letter to a file
             with open(res_path, 'w') as f:
                 try:
                     f.write(my_cover_letter)
                     print("ALL SUCCESS")
+                    return True
                 except Exception as e:
                     print("FAILED")
+                    return False
                     # Error logging
+
+#TODO: assess output according to best practices, e.g., length, word count, etc. 
+# 1. for cover letter, double check nothing is made up, 
+def asess_output():
+    return None
     
         
 
