@@ -1,14 +1,13 @@
 
 import os
 from pathlib import Path
-from openai_api import evaluate_response
 from langchain.chat_models import ChatOpenAI
 from langchain.llms import OpenAI
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
 from langchain import PromptTemplate
 from langchain.agents import ConversationalChatAgent, Tool, AgentExecutor
-from langchain_utils import create_QA_chain, create_QASource_chain, create_qa_tools, create_doc_tools, create_search_tools, CustomOutputParser, CustomPromptTemplate
+from langchain_utils import create_QA_chain, create_QASource_chain, create_qa_tools, create_doc_tools, create_search_tools, retrieve_redis_vectorstore, split_doc, CustomOutputParser, CustomPromptTemplate
 from langchain.prompts import BaseChatPromptTemplate
 from langchain.agents import Tool, AgentExecutor, LLMSingleActionAgent, AgentOutputParser
 from langchain.experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
@@ -19,6 +18,14 @@ from langchain import LLMChain
 from langchain.memory import ConversationSummaryBufferMemory
 from langchain.agents import initialize_agent
 from langchain.agents import AgentType
+from langchain.agents.agent_toolkits import (
+    create_vectorstore_agent,
+    VectorStoreToolkit,
+    create_vectorstore_router_agent,
+    VectorStoreRouterToolkit,
+    VectorStoreInfo,
+)
+from langchain.vectorstores import FAISS
 # from feast import FeatureStore
 import pickle
 # from fastapi import HTTPException
@@ -27,7 +34,7 @@ import pickle
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
 
-advice_path = "./static/advice"
+advice_path = "./static/advice/"
 
 
 class ChatController(object):
@@ -35,35 +42,34 @@ class ChatController(object):
 
     def __init__(self, userid):
         self.userid = userid
-        self.llm = ChatOpenAI(temperature=0, model_name="gpt-4", top_p=0.2, presence_penalty=0.4, frequency_penalty=0.2)
+        self.llm = ChatOpenAI(temperature=0.5, model_name="gpt-4", top_p=0.2, presence_penalty=0.4, frequency_penalty=0.2, cache=False)
         self.embeddings = OpenAIEmbeddings()
         self.tools = []
         self._create_chat_agent()
 
 
     def _create_chat_agent(self):
+    
+        # qa = create_QASource_chain(self.llm, self.embeddings, "redis" )
 
+        # # vector store tool
+        # self.tools = create_qa_tools(qa)
 
-        qa = create_QASource_chain(self.llm, self.embeddings, "redis" )
+        # advice_file = os.path.join(advice_path, self.userid+".txt")
 
-        # vector store tool
-        self.tools = create_qa_tools(qa)
+        # # self-referencing tool
+        # if (Path(advice_file).is_file()):
 
-        advice_file = os.path.join(advice_path, self.userid+".txt")
+        #     self.tools += create_doc_tools(advice_file, path_type="file")
 
-        # self-referencing tool
-        if (Path(advice_file).is_file()):
-
-            self.tools += create_doc_tools(advice_file, path_type="file")
-
-        # web tool
-        # self.tools += create_search_tools("google", 10)
+        # # web tool
+        # # self.tools += create_search_tools("google", 10)
 
     
         
-        memory = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", max_token_limit=650, return_messages=True, input_key="question")
+        # memory = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", max_token_limit=650, return_messages=True, input_key="question")
 
-        # OPTION 1: agent = CHAT_CONVERSATIONAL_REACT_DESCRIPTION
+        # # OPTION 1: agent = CHAT_CONVERSATIONAL_REACT_DESCRIPTION
         # self.chat_agent  = initialize_agent(self.tools, self.llm, agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION, verbose=True, memory=memory)
 
         # OPTION 2: agent = custom LLMSingleActionAgent
@@ -73,9 +79,39 @@ class ChatController(object):
         # )
 
         # Option 3: agent = Plant & Execute
-        planner = load_chat_planner(self.llm)
-        executor = load_agent_executor(self.llm, self.tools, verbose=True)
-        self.chat_agent = PlanAndExecute(planner=planner, executor=executor, verbose=True, memory=memory)
+        # planner = load_chat_planner(self.llm)
+        # executor = load_agent_executor(self.llm, self.tools, verbose=True)
+        # self.chat_agent = PlanAndExecute(planner=planner, executor=executor, verbose=True, memory=memory)
+
+        # Option 4 vectorstore agent
+        redis_store = retrieve_redis_vectorstore(self.embeddings, "redis_web_advice")
+        redis_vectorstore_info = VectorStoreInfo(
+            name="redis web store",
+            description="General information on cover letter and resume",
+            vectorstore=redis_store,
+            )
+
+        if (Path(os.path.join(advice_path, "advice.txt")).is_file()):
+            file = os.path.join(advice_path, "advice.txt")
+            docs = split_doc(file, "file")
+            faiss_advice_store = FAISS.from_documents(docs, OpenAIEmbeddings())
+
+            faiss_advice_store_info = VectorStoreInfo(
+            name="faiss advice store",
+            description="Tailored advice on how to improve user's own resume",
+            vectorstore=faiss_advice_store
+            )
+            router_toolkit = VectorStoreRouterToolkit(
+            vectorstores=[redis_vectorstore_info, faiss_advice_store_info], llm=self.llm
+                )
+            self.chat_agent = create_vectorstore_router_agent(
+                    llm=self.llm, toolkit=router_toolkit, verbose=True
+                )
+        else:            
+            toolkit = VectorStoreToolkit(vectorstore_info=redis_vectorstore_info)
+            self.chat_agent = create_vectorstore_agent(
+                llm=self.llm, toolkit=toolkit, verbose=True
+            )
 
         
 
@@ -152,8 +188,8 @@ class ChatController(object):
 
         # for could not parse LLM output
         try:
-            response = self.chat_agent.run(input=question)
-            # response = self.chat_agent.run(question, callbacks=callbacks)
+            # response = self.chat_agent.run(input=question)
+            response = self.chat_agent.run(question, callbacks=callbacks)
             # response = self.chat_agent({"question": question, "chat_history": []}, callbacks=callbacks)
         except ValueError as e:
             response = str(e)

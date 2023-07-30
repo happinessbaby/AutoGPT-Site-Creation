@@ -145,14 +145,23 @@ class Chat():
             results_container = st.container()
 
 
+            if 'questionInput' not in st.session_state:
+                st.session_state.questionInput = ''
+
+            def submit():
+                st.session_state.questionInput = st.session_state.input
+                st.session_state.input = ''    
+
+
             # User input
             ## Function for taking user provided prompt as input
             def get_text():
-                input_text = st.text_input("Ask a specific question: ", "", key="input")
-                return input_text
+                st.text_input("Ask a specific question: ", "", key="input", on_change = submit)
+                return st.session_state.questionInput
             ## Applying the user input box
             with question_container:
                 user_input = get_text()
+
 
             #Sidebar section
             with st.sidebar:
@@ -329,6 +338,7 @@ class Chat():
                 st.session_state.responses.append(response)
 
             if st.session_state['responses']:
+                user_input = ""
                 for i in range(len(st.session_state['responses'])):
                     message(st.session_state['questions'][i], is_user=True, key=str(i) + '_user')
                     message(st.session_state['responses'][i], key=str(i))
