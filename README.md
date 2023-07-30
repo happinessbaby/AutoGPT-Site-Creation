@@ -54,14 +54,8 @@ A search engine powered by AI for matching people with job they want (welcome an
 
 #### How to Run
 
-- Cover letter generator w/ frontend: run these 2 commands in 2 separate terminals
-````
- python3 -m celery -A backend_flask  worker -l INFO 
 
- python3 backend_flask.py
-
-````
-- Resume advisor chatbot w/ frontend
+- with frontend
 ````
  streamlit run backend_streamlit.py
 ````

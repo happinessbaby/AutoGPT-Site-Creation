@@ -48,11 +48,6 @@ def generate_basic_cover_letter(my_job_title, company="", read_path=my_resume_fi
       posting_info_dict=extract_posting_information(posting)
       my_job_title = posting_info_dict["job"]
       company = posting_info_dict["company"]
-
-    # Get advices on cover letter
-    advice_query = "What are some best practices when writing a cover letter?"
-    # advices = retrieve_from_vectorstore(embeddings, advice_query, index_name="redis_cover_letter_advice")
-    advices = retrieve_from_db(cover_letter_advice_path, advice_query)
   
     # Get job description using Google serach
     job_query  = f"""Research what a {my_job_title} does and output a detailed description of the common skills, responsibilities, education, experience needed. """
@@ -92,24 +87,25 @@ def generate_basic_cover_letter(my_job_title, company="", read_path=my_resume_fi
 
         """
     relevancy = get_job_relevancy(read_path, query_relevancy)
+
+    # Get advices on cover letter
+    advice_query = """Find answers to the following questions:
+
+    1. What are some best practices when writing a cover letter?
+    2. what is the average word count of a cover letter?
+    3. what keywords are important in a cover letter? """
+    # advices = retrieve_from_vectorstore(embeddings, advice_query, index_name="redis_cover_letter_advice")
+    advices = retrieve_from_db(cover_letter_advice_path, advice_query)
     # Get cover letter examples
     query_samples = f""" 
-      Step 3: Research sample cover letters provided. You're also given some expert advice on some common practices when writing a cover letter.
+      Research sample cover letters provided. 
 
-      expert advices: {advices} 
+      Reference the samples to answer the following questions: 
 
-      Reference the samples and use the expert advices to answer the following questions: 
-
-      1. word count range
-
-      2. style and intonation
-
-      3. common keywords, be specific
-
-      4. three most important key content
+      what should I put in my cover letter? \n
 
       """
-    practices = compare_samples(my_job_title,  query_samples, cover_letter_samples_path)
+    # practices = compare_samples(my_job_title,  query_samples, cover_letter_samples_path, "cover letter")
 
 
     
@@ -158,7 +154,7 @@ def generate_basic_cover_letter(my_job_title, company="", read_path=my_resume_fi
 
         job position they are applying for: {job}. \
     
-      Step 5: Generate the cover letter.
+      Step 5: Generate the cover letter using what you've learned in Step 1 through Step 4. Do not make stuff up. 
     
       Use the following format:
         Step 1:{delimiter4} <step 1 reasoning>
@@ -182,7 +178,7 @@ def generate_basic_cover_letter(my_job_title, company="", read_path=my_resume_fi
                     job = my_job_title,
                     content=resume_content,
                     relevancy=relevancy, 
-                    practices = practices, 
+                    practices = advices, 
                     company_description = company_description, 
                     delimiter = delimiter,
                     delimiter1 = delimiter1, 
@@ -197,7 +193,7 @@ def generate_basic_cover_letter(my_job_title, company="", read_path=my_resume_fi
 
     # Check potential harmful content in response
     if (check_content_safety(text_str=my_cover_letter)):   
-        # Validate cover letter
+        # TODO: to be replaced assess_output()
         if (evaluate_content(my_cover_letter, "cover letter")):
             # Write the cover letter to a file
             with open(res_path, 'w') as f:
@@ -209,6 +205,11 @@ def generate_basic_cover_letter(my_job_title, company="", read_path=my_resume_fi
                     print("FAILED")
                     return False
                     # Error logging
+
+#TODO: assess output according to best practices, e.g., length, word count, etc. 
+# 1. for cover letter, double check nothing is made up, 
+def asess_output():
+    return None
     
         
 

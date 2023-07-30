@@ -1,12 +1,14 @@
 import os
-from openai_api import evaluate_content, check_content_safety
+from openai_api import evaluate_content, check_content_safety, get_completion
 from langchain.chat_models import ChatOpenAI
 from langchain.llms import OpenAI
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
+from langchain.output_parsers import CommaSeparatedListOutputParser
 from langchain import PromptTemplate
 from basic_utils import read_txt
-from common_utils import search_similar_samples, get_web_resources, retrieve_from_db, get_job_relevancy, extract_fields
+from common_utils import compare_samples, get_web_resources, retrieve_from_db, get_job_relevancy, extract_posting_information, get_summary
+from pathlib import Path
 
 
 from dotenv import load_dotenv, find_dotenv
@@ -23,117 +25,202 @@ delimiter2 = "////"
 delimiter3 = "<<<<"
 delimiter4 = "****"
 
-my_job_title = 'prompt engineer'
+my_job_title = 'accountant'
 my_resume_file = 'resume_samples/sample1.txt'
 resume_advice_path = './web_data/resume/'
+resume_samples_path = './resume_samples/'
+posting_path = "./uploads/posting/accountant.txt"
 
 
     
-def evaluate_resume(my_job_title, read_path = my_resume_file, res_path="./static/advice/advice.txt"):
+def evaluate_resume(my_job_title, company="", read_path = my_resume_file, res_path="./static/advice/advice_rewrite.txt", posting_path=""):
 
     resume = read_txt(read_path)
 
     resume_fields = extract_fields(resume)
+
+    resume_fields = resume_fields.split(",")
+    print(f"{resume_fields}")
+
+    job_specification = ""
+    if (Path(posting_path).is_file()):
+      job_specification = get_summary(posting_path)
+      posting = read_txt(posting_path)
+      posting_info_dict=extract_posting_information(posting)
+      my_job_title = posting_info_dict["job"]
+      company = posting_info_dict["company"]
  
-    query_advice =  "what makes a bad resume and how to improve"
-    resume_advices = retrieve_from_db(resume_advice_path, query_advice)
-    
     query_job  = f"""Research what a {my_job_title} does, including details of the common skills, responsibilities, education, experience needed for the job."""
     job_description = get_web_resources(query_job, "google")
 
-    query_relevancy = f"""Determine all the irrelevant information contained in the resume document delimited with {delimiter} characters. 
+    company_description=""
+    if (company!=""):
+      company_query = f""" Research what kind of company {company} is, such as its culture, mission, and values.
+                          
+                          Look up the exact name of the company. If it doesn't exist or the search result does not return a company, output you don't know"""
+      
+      company_description = get_web_resources(company_query, "wiki")
 
-        You are provided with the skills and responsibilities of {my_job_title}, which is delimited with {delimiter1} charactres, as a reference when forming your answer.
 
-        resume document: {delimiter}{resume}{delimiter}
+    for field in resume_fields:
 
-        skills and responsibilities of {my_job_title}: {delimiter1}{job_description}{delimiter1} \n
+      print(f"CURRENT FIELD IS: {field}")
 
-        Generate a list of irrelevant information that should not be included in the resume. """
-
-    resume_relevancy = get_job_relevancy(read_path, query_relevancy)
-
-    resume_samples = f"""Research the content of sample resume provided. Each sample is delimited with {delimiter2} characters.
-
-        Compare them with the content delimited with {delimiter2} characters. and look for differences in the content of each field.
+      field_content = get_field_content(resume, field)
         
-        sample: {delimiter2}{resume_samples}{delimiter2}"""
-    resume_samples = search_similar_samples(embeddings, my_job_title)
+      
+      query_relevancy = f"""Determine the relevant and irrelevant information contained in the resume field.
 
-
-
-    template_string = """" Your task is to analyze the weaknesses of a resume and ways to improve it. 
+        You are  provided with job specification for an opening position. 
         
-    The resume is delimited with {delimiter1} chararacters.
-    
-    resume: {delimiter1}{resume}{delimiter1}
+        Use it as a primarily guidelines when generating your answer. 
 
-    Step 1: Search and extract fields of the resume.  
+        You are also provided with a general job decription of the requirement of {my_job_title}. 
+        
+        Use it as a secondary guideline when forming your answer.
+
+        If job specification is not provided, use general job description as your primarily guideline. 
+
+
+        reusme field: {field_content}\n
+
+        job specification: {job_specification}\n
+
+        general job description: {job_description} \n
+
+
+        Generate a list of irrelevant information that should not be included in the resume and a list of relevant information that should be included in the field. 
+
+          """
+      relevancy = get_job_relevancy(read_path, query_relevancy)
+
+      query_advice =  f"how to best wriite {field} for resume?"
+
+      resume_advices = retrieve_from_db(resume_advice_path, query_advice)
+
+      query_samples = f""" 
+        Research sample resume provided. 
+
+        If the resume contains a field that's related to {field}, answer the following question. Otherwise, ignore the questions: 
+
+        1. common noun keywords 
+
+        2. common action keywords
+
+        """
+      # practices = compare_samples(my_job_title,  query_samples, resume_samples_path, "resume")
+
+
+      template_string = """" Your task is to analyze and help improve the content of resume field {field}. 
+
+      The content of the field is delimiter with {delimiter} characters. Always use this as contenxt and do not make things up. 
+
+      field content: {delimiter}{field_content}{delimiter}
+      
+
+      Step 1: You're given some expert advices on how to write {field} . Keep these advices in mind for the next steps.
+
+          expert advices: {delimiter1}{advices}{delimiter1}  \n
+
+
+      step 2: You are given two lists of information delimited with {delimiter2} characters. One is content to be included in the {field} and the other is content to be removed. 
+
+          Use them as to generate your answer. 
+
+          information list: {delimiter2}{relevancy}{delimiter2} \n
+
+      Step 3: You're provided with some company informtion and job specification
+
+        Use it to make the resume field {field} cater to the company and job specification more. 
+
+        If company information and/or job specifcation do not pertain to the resume field, skip this step. 
+
+        company information: {company_description}.  \n
+
+        job specification: {job_specification}.    \n
+
+      Step 4: Based on what you gathered in Step 1 through 3, rewrite the resume field {field}. Do not make up things. 
+
+      Use the following format:
+          Step 1:{delimiter4} <step 1 reasoning>
+          Step 2:{delimiter4} <step 2 reasoning>
+          Step 3:{delimiter4} <step 3 reasoning>
+          Step 4:{delimiter4} <rewrite the resume field>
+
+
+        Make sure to include {delimiter4} to separate every step.
+      
+      """
+
+      prompt_template = ChatPromptTemplate.from_template(template_string)
+      upgrade_resume_message = prompt_template.format_messages(
+          field = field,
+          field_content = field_content,
+          job = my_job_title,
+          advices=resume_advices,
+          relevancy = relevancy,
+          company_description = company_description,
+          job_specification = job_specification, 
+          delimiter = delimiter,
+          delimiter1 = delimiter1, 
+          delimiter2 = delimiter2,
+          delimiter4 = delimiter4, 
+          
+      )
+      my_advice = llm(upgrade_resume_message).content
+
+      # Check potential harmful content in response
+      if (check_content_safety(text_str=my_advice)):   
+          # Write the cover letter to a file
+          with open(res_path, 'a') as f:
+              try:
+                  f.write(my_advice)
+                  print("ALL SUCCESS")
+              except Exception as e:
+                  print("FAILED")
+                  # Error logging
+
+
+
+
+def extract_fields(resume, llm=OpenAI(temperature=0, cache=False)):
+
+
+    query =  """Search and extract fields of the resume delimited with {delimiter} characters.
 
          Some common resume fields include but not limited to personal information, objective, education, work experience, awards and honors, and skills.
-
-    Step 2: YOu are given a list information delimited with {delimiter4} characters that is considered irrelevant to applying for {job}. 
+         
+         resume: {delimiter}{resume}{delimiter} \n
+         
+         {format_instructions}"""
     
-        They should not be included in the resume. 
-     
-      job_relevancy: {delimiter4}{job_relevancy}{delimiter4}. 
-
-    Step 3: Research sample resume provided. Each sample is delimited with {delimiter2} characters.
-
-        Compare them with resume in Step 1 and list out contents that are in the samples but not in the resume in Step 1.
-
-        These are contents that are probably missing in the resume. 
-
-        sample: {delimiter2}{samples}{delimiter2}
-
-    Step 4: An resume advisor has also given some advices on what makes a bad resume and how to write good resume. The advises are delimited with {delimiter3} characters.
+    output_parser = CommaSeparatedListOutputParser()
+    format_instructions = output_parser.get_format_instructions()
+    prompt = PromptTemplate(
+        template=query,
+        input_variables=["delimiter", "resume"],
+        partial_variables={"format_instructions": format_instructions}
+    )
     
-        Uses these advices to generate a list of suggestions for fields and content in previous steps. 
+    _input = prompt.format(delimiter=delimiter, resume = resume)
+    response = llm(_input)
+    print(response)
+    return response
 
-        For each badly written field or any missing fields, give your advice on how they can be improved and filled out. 
+def get_field_content(resume, field):
+   
+   
+   query = f"""Retrieve all the content of field {field} from the resume file delimiter with {delimiter} charactres.
 
-        advices: {delimiter3}{advices}{delimiter3}
-
-
-    Use the following format:
-        Step 1:{delimiter} <step 1 reasoning>
-        Step 2:{delimiter} <step 2 reasoning>
-        Step 3:{delimiter} <step 3 reasoning>
-        step 4:{delimiter} <step 4 reasoning>
-
-
-      Make sure to include {delimiter} to separate every step.
-    
+      resume: {delimiter}{resume}{delimiter}
     """
 
-    prompt_template = ChatPromptTemplate.from_template(template_string)
-    upgrade_resume_message = prompt_template.format_messages(
-        resume = resume,
-        samples = resume_samples,
-        advices = resume_advices,
-        job = my_job_title,
-        job_relevancy = resume_relevancy,
-        delimiter = delimiter,
-        delimiter1 = delimiter1, 
-        delimiter2 = delimiter2,
-        delimiter3 = delimiter3,
-        delimiter4 = delimiter4, 
-        
-    )
-    my_advice = llm(upgrade_resume_message).content
-
-    # Check potential harmful content in response
-    if (check_content_safety(text_str=my_advice)):   
-        # Write the cover letter to a file
-        with open(res_path, 'w') as f:
-            try:
-                f.write(my_advice)
-                print("ALL SUCCESS")
-            except Exception as e:
-                print("FAILED")
-                # Error logging
+   response = get_completion(query)
+   print(response)
+   return response
 
 
 
 if __name__ == '__main__':
     evaluate_resume(my_job_title)
+ 

@@ -29,6 +29,8 @@ from langchain.agents.agent_toolkits import (
 from langchain.vectorstores import FAISS
 import sys
 import re
+import string
+import random
 
 
 
@@ -116,50 +118,27 @@ def extract_posting_information(posting, llm = ChatOpenAI(temperature=0, model="
     return posting_info_dict
 
 
-def extract_fields(resume, llm=OpenAI(temperature=0, cache=False)):
-
-
-    query =  """Search and extract fields of the resume delimited with {delimiter} characters.
-
-         Some common resume fields include but not limited to personal information, objective, education, work experience, awards and honors, and skills.
-         
-         resume: {delimiter}{resume}{delimiter} \n
-         
-         {format_instructions}"""
-    
-    output_parser = CommaSeparatedListOutputParser()
-    format_instructions = output_parser.get_format_instructions()
-    prompt = PromptTemplate(
-        template=query,
-        input_variables=["delimiter", "resume"],
-        partial_variables={"format_instructions": format_instructions}
-    )
-    
-    _input = prompt.format(delimiter=delimiter, resume = resume)
-    response = llm(_input)
-    print(response)
-    return response
-
     
 def search_related_samples(job_title, directory):
     # related_jobs = get_completion(f"Generate a list of job titles that are similar to {job_title} or relevant to {job_title}")
     # print(related_jobs)
 
     system_message = f"""
-		You are an assistant that evaluates whether the job position described in the content is related to {job_title} or relevant to {job_title}. 
+		You are an assistant that evaluates whether the job position described in the content is similar to {job_title} or relevant to {job_title}. 
 
 		Respond with a Y or N character, with no punctuation:
-		Y - if the content contains a cover letter
+		Y - if the job position is similar to {job_title} or relevant to it
 		N - otherwise
 
 		Output a single letter only.
 		"""
     related_files = []
-    for path in  Path(directory).glob('**/*'):
+    for path in  Path(directory).glob('**/*.txt'):
         # 1. extract job from sample resume/cover letter and do a similarity search with job_title
         # 2. for similar jobs, compare the sample with the user's and determine areas of improvement
         file = str(path)
         content = read_txt(file)
+        print(file, len(content))
         messages = [
         {'role': 'system', 'content': system_message},
         {'role': 'user', 'content': content}
@@ -173,54 +152,25 @@ def search_related_samples(job_title, directory):
 
 
 
-def compare_samples(job_title, query, directory, llm=ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
-    # loader = CSVLoader(file_path="jobs.csv")
-    # docs = loader.load()
+def compare_samples(job_title, query, directory, sample_type, llm=ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
 
-    # output_parser = CommaSeparatedListOutputParser()
-    # qa_stuff = create_QA_chain(llm, embeddings, docs=docs, db_type = "docarray", output_parse = output_parser)
-
-    # # format_instructions = output_parser.get_format_instructions()
-
-    # similarity_query = f"""List all the jobs titles that are similar to {job_title} or relevant to {job_title}.
-    
-    # Do not make up things not in the given context. """
-
-    # jobs = qa_stuff.run(similarity_query)
-    # print(jobs)
-    
-
-    # sample_string = ""
-    # jobs_list = jobs.split(" ")
-    # for job in jobs_list:
-    #     job = job[:-1] 
-    #     print(job)
-    #     if (samples.get(job)!=None):
-    #         sample = read_txt(samples.get(job))
-    #         sample_string = sample_string + "\n" + f" {delimiter3}\n{sample}\n{delimiter3}" + "\n\nexample:"   
-    # print(sample_string)
-    # return sample_string
     related_files = search_related_samples(job_title, directory)
     print(related_files)
     if (related_files):
         tools = []
         for file in related_files:
             docs = split_doc(file, "file")
+
             retriever = FAISS.from_documents(docs, OpenAIEmbeddings()).as_retriever()
-            tool = create_db_tools(llm, retriever, Path(file).name )
+            # name of the tool is really important in the agent using the tool
+            tool = create_db_tools(llm, retriever, f"sample {sample_type} {random.choice(string.ascii_letters)}")
             tools.extend(tool)
         # Option 1: OpenAI multi functions
         agent = initialize_agent(
             tools, llm, agent=AgentType.OPENAI_MULTI_FUNCTIONS, verbose=True
             )
-        response = agent.run(query)
-        print(response)
-        return response
-        # Option 2: Plan and Execute
-        planner = load_chat_planner(llm)
-        executor = load_agent_executor(llm, tools, verbose=True)
-        agent = PlanAndExecute(planner=planner, executor=executor, verbose=True)
-        response = agent.run(query)
+        # response = agent.run(query)
+        response = agent({"input": query})
         print(response)
         return response
     else:
@@ -229,9 +179,7 @@ def compare_samples(job_title, query, directory, llm=ChatOpenAI(temperature=0, m
 
 
 
-
-
-def get_web_resources(query, search_tool, top=10,  llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
+def get_web_resources(query, search_tool, top=10,  llm = ChatOpenAI(temperature=0.8, model="gpt-3.5-turbo-0613", cache=False)):
 
     # SERPAPI has limited searches, for now, use plain google
     if (search_tool=="google"):
@@ -268,29 +216,26 @@ def get_web_resources(query, search_tool, top=10,  llm = ChatOpenAI(temperature=
 
 
     
-def get_job_relevancy(doc, query, doctype="file", llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
+def get_job_relevancy(file, query, doctype="file", llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
 
-    # loader = TextLoader(file_path=resume)
-    # docs = loader.load()
 
-    # qa = create_QA_chain(llm, embeddings, docs = docs)
-
-    # tools = create_qa_tools(qa)
-    tools = create_doc_tools(doc, doctype)
+    tools = create_doc_tools(file, doctype)
 
 
     agent = initialize_agent(
     tools, llm, agent=AgentType.OPENAI_MULTI_FUNCTIONS, verbose=True
     )
-    response = agent.run(query)
+    # response = agent.run(query)
+    response = agent({"input": query})
     print(response)
     return response
     
 
-def retrieve_from_db(path, query, llm=OpenAI()):
+def retrieve_from_db(path, query, llm=OpenAI(temperature=0.8)):
     index = get_index(path=path, path_type='dir')
     # Create a question-answering chain using the index
-    chain = RetrievalQA.from_chain_type(llm, chain_type="stuff", retriever=index.vectorstore.as_retriever(), input_key="question")
+    #TODO: try vectorestore as retriever directly without creating index first, just retrieve vector store (saves memory)
+    chain = RetrievalQA.from_chain_type(llm, chain_type="stuff", verbose=True, retriever=index.vectorstore.as_retriever(), input_key="question")
     response = chain.run(query)
     print(response)
     return response
@@ -313,28 +258,7 @@ def get_summary(doc_path, llm=OpenAI()):
     print(response)
     return response
 
-# def retrieve_from_vectorstore(embeddings, query,  llm=OpenAI(temperature=0, cache=False), db_type = "redis", index_name="redis_resume_advice"):
 
-
-#     qa_stuff = create_QA_chain(llm, embeddings, db_type=db_type, index_name=index_name)
-#     # Option 1: qa tool + react 
-#     # Option 1 seems to give better advices 
-#     tools = create_qa_tools(qa_stuff)
-#     agent = initialize_agent(tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=True)
-#     try:
-#         response = agent.run(query)
-#         return response
-#     except ValueError as e:
-#         response = str(e)
-#         if not response.startswith("Could not parse LLM output: `"):
-#             print(e)
-#             raise e
-#         response = response.removeprefix(
-#             "Could not parse LLM output: `").removesuffix("`")
-#         return response
-    # response = agent.run(query)
-    # # Option 2
-    # # response = qa_stuff.run(query)
 
 
 
