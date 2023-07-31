@@ -15,6 +15,7 @@ from basic_utils import convert_to_txt, read_txt, retrieve_web_content
 from openai_api import check_content_safety, evaluate_content
 from upgrade_resume import evaluate_resume
 from dotenv import load_dotenv, find_dotenv
+from langchain_utils import split_doc, create_faiss_index, merge_faiss_vectorstore
 import asyncio
 import concurrent.futures
 import subprocess
@@ -23,6 +24,8 @@ from multiprocessing import Process, Queue, Value
 import pickle
 import requests
 from generate_cover_letter import generate_basic_cover_letter
+from langchain.vectorstores import FAISS
+from langchain.embeddings import OpenAIEmbeddings
 
 
 _ = load_dotenv(find_dotenv()) # read local .env file
@@ -145,6 +148,7 @@ class Chat():
             results_container = st.container()
 
 
+
             if 'questionInput' not in st.session_state:
                 st.session_state.questionInput = ''
 
@@ -236,6 +240,11 @@ class Chat():
                         if (check_content_safety(file=read_path)):
                             if (evaluate_content(read_path, "resume")):
                                 st.write("resume uploaded")
+                                docs = split_doc(read_path, "file")
+                                db=FAISS.from_document(docs, OpenAIEmbeddings())
+                                create_faiss_index(db, "faiss_user_specifics")
+                                new_chat = ChatController(st.session_state.userid)
+                                
                             else:
                                 st.write("sorry, please make sure your file is correct.")
                         else:
@@ -298,7 +307,7 @@ class Chat():
                                 p = Process(target=self.assess, args=(st.session_state.userid, st.session_state.job,st.session_state.company, "coverletter"))
                                 p.start()
                                 # progress feedbacks
-                                p.join()
+                                p.join()     
                                 response = read_txt(save_path)
                             else:
                                 response = "Sure! Just fill out the resume form and I'll help you with it. "
@@ -310,6 +319,10 @@ class Chat():
                                 p.start()
                                 p.join()
                                 response = read_txt(save_path)
+                                docs = split_doc(save_path, "file")
+                                db=FAISS.from_document(docs, OpenAIEmbeddings())
+                                create_faiss_index(db, "temp")
+                                merge_faiss_vectorstore("faiss_user_specifics", "temp")
                             else:
                                 response = "Sure! Just fill out the resume form and I'll help you with it. "
                         else: 
@@ -340,8 +353,8 @@ class Chat():
             if st.session_state['responses']:
                 user_input = ""
                 for i in range(len(st.session_state['responses'])):
-                    message(st.session_state['questions'][i], is_user=True, key=str(i) + '_user')
-                    message(st.session_state['responses'][i], key=str(i))
+                    message(st.session_state['questions'][i], is_user=True, key=str(i) + '_user',  avatar_style="initials", seed="Yueqi")
+                    message(st.session_state['responses'][i], key=str(i), avatar_style="initials", seed="AI")
 
                 
 

@@ -7,7 +7,10 @@ from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
 from langchain import PromptTemplate
 from langchain.agents import ConversationalChatAgent, Tool, AgentExecutor
-from langchain_utils import create_QA_chain, create_QASource_chain, create_qa_tools, create_doc_tools, create_search_tools, retrieve_redis_vectorstore, split_doc, CustomOutputParser, CustomPromptTemplate
+from basic_utils import read_txt
+from langchain_utils import (create_QA_chain, create_QASource_chain, create_qa_tools, create_doc_tools, create_search_tools, 
+                             retrieve_redis_vectorstore, split_doc, CustomOutputParser, CustomPromptTemplate,
+                             create_vectorstore_agent_toolkit)
 from langchain.prompts import BaseChatPromptTemplate
 from langchain.agents import Tool, AgentExecutor, LLMSingleActionAgent, AgentOutputParser
 from langchain.experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
@@ -34,7 +37,12 @@ import pickle
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
 
+delimiter = "####"
+
 advice_path = "./static/advice/"
+resume_path = "./uploads/"
+resume_uploaded=False
+
 
 
 class ChatController(object):
@@ -47,7 +55,7 @@ class ChatController(object):
         self.tools = []
         self._create_chat_agent()
 
-
+    #TODO: switch between different agents?
     def _create_chat_agent(self):
     
         # qa = create_QASource_chain(self.llm, self.embeddings, "redis" )
@@ -84,36 +92,52 @@ class ChatController(object):
         # self.chat_agent = PlanAndExecute(planner=planner, executor=executor, verbose=True, memory=memory)
 
         # Option 4 vectorstore agent
-        redis_store = retrieve_redis_vectorstore(self.embeddings, "redis_web_advice")
-        redis_vectorstore_info = VectorStoreInfo(
-            name="redis web store",
-            description="General information on cover letter and resume",
-            vectorstore=redis_store,
-            )
+        # resume = ""
+        # if (Path(os.path.join(resume_path, self.userid+".txt")).is_file()):
+        #     resume = read_txt(os.path.join(resume_path, self.userid+".txt"))
 
-        if (Path(os.path.join(advice_path, "advice.txt")).is_file()):
-            file = os.path.join(advice_path, "advice.txt")
-            docs = split_doc(file, "file")
-            faiss_advice_store = FAISS.from_documents(docs, OpenAIEmbeddings())
+        # prompt_template seems to be ignored by vectore store agent
+        # template = """
+        #     You're a helpful AI assitent who provides job candidates job-related advices.
 
-            faiss_advice_store_info = VectorStoreInfo(
-            name="faiss advice store",
-            description="Tailored advice on how to improve user's own resume",
-            vectorstore=faiss_advice_store
-            )
-            router_toolkit = VectorStoreRouterToolkit(
-            vectorstores=[redis_vectorstore_info, faiss_advice_store_info], llm=self.llm
-                )
-            self.chat_agent = create_vectorstore_router_agent(
-                    llm=self.llm, toolkit=router_toolkit, verbose=True
-                )
-        else:            
-            toolkit = VectorStoreToolkit(vectorstore_info=redis_vectorstore_info)
-            self.chat_agent = create_vectorstore_agent(
-                llm=self.llm, toolkit=toolkit, verbose=True
-            )
+        #     If you're provided with a resume, which will be delimited with {delimiter} characters, always refer to it as your context.
 
+        #     Use it when available and needed.
+
+        #     resume: {delimiter}{resume}{delimiter}
+
+        #     when you're asked to write a cover letter, reply with Y. 
+
+        #     When you're asked questions other than job related questions, reply I don't know. 
+
+        #     Always reply I don't know when the question is not job-related. 
+
+
+        # """
+
+      
+        # prompt = PromptTemplate.from_template(template)
+        # prompt_template = prompt.format(delimiter = delimiter, resume=resume)
+        # redis_store = retrieve_redis_vectorstore(self.embeddings, "redis_web_advice")
+        # redis_vectorstore_info = VectorStoreInfo(
+        #     name="redis web store",
+        #     description="General advise on cover letter and resume",
+        #     vectorstore=redis_store,
+        #     )
+        # router_toolkit = VectorStoreRouterToolkit(
+        # vectorstores=[redis_vectorstore_info,], llm=self.llm
+        #     )
+        # TODO: need to add memory see if every time a new agent is created when vector store updated memory from previous version of agent is kept
+        if (resume_uploaded):
+            router_toolkit = create_vectorstore_agent_toolkit("specific", "faiss_user_specifics", self.embeddings, self.llm)
+        else:
+            router_toolkit = create_vectorstore_agent_toolkit("general", "redis_web_advice", self.embeddings, self.llm)
         
+        self.chat_agent = create_vectorstore_router_agent(
+                llm=self.llm, toolkit=router_toolkit, verbose=True
+            )
+
+      
 
 
     def create_custom_llm_agent(self):
@@ -204,4 +228,5 @@ class ChatController(object):
         #     pickle.dump(mem, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
         return response
+    
     

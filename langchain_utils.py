@@ -42,6 +42,13 @@ from langchain.agents.agent_toolkits import create_python_agent
 from langchain.chains import RetrievalQA
 from langchain.vectorstores import FAISS
 from pydantic import BaseModel, Field
+from langchain.agents.agent_toolkits import (
+    create_vectorstore_agent,
+    VectorStoreToolkit,
+    create_vectorstore_router_agent,
+    VectorStoreRouterToolkit,
+    VectorStoreInfo,
+)
 
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
@@ -160,15 +167,30 @@ def create_db_tools(llm, retriever, name):
     ]
     return tool
 
-# def create_process_tools(file_name):
-#     tool = [
-#         Tool(
-#         name = "Python Process",
-#         func = subprocess.run([f"{sys.executable}", f"{file_name}"]),
-#         description="useful for when you are asked to write a cover letter",
-#         ),
-#     ]
-#     return tool
+
+def create_vectorstore_agent_toolkit(vs_type, index_name, embeddings, llm):
+    if vs_type=="general":
+        redis_store = retrieve_redis_vectorstore(embeddings, index_name)
+        redis_vectorstore_info = VectorStoreInfo(
+            name="redis web store",
+            description="General advise on cover letter and resume",
+            vectorstore=redis_store,
+            )
+        router_toolkit = VectorStoreRouterToolkit(
+        vectorstores=[redis_vectorstore_info,], llm=llm
+            )
+    elif vs_type =="specific":
+        faiss_store = retrieve_faiss_vectorstore(embeddings, index_name)
+        faiss_vectorstore_info = VectorStoreInfo(
+        name="user specific store",
+        description="Used whenever asked about user's resume, cover letter, and resume advices",
+        vectorstore=faiss_store
+        )
+        router_toolkit = VectorStoreRouterToolkit(
+        vectorstores=[redis_vectorstore_info, faiss_vectorstore_info], llm=llm
+            )   
+    return router_toolkit
+
 
 def create_QA_chain(llm, embeddings, docs=None, chain_type="stuff", db_type = "docarray", index_name="redis_index", output_parse=None):
     if (db_type=="docarray"):
@@ -272,6 +294,17 @@ def create_elastic_knn():
     
     return knn_search
 
+    
+def create_redis_vectorstore(index_name, path, path_type="file", source=None):
+    # retrieve_web_content(link)
+    docs = split_doc(path=path, path_type=path_type)
+    if (source!=None):
+        rds = create_redis_index_with_source(docs, OpenAIEmbeddings(), source, index_name)
+    else:
+        rds = create_redis_index(docs, OpenAIEmbeddings(), index_name)
+    # add_redis_index(docs, OpenAIEmbeddings, link, "redis_index")
+    print(rds)
+
 
 def create_redis_index_with_source(docs, embedding, source, index_name):
     texts = [d.page_content for d in docs]
@@ -305,6 +338,17 @@ def retrieve_redis_vectorstore(embeddings, index_name):
 
 def drop_redis_index(index_name):
     print(Redis.drop_index(index_name, delete_documents=True, redis_url=redis_url))
+
+def create_faiss_index(db, index_name):
+    db.save_local(index_name)
+
+
+def merge_faiss_vectorstore(db1, db2):
+    db1.merge_from(db2)
+
+def retrieve_faiss_vectorstore(index_name, embeddings):
+    db = FAISS.load_local(index_name, embeddings)
+    return db
 
 
 
@@ -365,7 +409,7 @@ class CustomOutputParser(AgentOutputParser):
 
     
     
-def create_vector_store(index_name, path, path_type="file", source=None):
+def create_redis_vectorstore(index_name, path, path_type="file", source=None):
     # retrieve_web_content(link)
     docs = split_doc(path=path, path_type=path_type)
     if (source!=None):
@@ -380,7 +424,7 @@ def create_vector_store(index_name, path, path_type="file", source=None):
 
 
 if __name__ == '__main__':
-    create_vector_store("redis_web_advice", "./web_data/", path_type="dir" )
+    create_redis_vectorstore("redis_web_advice", "./web_data/", path_type="dir" )
     
 
 
