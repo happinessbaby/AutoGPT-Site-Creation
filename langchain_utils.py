@@ -168,22 +168,29 @@ def create_db_tools(llm, retriever, name):
     return tool
 
 
-def create_vectorstore_agent_toolkit(vs_type, index_name, embeddings, llm):
+def create_vectorstore_agent_toolkit(embeddings, llm, vs_type, redis_index_name="", faiss_index_name=""):
     if vs_type=="general":
-        redis_store = retrieve_redis_vectorstore(embeddings, index_name)
+        redis_store = retrieve_redis_vectorstore(embeddings, redis_index_name)
         redis_vectorstore_info = VectorStoreInfo(
             name="redis web store",
-            description="General advise on cover letter and resume",
+            description="General advise on cover letter, resume, and job application",
             vectorstore=redis_store,
             )
         router_toolkit = VectorStoreRouterToolkit(
         vectorstores=[redis_vectorstore_info,], llm=llm
             )
     elif vs_type =="specific":
-        faiss_store = retrieve_faiss_vectorstore(embeddings, index_name)
+        redis_store = retrieve_redis_vectorstore(embeddings, redis_index_name)
+        redis_vectorstore_info = VectorStoreInfo(
+            name="redis web store",
+            description="General advise database on cover letter, resume, and job application tips",
+            vectorstore=redis_store,
+            )
+        faiss_store = retrieve_faiss_vectorstore(embeddings, faiss_index_name)
         faiss_vectorstore_info = VectorStoreInfo(
         name="user specific store",
-        description="Used whenever asked about user's resume, cover letter, and resume advices",
+        description="""Specific user tailored database. 
+        Use this tool more than 'redis_web_store' when users ask about things specific to their own resume, cover letter, and other documents.""",
         vectorstore=faiss_store
         )
         router_toolkit = VectorStoreRouterToolkit(
@@ -294,41 +301,34 @@ def create_elastic_knn():
     
     return knn_search
 
-    
-def create_redis_vectorstore(index_name, path, path_type="file", source=None):
-    # retrieve_web_content(link)
-    docs = split_doc(path=path, path_type=path_type)
+
+def create_redis_index(docs, embedding, index_name, source=None):
     if (source!=None):
-        rds = create_redis_index_with_source(docs, OpenAIEmbeddings(), source, index_name)
+        texts = [d.page_content for d in docs]
+        # metadatas = [d.metadata for d in docs]
+        metadatas=[{"source": source} for i in range(len(texts))]
+
+        rds, keys = Redis.from_texts_return_keys(
+            texts, embedding, metadatas = metadatas, redis_url=redis_url, index_name=index_name
+        ) 
     else:
-        rds = create_redis_index(docs, OpenAIEmbeddings(), index_name)
-    # add_redis_index(docs, OpenAIEmbeddings, link, "redis_index")
-    print(rds)
-
-
-def create_redis_index_with_source(docs, embedding, source, index_name):
-    texts = [d.page_content for d in docs]
-    # metadatas = [d.metadata for d in docs]
-    metadatas=[{"source": source} for i in range(len(texts))]
-    print(metadatas)
-
-    rds, keys = Redis.from_texts_return_keys(
-        texts, embedding, metadatas = metadatas, redis_url=redis_url, index_name=index_name
-    ) 
+        rds = Redis.from_documents(
+        docs, embedding, redis_url=redis_url, index_name=index_name
+        )
     return rds
 
-def create_redis_index(docs, embeddings, index_name):
-    rds = Redis.from_documents(
-        docs, embeddings, redis_url=redis_url, index_name=index_name
-    )
-    return rds
 
-def add_redis_index(texts, embedding, source, index_name):
+def add_redis_index(texts, embedding, index_name, source=None):
     rds = Redis.from_existing_index(
             embedding, redis_url=redis_url, index_name=index_name
         )
-    metadatas=[{"source": source} for i in range(len(texts))]
-    print(rds.add_texts(texts, metadatas=metadatas))
+    if (source!=None):
+        metadatas=[{"source": source} for i in range(len(texts))]
+        print(rds.add_texts(texts, metadatas=metadatas))    
+    else:
+        print(rds.add_texts(texts))
+        
+
 
 def retrieve_redis_vectorstore(embeddings, index_name):
 
@@ -345,10 +345,15 @@ def create_faiss_index(db, index_name):
 
 def merge_faiss_vectorstore(db1, db2):
     db1.merge_from(db2)
+    print(f"Successfully merged {db2} into {db1}")
 
-def retrieve_faiss_vectorstore(index_name, embeddings):
-    db = FAISS.load_local(index_name, embeddings)
-    return db
+def retrieve_faiss_vectorstore(embeddings, index_name):
+    try:
+        db = FAISS.load_local(index_name, embeddings)
+        return db
+    except Exception as e:
+        print(e)
+        return None
 
 
 
@@ -404,27 +409,14 @@ class CustomOutputParser(AgentOutputParser):
         return AgentAction(tool=action, tool_input=action_input.strip(" ").strip('"'), log=llm_output)
     
 
-
-
-
-    
-    
-def create_redis_vectorstore(index_name, path, path_type="file", source=None):
-    # retrieve_web_content(link)
-    docs = split_doc(path=path, path_type=path_type)
-    if (source!=None):
-        rds = create_redis_index_with_source(docs, OpenAIEmbeddings(), source, index_name)
-    else:
-        rds = create_redis_index(docs, OpenAIEmbeddings(), index_name)
-    # add_redis_index(docs, OpenAIEmbeddings, link, "redis_index")
-    print(rds)
-
     
 
 
 
 if __name__ == '__main__':
-    create_redis_vectorstore("redis_web_advice", "./web_data/", path_type="dir" )
+    docs = split_doc(path="./web_data/", path_type="dir")
+    rds = create_redis_index(docs, OpenAIEmbeddings(), "index_web_advice")
+    print(rds)
     
 
 

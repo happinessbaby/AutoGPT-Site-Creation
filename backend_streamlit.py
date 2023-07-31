@@ -15,7 +15,7 @@ from basic_utils import convert_to_txt, read_txt, retrieve_web_content
 from openai_api import check_content_safety, evaluate_content
 from upgrade_resume import evaluate_resume
 from dotenv import load_dotenv, find_dotenv
-from langchain_utils import split_doc, create_faiss_index, merge_faiss_vectorstore
+from langchain_utils import split_doc, create_faiss_index, merge_faiss_vectorstore, retrieve_faiss_vectorstore
 import asyncio
 import concurrent.futures
 import subprocess
@@ -61,11 +61,13 @@ class Chat():
             if "userid" not in st.session_state:
                 st.session_state["userid"] = str(uuid.uuid4())
                 print(st.session_state.userid)
-
-            new_chat = ChatController(st.session_state.userid)
-
-
-            # chat_agent = new_chat.create_chat_agent()
+            
+            # check if user specific vector store exists already
+            db = retrieve_faiss_vectorstore(OpenAIEmbeddings(), f"faiss_user_{st.session_state.userid}")
+            if db==None:
+                new_chat = ChatController(st.session_state.userid, False)
+            else:
+                new_chat = ChatController(st.session_state.userid, True)
 
             # Initialize chat history
             # if "messages" not in st.session_state:
@@ -95,26 +97,7 @@ class Chat():
             #     with st.chat_message(message["role"]):
             #         st.markdown(message["content"])
 
-            # Accept user input
-            # if prompt := st.chat_input("What is up?"):
-                # # Add user message to chat history
-                # st.session_state.messages.append({"role": "user", "content": prompt})
-                # # Display user message in chat message container
-                # with st.chat_message("user"):
-                #     st.markdown(prompt)
-                # # Display assistant response in chat message container
-                # with st.chat_message("assistant"):
-                #     message_placeholder = st.empty()
-                #     full_response = ""
-                #     for response in openai.ChatCompletion.create(
-                #         model=st.session_state["openai_model"],
-                #         messages=[{"role": m["role"], "content": m["content"]} for m in st.session_state.messages],
-                #             stream=True,
-                #      ):
-                #         full_response += response.choices[0].delta.get("content", "")
-                #         message_placeholder.markdown(full_response + "▌")
-                #     message_placeholder.markdown(full_response)
-                # st.session_state.messages.append({"role": "assistant", "content": full_response})
+        
 
             SAMPLE_QUESTIONS = {
                 # "What are some general advices for writing an outstanding resume?": "general_advices.pickle",
@@ -238,15 +221,16 @@ class Chat():
                         convert_to_txt(resume_save_path, read_path)
 
                         if (check_content_safety(file=read_path)):
-                            if (evaluate_content(read_path, "resume")):
-                                st.write("resume uploaded")
-                                docs = split_doc(read_path, "file")
-                                db=FAISS.from_document(docs, OpenAIEmbeddings())
-                                create_faiss_index(db, "faiss_user_specifics")
-                                new_chat = ChatController(st.session_state.userid)
+                            # TODO: evaludate content currently not recognizing any resume
+                            # if (evaluate_content(read_path, "resume")):
+                            st.write("resume uploaded")
+                            docs = split_doc(read_path, "file")
+                            db=FAISS.from_documents(docs, OpenAIEmbeddings())
+                            create_faiss_index(db, f"faiss_user_{st.session_state.userid}")
+                            new_chat = ChatController(st.session_state.userid, True)
                                 
-                            else:
-                                st.write("sorry, please make sure your file is correct.")
+                            # else:
+                            #     st.write("sorry, please make sure your file is correct.")
                         else:
                             st.write("sorry, that didn't work, please try again.")
 
@@ -261,26 +245,6 @@ class Chat():
                             else:
                                 st.write("sorry, the system could not process the link. ")
 
-                            
-                
-
-                        # loop = asyncio.get_running_loop()
-                        # 3. Run in a custom process pool:
-                        # with concurrent.futures.ProcessPoolExecutor() as pool:
-                        #     result = await loop.run_in_executor(pool, self.assess(uploaded_file, text_input))
-                        #     print('custom process pool', result)
-                        # queue = Queue()
-                        # self.id = str(uuid.uuid4())
-                        # userid = self.id
-                        # self.job = job
-                        # self.company = company
-                        # p = Process(target=self.assess, args=(st.session_state.userid, uploaded_file, st.session_state.job,))
-                        # p.start()
-                        # p.join() # this blocks until the process terminates
-                        # subprocess.run([f"{sys.executable}", "assess.py"])
-                        # self.show_progress()
-                        # result = queue.get()
-                        # print(result)
 
                 add_vertical_space(3)
 
@@ -320,9 +284,9 @@ class Chat():
                                 p.join()
                                 response = read_txt(save_path)
                                 docs = split_doc(save_path, "file")
-                                db=FAISS.from_document(docs, OpenAIEmbeddings())
+                                db=FAISS.from_documents(docs, OpenAIEmbeddings())
                                 create_faiss_index(db, "temp")
-                                merge_faiss_vectorstore("faiss_user_specifics", "temp")
+                                merge_faiss_vectorstore(f"faiss_user_{st.session_state.userid}", "temp")
                             else:
                                 response = "Sure! Just fill out the resume form and I'll help you with it. "
                         else: 
@@ -356,50 +320,11 @@ class Chat():
                     message(st.session_state['questions'][i], is_user=True, key=str(i) + '_user',  avatar_style="initials", seed="Yueqi")
                     message(st.session_state['responses'][i], key=str(i), avatar_style="initials", seed="AI")
 
-                
-
-
-
-
-    # def initialize(self):
-
-    #     with placeholder.container():
-
-    #         with st.form(key='my_form'):
-
-    #             text_input = st.text_input(
-    #                 "Tell me about your dream job",
-    #                 "",
-    #                 key="job",
-    #             )
-
-    #             uploaded_file = st.file_uploader(label="Upload your resume", type=["pdf","odt", "docx","txt"])
-    #             # if uploaded_file is not None:
-    #             #     # To convert to a string based IO:
-    #             #     stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))
-    #                 # st.write(stringio)
-
-    #             submit_button = st.form_submit_button(label='Send to resume advisor')
-    #             if submit_button:
-    #                 self.id = str(uuid.uuid4())
-    #                 p = Process(target=self.assess, args=(uploaded_file, text_input,))
-    #                 p.start()
-    #                 # subprocess.run([f"{sys.executable}", "assess.py"])
-    #                 self.show_progress()
-    #                 p.join() # this blocks until the process terminates
-    #                 # result = queue.get()
-    #                 # print(result)
+            
                         
 
     def assess(self, userid, job, company, task):
-        # file_ext = Path(uploaded_file.name).suffix
-        # filename = userid+file_ext
-        # # uploaded_file.name = filename
-        # save_path = os.path.join(upload_path, filename)
-        # with open(save_path, 'wb') as f:
-        #     f.write(uploaded_file.getvalue())
-        # read_path =  os.path.join(upload_path, Path(filename).stem+'.txt')
-        # convert_to_txt(save_path, read_path)
+        
         read_path = os.path.join(upload_path, userid+".txt")
         if (task=="resume"):
             res_path = os.path.join(advice_path, userid+".txt")

@@ -48,9 +48,10 @@ resume_uploaded=False
 class ChatController(object):
 
 
-    def __init__(self, userid):
+    def __init__(self, userid, user_specific):
         self.userid = userid
-        self.llm = ChatOpenAI(temperature=0.5, model_name="gpt-4", top_p=0.2, presence_penalty=0.4, frequency_penalty=0.2, cache=False)
+        self.user_specific = user_specific
+        self.llm = ChatOpenAI(temperature=0.5, model_name="gpt-4", cache=False)
         self.embeddings = OpenAIEmbeddings()
         self.tools = []
         self._create_chat_agent()
@@ -118,24 +119,26 @@ class ChatController(object):
       
         # prompt = PromptTemplate.from_template(template)
         # prompt_template = prompt.format(delimiter = delimiter, resume=resume)
-        # redis_store = retrieve_redis_vectorstore(self.embeddings, "redis_web_advice")
-        # redis_vectorstore_info = VectorStoreInfo(
-        #     name="redis web store",
-        #     description="General advise on cover letter and resume",
-        #     vectorstore=redis_store,
-        #     )
-        # router_toolkit = VectorStoreRouterToolkit(
-        # vectorstores=[redis_vectorstore_info,], llm=self.llm
-        #     )
         # TODO: need to add memory see if every time a new agent is created when vector store updated memory from previous version of agent is kept
-        if (resume_uploaded):
-            router_toolkit = create_vectorstore_agent_toolkit("specific", "faiss_user_specifics", self.embeddings, self.llm)
+        if (self.user_specific):
+            router_toolkit = create_vectorstore_agent_toolkit(self.embeddings, self.llm, "specific", redis_index_name = "redis_web_advice", faiss_index_name=f"faiss_user_{self.userid}")
+            print(f"Successfully created redis and faiss vector store toolkit")
+            # agent_instructions = f"""Try using 'faiss_user_{self.userid} tool' first, especially when humans ask about things specific to their own resume, cover letter, job application. 
+                                    
+            #                         Use 'redis_web_advice' only when asked general questions not specific to human's own resume and other documents.  """
+            self.chat_agent = create_vectorstore_router_agent(
+                    llm=self.llm, toolkit=router_toolkit, verbose=True,
+                    # agent_instructions = agent_instructions
+                )
+       
         else:
-            router_toolkit = create_vectorstore_agent_toolkit("general", "redis_web_advice", self.embeddings, self.llm)
-        
-        self.chat_agent = create_vectorstore_router_agent(
+            router_toolkit = create_vectorstore_agent_toolkit(self.embeddings, self.llm, "general", redis_index_name="redis_web_advice")
+            print(f"Successfully created redis vector store toolkit")
+            self.chat_agent = create_vectorstore_router_agent(
+            agent_instructions = "",
                 llm=self.llm, toolkit=router_toolkit, verbose=True
             )
+        
 
       
 
