@@ -10,7 +10,7 @@ from langchain.agents import ConversationalChatAgent, Tool, AgentExecutor
 from basic_utils import read_txt
 from langchain_utils import (create_QA_chain, create_QASource_chain, create_qa_tools, create_doc_tools, create_search_tools, 
                              retrieve_redis_vectorstore, split_doc, CustomOutputParser, CustomPromptTemplate,
-                             create_vectorstore_agent_toolkit)
+                             create_db_tools, retrieve_faiss_vectorstore)
 from langchain.prompts import BaseChatPromptTemplate
 from langchain.agents import Tool, AgentExecutor, LLMSingleActionAgent, AgentOutputParser
 from langchain.experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
@@ -29,6 +29,7 @@ from langchain.agents.agent_toolkits import (
     VectorStoreInfo,
 )
 from langchain.vectorstores import FAISS
+from generate_cover_letter import create_cover_letter_generator_tool
 # from feast import FeatureStore
 import pickle
 # from fastapi import HTTPException
@@ -59,28 +60,27 @@ class ChatController(object):
     #TODO: switch between different agents?
     def _create_chat_agent(self):
     
-        # qa = create_QASource_chain(self.llm, self.embeddings, "redis" )
+        #TODO: test with memory
+        # memory = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", max_token_limit=650, return_messages=True, input_key="question")
+        # # OPTION 1: agent = CHAT_CONVERSATIONAL_REACT_DESCRIPTION
+        cover_letter_tool = create_cover_letter_generator_tool()
+        
+        redis_store = retrieve_redis_vectorstore(self.embeddings, "index_web_advice")
+        redis_retriever = redis_store.as_retriever()
+        general_tool= create_db_tools(self.llm, redis_retriever, "redis_general")
 
-        # # vector store tool
-        # self.tools = create_qa_tools(qa)
+        self.tools = general_tool + cover_letter_tool
 
-        # advice_file = os.path.join(advice_path, self.userid+".txt")
+        if (self.user_specific):
+            faiss_store = retrieve_faiss_vectorstore(self.embeddings, f"faiss_user_{self.userid}")
+            faiss_retriever = faiss_store.as_retriever()
+            specific_tool = create_db_tools(self.llm, faiss_retriever, "faiss_specific")
+            self.tools +=  specific_tool
 
-        # # self-referencing tool
-        # if (Path(advice_file).is_file()):
-
-        #     self.tools += create_doc_tools(advice_file, path_type="file")
-
-        # # web tool
-        # # self.tools += create_search_tools("google", 10)
+        self.chat_agent  = initialize_agent(self.tools, self.llm, agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION, verbose=True)
 
     
-        
-        # memory = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", max_token_limit=650, return_messages=True, input_key="question")
-
-        # # OPTION 1: agent = CHAT_CONVERSATIONAL_REACT_DESCRIPTION
-        # self.chat_agent  = initialize_agent(self.tools, self.llm, agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION, verbose=True, memory=memory)
-
+    
         # OPTION 2: agent = custom LLMSingleActionAgent
         # agent = self.create_custom_llm_agent()
         # self.chat_agent = AgentExecutor.from_agent_and_tools(
@@ -93,105 +93,76 @@ class ChatController(object):
         # self.chat_agent = PlanAndExecute(planner=planner, executor=executor, verbose=True, memory=memory)
 
         # Option 4 vectorstore agent
-        # resume = ""
-        # if (Path(os.path.join(resume_path, self.userid+".txt")).is_file()):
-        #     resume = read_txt(os.path.join(resume_path, self.userid+".txt"))
-
-        # prompt_template seems to be ignored by vectore store agent
-        # template = """
-        #     You're a helpful AI assitent who provides job candidates job-related advices.
-
-        #     If you're provided with a resume, which will be delimited with {delimiter} characters, always refer to it as your context.
-
-        #     Use it when available and needed.
-
-        #     resume: {delimiter}{resume}{delimiter}
-
-        #     when you're asked to write a cover letter, reply with Y. 
-
-        #     When you're asked questions other than job related questions, reply I don't know. 
-
-        #     Always reply I don't know when the question is not job-related. 
-
-
-        # """
-
-      
-        # prompt = PromptTemplate.from_template(template)
-        # prompt_template = prompt.format(delimiter = delimiter, resume=resume)
-        # TODO: need to add memory see if every time a new agent is created when vector store updated memory from previous version of agent is kept
-        if (self.user_specific):
-            router_toolkit = create_vectorstore_agent_toolkit(self.embeddings, self.llm, "specific", redis_index_name = "redis_web_advice", faiss_index_name=f"faiss_user_{self.userid}")
-            print(f"Successfully created redis and faiss vector store toolkit")
-            # agent_instructions = f"""Try using 'faiss_user_{self.userid} tool' first, especially when humans ask about things specific to their own resume, cover letter, job application. 
-                                    
-            #                         Use 'redis_web_advice' only when asked general questions not specific to human's own resume and other documents.  """
-            self.chat_agent = create_vectorstore_router_agent(
-                    llm=self.llm, toolkit=router_toolkit, verbose=True,
-                    # agent_instructions = agent_instructions
-                )
+    
+        # if (self.user_specific):
+        #     router_toolkit = create_vectorstore_agent_toolkit(self.embeddings, self.llm, "specific", redis_index_name = "redis_web_advice", faiss_index_name=f"faiss_user_{self.userid}")
+        #     print(f"Successfully created redis and faiss vector store toolkit")
+        #     self.chat_agent = create_vectorstore_router_agent(
+        #             llm=self.llm, toolkit=router_toolkit, verbose=True
+        #         )
        
-        else:
-            router_toolkit = create_vectorstore_agent_toolkit(self.embeddings, self.llm, "general", redis_index_name="redis_web_advice")
-            print(f"Successfully created redis vector store toolkit")
-            self.chat_agent = create_vectorstore_router_agent(
-            agent_instructions = "",
-                llm=self.llm, toolkit=router_toolkit, verbose=True
-            )
+        # else:
+        #     router_toolkit = create_vectorstore_agent_toolkit(self.embeddings, self.llm, "general", redis_index_name="redis_web_advice")
+        #     print(f"Successfully created redis vector store toolkit")
+        #     vs_agent = create_vectorstore_router_agent(
+        #         llm=self.llm, toolkit=router_toolkit ,  verbose=True
+        #     )
+         
+            
         
 
       
 
 
-    def create_custom_llm_agent(self):
+    # def create_custom_llm_agent(self):
 
-        system_msg = "You are a helpful, polite assistant who evaluates people's resume and provides feedbacks."
+    #     system_msg = "You are a helpful, polite assistant who evaluates people's resume and provides feedbacks."
 
-        template = """Complete the objective as best you can. You have access to the following tools:
+    #     template = """Complete the objective as best you can. You have access to the following tools:
 
-            {tools}
+    #         {tools}
 
-            Use the following format:
+    #         Use the following format:
 
-            Question: the input question you must answer
-            Thought: you should always think about what to do
-            Action: the action to take, should be one of [{tool_names}]
-            Action Input: the input to the action
-            Observation: the result of the action
-            ... (this Thought/Action/Action Input/Observation can repeat N times)
-            Thought: I now know the final answer
-            Final Answer: the final answer to the original input question
-
-
-            Begin!
-
-            {chat_history}
-
-            Question: {question}
-            {agent_scratchpad}"""
+    #         Question: the input question you must answer
+    #         Thought: you should always think about what to do
+    #         Action: the action to take, should be one of [{tool_names}]
+    #         Action Input: the input to the action
+    #         Observation: the result of the action
+    #         ... (this Thought/Action/Action Input/Observation can repeat N times)
+    #         Thought: I now know the final answer
+    #         Final Answer: the final answer to the original input question
 
 
-        prompt = CustomPromptTemplate(
-            template=template,
-            tools=self.tools,
-            system_msg=system_msg,
-            # This omits the `agent_scratchpad`, `tools`, and `tool_names` variables because those are generated dynamically
-            # This includes the `intermediate_steps` variable because that is needed
-            input_variables=["chat_history", "question", "intermediate_steps"],
-        )
-        output_parser = CustomOutputParser()
-        # LLM chain consisting of the LLM and a prompt
-        llm_chain = LLMChain(llm=self.llm, prompt=prompt)
-        tool_names = [tool.name for tool in self.tools]
+    #         Begin!
 
-        agent = LLMSingleActionAgent(
-            llm_chain=llm_chain, 
-            output_parser=output_parser,
-            stop=["\nObservation:"], 
-            allowed_tools=tool_names
-        )
+    #         {chat_history}
 
-        return agent
+    #         Question: {question}
+    #         {agent_scratchpad}"""
+
+
+    #     prompt = CustomPromptTemplate(
+    #         template=template,
+    #         tools=self.tools,
+    #         system_msg=system_msg,
+    #         # This omits the `agent_scratchpad`, `tools`, and `tool_names` variables because those are generated dynamically
+    #         # This includes the `intermediate_steps` variable because that is needed
+    #         input_variables=["chat_history", "question", "intermediate_steps"],
+    #     )
+    #     output_parser = CustomOutputParser()
+    #     # LLM chain consisting of the LLM and a prompt
+    #     llm_chain = LLMChain(llm=self.llm, prompt=prompt)
+    #     tool_names = [tool.name for tool in self.tools]
+
+    #     agent = LLMSingleActionAgent(
+    #         llm_chain=llm_chain, 
+    #         output_parser=output_parser,
+    #         stop=["\nObservation:"], 
+    #         allowed_tools=tool_names
+    #     )
+
+    #     return agent
 
 
     def askAI(self, userid, question, callbacks=None):
@@ -216,8 +187,9 @@ class ChatController(object):
         # for could not parse LLM output
         try:
             # response = self.chat_agent.run(input=question)
-            response = self.chat_agent.run(question, callbacks=callbacks)
-            # response = self.chat_agent({"question": question, "chat_history": []}, callbacks=callbacks)
+            # response = self.chat_agent.run(question, callbacks=callbacks)
+            # BELOW IS USED WITH CHAT_CONVERSATIONAL_REACT_DESCRIPTION 
+            response = self.chat_agent({"input": question, "chat_history": []}, callbacks=callbacks)
         except ValueError as e:
             response = str(e)
             if not response.startswith("Could not parse LLM output: `"):

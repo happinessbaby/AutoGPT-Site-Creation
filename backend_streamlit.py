@@ -15,7 +15,7 @@ from basic_utils import convert_to_txt, read_txt, retrieve_web_content
 from openai_api import check_content_safety, evaluate_content
 from upgrade_resume import evaluate_resume
 from dotenv import load_dotenv, find_dotenv
-from langchain_utils import split_doc, create_faiss_index, merge_faiss_vectorstore, retrieve_faiss_vectorstore
+from langchain_utils import split_doc,merge_faiss_vectorstore, retrieve_faiss_vectorstore, create_vectorstore
 import asyncio
 import concurrent.futures
 import subprocess
@@ -23,7 +23,7 @@ import sys
 from multiprocessing import Process, Queue, Value
 import pickle
 import requests
-from generate_cover_letter import generate_basic_cover_letter
+# from generate_cover_letter import generate_basic_cover_letter
 from langchain.vectorstores import FAISS
 from langchain.embeddings import OpenAIEmbeddings
 
@@ -103,7 +103,8 @@ class Chat():
                 # "What are some general advices for writing an outstanding resume?": "general_advices.pickle",
                 # "What are some things I could be doing terribly wrong with my resume?": "bad_resume.pickle",
                 "help me write a cover letter": "coverletter",
-                "help me with my resume": "resume"
+                "help me with my resume": "resume",
+                "help me do a mock interview": "interview"
             }
 
             # key = "input"
@@ -153,14 +154,14 @@ class Chat():
             #Sidebar section
             with st.sidebar:
                 st.title('Career Chat 🧸')
-                st.markdown('''
-                Hi, my name is Tebi, your AI career advisor. I can help you: 
+                # st.markdown('''
+                # Hi, my name is Tebi, your AI career advisor. I can help you: 
                             
-                - improve your resume
-                - write a cover letter
-                - search for jobs
+                # - improve your resume
+                # - write a cover letter
+                # - search for jobs
                                             
-                ''')
+                # ''')
 
                 add_vertical_space(3)
 
@@ -224,9 +225,7 @@ class Chat():
                             # TODO: evaludate content currently not recognizing any resume
                             # if (evaluate_content(read_path, "resume")):
                             st.write("resume uploaded")
-                            docs = split_doc(read_path, "file")
-                            db=FAISS.from_documents(docs, OpenAIEmbeddings())
-                            create_faiss_index(db, f"faiss_user_{st.session_state.userid}")
+                            create_vectorstore(OpenAIEmbeddings(), "faiss", read_path, "file",  f"faiss_user_{st.session_state.userid}")
                             new_chat = ChatController(st.session_state.userid, True)
                                 
                             # else:
@@ -262,41 +261,47 @@ class Chat():
                             parent_container=res,
                         )
                         question = prefilled
-                        session_name = SAMPLE_QUESTIONS[question]
-                        if session_name == "coverletter":
-                            read_path = os.path.join(upload_path, st.session_state.userid+'.txt')
-                            if Path(read_path).is_file():
-                                save_path = os.path.join(cover_letter_path, st.session_state.userid+'.txt')
-                                # p = Process(target=generate_basic_cover_letter, args=(st.session_state.job, st.session_state.company, read_path, save_path))
-                                p = Process(target=self.assess, args=(st.session_state.userid, st.session_state.job,st.session_state.company, "coverletter"))
-                                p.start()
-                                # progress feedbacks
-                                p.join()     
-                                response = read_txt(save_path)
-                            else:
-                                response = "Sure! Just fill out the resume form and I'll help you with it. "
-                        elif session_name=="resume":
-                            read_path = os.path.join(upload_path, st.session_state.userid+".txt")
-                            if Path(read_path).is_file():
-                                save_path = os.path.join(advice_path,  st.session_state.userid+'.txt')
-                                p = Process(target=self.assess, args=(st.session_state.userid, st.session_state.job,st.session_state.company, "resume"))
-                                p.start()
-                                p.join()
-                                response = read_txt(save_path)
-                                docs = split_doc(save_path, "file")
-                                db=FAISS.from_documents(docs, OpenAIEmbeddings())
-                                create_faiss_index(db, "temp")
-                                merge_faiss_vectorstore(f"faiss_user_{st.session_state.userid}", "temp")
-                            else:
-                                response = "Sure! Just fill out the resume form and I'll help you with it. "
-                        else: 
-                            session_path = Path(__file__).parent / "general_questions" / session_name
-                            # print(f"Playing saved session: {session_path}")
-                            response = playback_callbacks(
-                                [streamlit_handler], str(session_path), max_pause_time=3
-                            )         
+                        # answer = chat_agent.run(mrkl_input, callbacks=[streamlit_handler])
+                        response = new_chat.askAI(st.session_state.userid, question, callbacks=[streamlit_handler])
                         st.session_state.questions.append(question)
                         st.session_state.responses.append(response)
+                        # session_name = SAMPLE_QUESTIONS[question]
+                        # #TODO: instead of all of this, if a cover letter is already generated, it should be played back
+                        # # else, agent should use cover_letter_generator tool to do it, instead of this manual coding
+                        # if session_name == "coverletter":
+                        #     # read_path = os.path.join(upload_path, st.session_state.userid+'.txt')
+                        #     # if Path(read_path).is_file():
+                        #     #     save_path = os.path.join(cover_letter_path, st.session_state.userid+'.txt')
+                        #     #     # p = Process(target=generate_basic_cover_letter, args=(st.session_state.job, st.session_state.company, read_path, save_path))
+                        #     #     p = Process(target=self.assess, args=(st.session_state.userid, st.session_state.job,st.session_state.company, "coverletter"))
+                        #     #     p.start()
+                        #     #     # progress feedbacks
+                        #     #     p.join()     
+                        #     #     response = read_txt(save_path)
+                        #     # else:
+                        #     response = "Sure! Just fill out the resume form and I'll help you with it. "
+                        # elif session_name=="resume":
+                        #     # read_path = os.path.join(upload_path, st.session_state.userid+".txt")
+                        #     # if Path(read_path).is_file():
+                        #     #     save_path = os.path.join(advice_path,  st.session_state.userid+'.txt')
+                        #     #     p = Process(target=self.assess, args=(st.session_state.userid, st.session_state.job,st.session_state.company, "resume"))
+                        #     #     p.start()
+                        #     #     create_vectorstore(OpenAIEmbeddings(), "faiss", save_path, "file", "temp")
+                        #     #     old_db = retrieve_faiss_vectorstore(OpenAIEmbeddings(), f"faiss_user_{st.session_state.userid}")
+                        #     #     new_db = retrieve_faiss_vectorstore(OpenAIEmbeddings(), "temp")
+                        #     #     merge_faiss_vectorstore(old_db, new_db)
+                        #     #     p.join()
+                        #     #     response = read_txt(save_path)
+                        #     # else:
+                        #     response = "Sure! Just fill out the resume form and I'll help you with it. "
+                        # else: 
+                            # session_path = Path(__file__).parent / "general_questions" / session_name
+                            # # print(f"Playing saved session: {session_path}")
+                            # response = playback_callbacks(
+                            #     [streamlit_handler], str(session_path), max_pause_time=3
+                            # )         
+                            # st.session_state.questions.append(question)
+                            # st.session_state.responses.append(response)
 
 
             # Chat section
@@ -323,15 +328,15 @@ class Chat():
             
                         
 
-    def assess(self, userid, job, company, task):
+    # def assess(self, userid, job, company, task):
         
-        read_path = os.path.join(upload_path, userid+".txt")
-        if (task=="resume"):
-            res_path = os.path.join(advice_path, userid+".txt")
-            evaluate_resume(job, read_path = read_path, res_path = res_path)
-        elif (task=="coverletter"):
-            res_path = os.path.join(cover_letter_path, userid+".txt")
-            generate_basic_cover_letter(job, company =company, read_path=read_path, res_path=res_path, posting_path=os.path.join(posting_path, userid+".txt"))
+    #     read_path = os.path.join(upload_path, userid+".txt")
+    #     if (task=="resume"):
+    #         res_path = os.path.join(advice_path, userid+".txt")
+    #         evaluate_resume(job, read_path = read_path, res_path = res_path)
+    #     elif (task=="coverletter"):
+    #         res_path = os.path.join(cover_letter_path, userid+".txt")
+    #         generate_basic_cover_letter(job, company =company, read_path=read_path, res_path=res_path, posting_path=os.path.join(posting_path, userid+".txt"))
 
     
 

@@ -11,6 +11,9 @@ from common_utils import extract_personal_information, get_web_resources,  get_j
 from samples import cover_letter_samples_dict
 from datetime import date
 from pathlib import Path
+import json
+from langchain.agents import load_tools, initialize_agent
+from langchain.agents import AgentType, Tool
 
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
@@ -82,7 +85,6 @@ def generate_basic_cover_letter(my_job_title, company="", read_path=my_resume_fi
 
       general job description: {delimiter1}{job_description}{delimiter1} \n
 
-
       Generate a list of irrelevant information that should not be included in the cover letter and a list of relevant information that should be included in the cover letter. 
 
         """
@@ -128,8 +130,7 @@ def generate_basic_cover_letter(my_job_title, company="", read_path=my_resume_fi
         information list: {delimiter2}{relevancy}{delimiter2}.  \n
 
       Step 2: You're given a list of best practices when writing the cover letter. It is delimited with {delimiter1} characters.
-      
-        Use it as a guideline when generating the cover letter.
+      evaluate_contentrating the cover letter.
 
         best practices: {delimiter1}{practices}{delimiter1}. \n
 
@@ -195,6 +196,7 @@ def generate_basic_cover_letter(my_job_title, company="", read_path=my_resume_fi
     if (check_content_safety(text_str=my_cover_letter)):   
         # TODO: to be replaced assess_output()
         if (evaluate_content(my_cover_letter, "cover letter")):
+            return my_cover_letter.split(delimiter4)[-1].strip()
             # Write the cover letter to a file
             with open(res_path, 'w') as f:
                 try:
@@ -206,16 +208,78 @@ def generate_basic_cover_letter(my_job_title, company="", read_path=my_resume_fi
                     return False
                     # Error logging
 
-#TODO: assess output according to best practices, e.g., length, word count, etc. 
-# 1. for cover letter, double check nothing is made up, 
-def asess_output():
+#TODO
+def postprocessing():
+    # cut the text to only cover letter
+      # transform_chain = TransformChain(
+    #     input_variables=["text"], output_variables=["output_text"], transform=transform_func)
+    # stream out the answer
+    # chat = ChatOpenAI(streaming=True, callbacks=[StreamingStdOutCallbackHandler()], temperature=0)
+    # langchain.llm_cache = InMemoryCache()
     return None
-    
-        
 
+
+# tbd: parse the dict json in transform chain before passing into retrievalqaresourcechain
+def transform_func(inputs: dict) -> dict:
+    text = inputs["text"]
+    shortened_text = "\n\n".join(text.split("\n\n")[:3])
+    return {"output_text": shortened_text}
+
+def call_cover_letter_generator(json_request):
+    print(json_request)
+    args = json.loads(json_request)
+    job = args["job"]
+    company = args["company"]
+    read_path = args["resume file"]
+    res_path = args["save path"]
+    posting_path = args["job post link"]
+    res = generate_basic_cover_letter(job, company=company, read_path=read_path, res_path=res_path, posting_path=posting_path)
+    return res
+    
+
+    
+def create_cover_letter_generator_tool():
+    name = "cover letter generator"
+    parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "save path": "<save path>", "job post link": "<job post link>"}}'
+    description = f"""Helps to generate a cover letter. Use this tool more than any other tool when user asks to write a cover letter. 
+    Input should be JSON in the following format: {parameters}
+    """
+    tools = [
+        Tool(
+        name = name,
+        func = call_cover_letter_generator,
+        description = description, 
+        verbose = False,
+        )
+    ]
+    return tools
+
+  
+
+def test_coverletter_tool():
+
+    tools = create_cover_letter_generator_tool()
+    agent= initialize_agent(
+        tools, 
+        llm=ChatOpenAI(cache=False), 
+        agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+        handle_parsing_errors=True,
+        verbose = True,
+        )
+    response = agent.run(f"""generate a cover letter with following information:
+                              job: {my_job_title} \n
+                              company:  \n
+                              resume file: {my_resume_file} \n
+                              save path: "./static/cover_letter/cover_letter.txt" \n
+                              job post links: \n
+                              """)
+    return response
+  
+    
 # Call the function to generate the cover letter
  
 if __name__ == '__main__':
-    generate_basic_cover_letter(my_job_title)
+    # generate_basic_cover_letter(my_job_title)
+    test_coverletter_tool()
 
 
