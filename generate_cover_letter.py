@@ -7,13 +7,11 @@ from langchain import PromptTemplate
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
 from basic_utils import read_txt
-from common_utils import extract_personal_information, get_web_resources,  get_job_relevancy, retrieve_from_db, get_summary, extract_posting_information, compare_samples
-from samples import cover_letter_samples_dict
+from common_utils import extract_personal_information, get_web_resources,  get_job_relevancy, retrieve_from_db, get_summary, extract_posting_information, compare_samples, extract_job_title
 from datetime import date
 from pathlib import Path
 import json
-from langchain.agents import load_tools, initialize_agent
-from langchain.agents import AgentType, Tool
+from langchain.agents import AgentType, Tool, initialize_agent
 
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
@@ -38,7 +36,7 @@ cover_letter_samples_path = "./sample_cover_letters/"
 
 
 
-def generate_basic_cover_letter(my_job_title, company="", read_path=my_resume_file, res_path= "./static/cover_letter/cover_letter.txt", posting_path=""):
+def generate_basic_cover_letter(my_job_title="", company="", read_path=my_resume_file, res_path= "./static/cover_letter/cover_letter.txt", posting_path=""):
     
     resume_content = read_txt(read_path)
     # Get personal information from resume
@@ -51,6 +49,9 @@ def generate_basic_cover_letter(my_job_title, company="", read_path=my_resume_fi
       posting_info_dict=extract_posting_information(posting)
       my_job_title = posting_info_dict["job"]
       company = posting_info_dict["company"]
+
+    if (my_job_title==""):
+        my_job_title = extract_job_title(resume_content)
   
     # Get job description using Google serach
     job_query  = f"""Research what a {my_job_title} does and output a detailed description of the common skills, responsibilities, education, experience needed. """
@@ -231,9 +232,13 @@ def call_cover_letter_generator(json_request):
     job = args["job"]
     company = args["company"]
     read_path = args["resume file"]
+    if (read_path=="" or read_path=="<resume file>"):
+      return "Can you provide your resume so I can further assist you? "
     res_path = args["save path"]
     posting_path = args["job post link"]
-    res = generate_basic_cover_letter(job, company=company, read_path=read_path, res_path=res_path, posting_path=posting_path)
+    # if (job=="" and posting_path==""):
+    #     return "Can you provide a job title or a job post link so I can further assist you?"
+    res = generate_basic_cover_letter(my_job_title=job, company=company, read_path=read_path, res_path=res_path, posting_path=posting_path)
     return res
     
 
@@ -242,7 +247,7 @@ def create_cover_letter_generator_tool():
     name = "cover letter generator"
     parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "save path": "<save path>", "job post link": "<job post link>"}}'
     description = f"""Helps to generate a cover letter. Use this tool more than any other tool when user asks to write a cover letter. 
-    Input should be JSON in the following format: {parameters}
+    Input should be JSON in the following format: {parameters} \n
     """
     tools = [
         Tool(
@@ -252,6 +257,7 @@ def create_cover_letter_generator_tool():
         verbose = False,
         )
     ]
+    print("Sucessfully created cover letter generator tool. ")
     return tools
 
   
@@ -267,11 +273,13 @@ def test_coverletter_tool():
         verbose = True,
         )
     response = agent.run(f"""generate a cover letter with following information:
-                              job: {my_job_title} \n
+                              job:  \n
                               company:  \n
                               resume file: {my_resume_file} \n
                               save path: "./static/cover_letter/cover_letter.txt" \n
                               job post links: \n
+
+                           
                               """)
     return response
   
@@ -279,7 +287,7 @@ def test_coverletter_tool():
 # Call the function to generate the cover letter
  
 if __name__ == '__main__':
-    # generate_basic_cover_letter(my_job_title)
+    # generate_basic_cover_letter()
     test_coverletter_tool()
 
 

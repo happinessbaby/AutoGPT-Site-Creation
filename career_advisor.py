@@ -4,32 +4,33 @@ from pathlib import Path
 from langchain.chat_models import ChatOpenAI
 from langchain.llms import OpenAI
 from langchain.embeddings import OpenAIEmbeddings
-from langchain.prompts import ChatPromptTemplate
-from langchain import PromptTemplate
-from langchain.agents import ConversationalChatAgent, Tool, AgentExecutor
-from basic_utils import read_txt
+# from langchain.prompts import ChatPromptTemplate
+# from langchain import PromptTemplate
+# from langchain.agents import ConversationalChatAgent, Tool, AgentExecutor
+# from basic_utils import read_txt
 from langchain_utils import (create_QA_chain, create_QASource_chain, create_qa_tools, create_doc_tools, create_search_tools, 
                              retrieve_redis_vectorstore, split_doc, CustomOutputParser, CustomPromptTemplate,
                              create_db_tools, retrieve_faiss_vectorstore)
-from langchain.prompts import BaseChatPromptTemplate
-from langchain.agents import Tool, AgentExecutor, LLMSingleActionAgent, AgentOutputParser
-from langchain.experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
-from langchain.schema import AgentAction, AgentFinish, HumanMessage
-from typing import List, Union
-import re
-from langchain import LLMChain
-from langchain.memory import ConversationSummaryBufferMemory
+# from langchain.prompts import BaseChatPromptTemplate
+# from langchain.agents import Tool, AgentExecutor, LLMSingleActionAgent, AgentOutputParser
+# from langchain.experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
+# from langchain.schema import AgentAction, AgentFinish, HumanMessage
+# from typing import List, Union
+# import re
+# from langchain import LLMChain
+# from langchain.memory import ConversationSummaryBufferMemory
 from langchain.agents import initialize_agent
 from langchain.agents import AgentType
-from langchain.agents.agent_toolkits import (
-    create_vectorstore_agent,
-    VectorStoreToolkit,
-    create_vectorstore_router_agent,
-    VectorStoreRouterToolkit,
-    VectorStoreInfo,
-)
+# from langchain.agents.agent_toolkits import (
+#     create_vectorstore_agent,
+#     VectorStoreToolkit,
+#     create_vectorstore_router_agent,
+#     VectorStoreRouterToolkit,
+#     VectorStoreInfo,
+# )
 from langchain.vectorstores import FAISS
 from generate_cover_letter import create_cover_letter_generator_tool
+from upgrade_resume import create_resume_evaluator_tool
 # from feast import FeatureStore
 import pickle
 # from fastapi import HTTPException
@@ -64,12 +65,14 @@ class ChatController(object):
         # memory = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", max_token_limit=650, return_messages=True, input_key="question")
         # # OPTION 1: agent = CHAT_CONVERSATIONAL_REACT_DESCRIPTION
         cover_letter_tool = create_cover_letter_generator_tool()
+
+        resume_advice_tool = create_resume_evaluator_tool()
         
         redis_store = retrieve_redis_vectorstore(self.embeddings, "index_web_advice")
         redis_retriever = redis_store.as_retriever()
         general_tool= create_db_tools(self.llm, redis_retriever, "redis_general")
 
-        self.tools = general_tool + cover_letter_tool
+        self.tools = general_tool + cover_letter_tool + resume_advice_tool
 
         if (self.user_specific):
             faiss_store = retrieve_faiss_vectorstore(self.embeddings, f"faiss_user_{self.userid}")

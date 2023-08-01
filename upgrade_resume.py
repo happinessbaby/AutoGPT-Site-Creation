@@ -1,14 +1,16 @@
 import os
-from openai_api import evaluate_content, check_content_safety, get_completion
+from openai_api import check_content_safety
 from langchain.chat_models import ChatOpenAI
 from langchain.llms import OpenAI
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
 from langchain.output_parsers import CommaSeparatedListOutputParser
 from langchain import PromptTemplate
+from langchain.agents import AgentType, Tool, initialize_agent
 from basic_utils import read_txt
-from common_utils import compare_samples, get_web_resources, retrieve_from_db, get_job_relevancy, extract_posting_information, get_summary
+from common_utils import compare_samples, get_web_resources, retrieve_from_db, get_job_relevancy, extract_posting_information, get_summary, extract_fields, get_field_content, extract_job_title
 from pathlib import Path
+import json
 
 
 from dotenv import load_dotenv, find_dotenv
@@ -33,7 +35,7 @@ posting_path = "./uploads/posting/accountant.txt"
 
 
     
-def evaluate_resume(my_job_title, company="", read_path = my_resume_file, res_path="./static/advice/advice_rewrite.txt", posting_path=""):
+def evaluate_resume(my_job_title="", company="", read_path = my_resume_file, res_path="./static/advice/advice_rewrite.txt", posting_path=""):
 
     resume = read_txt(read_path)
 
@@ -49,6 +51,9 @@ def evaluate_resume(my_job_title, company="", read_path = my_resume_file, res_pa
       posting_info_dict=extract_posting_information(posting)
       my_job_title = posting_info_dict["job"]
       company = posting_info_dict["company"]
+
+    if (my_job_title==""):
+      my_job_title = extract_job_title(resume)
  
     query_job  = f"""Research what a {my_job_title} does, including details of the common skills, responsibilities, education, experience needed for the job."""
     job_description = get_web_resources(query_job, "google")
@@ -131,7 +136,7 @@ def evaluate_resume(my_job_title, company="", read_path = my_resume_file, res_pa
 
       Step 3: You're provided with some company informtion and job specification
 
-        Use it to make the resume field {field} cater to the company and job specification more. 
+        Look for ATS-friendly keywords in the job specification and company information to make the resume field cater to the compnay and job position. 
 
         If company information and/or job specifcation do not pertain to the resume field, skip this step. 
 
@@ -182,45 +187,64 @@ def evaluate_resume(my_job_title, company="", read_path = my_resume_file, res_pa
 
 
 
+def call_resume_evaluator(json_request):
+    print(json_request)
+    args = json.loads(json_request)
+    job = args["job"]
+    company = args["company"]
+    read_path = args["resume file"]
+    if (read_path=="" or read_path=="<resume file>"):
+      return "Can you provide your resume so I can further assist you? "
+    res_path = args["save path"]
+    posting_path = args["job post link"]
+    # if (job=="" and posting_path==""):
+    #     return "Can you provide a job title or a job post link so I can further assist you?"
+    res = evaluate_resume(my_job_title=job, company=company, read_path=read_path, res_path=res_path, posting_path=posting_path)
+    return res
 
-def extract_fields(resume, llm=OpenAI(temperature=0, cache=False)):
-
-
-    query =  """Search and extract fields of the resume delimited with {delimiter} characters.
-
-         Some common resume fields include but not limited to personal information, objective, education, work experience, awards and honors, and skills.
-         
-         resume: {delimiter}{resume}{delimiter} \n
-         
-         {format_instructions}"""
-    
-    output_parser = CommaSeparatedListOutputParser()
-    format_instructions = output_parser.get_format_instructions()
-    prompt = PromptTemplate(
-        template=query,
-        input_variables=["delimiter", "resume"],
-        partial_variables={"format_instructions": format_instructions}
-    )
-    
-    _input = prompt.format(delimiter=delimiter, resume = resume)
-    response = llm(_input)
-    print(response)
-    return response
-
-def get_field_content(resume, field):
-   
-   
-   query = f"""Retrieve all the content of field {field} from the resume file delimiter with {delimiter} charactres.
-
-      resume: {delimiter}{resume}{delimiter}
+def create_resume_evaluator_tool():
+    name = "resume evaluator"
+    parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "save path": "<save path>", "job post link": "<job post link>"}}'
+    description = f"""Helps to evaluate a resume. Use this tool more than any other tool when user asks to evaluate, review, help with a resume. 
+    Input should be JSON in the following format: {parameters} \n
     """
+    tools = [
+        Tool(
+        name = name,
+        func = call_resume_evaluator,
+        description = description, 
+        verbose = False,
+        )
+    ]
+    print("Succesfully created resume evaluator tool.")
+    return tools
 
-   response = get_completion(query)
-   print(response)
-   return response
 
+def test_resume_tool():
+
+    tools = create_resume_evaluator_tool()
+    agent= initialize_agent(
+        tools, 
+        llm=ChatOpenAI(cache=False), 
+        agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+        handle_parsing_errors=True,
+        verbose = True,
+        )
+    response = agent.run(f"""evaluate a resume with following information:
+                              job:  \n
+                              company:  \n
+                              resume file: {my_resume_file} \n
+                              save path: "./static/resume/advice.txt" \n
+                              job post links: \n
+
+                           
+                              """)
+    return response
+   
+   
 
 
 if __name__ == '__main__':
-    evaluate_resume(my_job_title)
+    # evaluate_resume()
+    test_resume_tool()
  

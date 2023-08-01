@@ -13,7 +13,6 @@ from career_advisor import ChatController
 from callbacks.capturing_callback_handler import playback_callbacks
 from basic_utils import convert_to_txt, read_txt, retrieve_web_content
 from openai_api import check_content_safety, evaluate_content
-from upgrade_resume import evaluate_resume
 from dotenv import load_dotenv, find_dotenv
 from langchain_utils import split_doc,merge_faiss_vectorstore, retrieve_faiss_vectorstore, create_vectorstore
 import asyncio
@@ -103,7 +102,7 @@ class Chat():
                 # "What are some general advices for writing an outstanding resume?": "general_advices.pickle",
                 # "What are some things I could be doing terribly wrong with my resume?": "bad_resume.pickle",
                 "help me write a cover letter": "coverletter",
-                "help me with my resume": "resume",
+                "help  evaluate my my resume": "resume",
                 "help me do a mock interview": "interview"
             }
 
