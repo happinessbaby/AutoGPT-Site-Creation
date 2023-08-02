@@ -170,30 +170,30 @@ class Chat():
                        # A hack to "clear" the previous result when submitting a new prompt.
                 with st.form( key='my_form', clear_on_submit=True):
 
-                    col1, col2, col3= st.columns([5, 1, 5])
+                    # col1, col2, col3= st.columns([5, 1, 5])
 
-                    with col1:
-                        job = st.text_input(
-                            "job title",
-                            "",
-                            key="job",
-                        )
+                    # with col1:
+                    #     job = st.text_input(
+                    #         "job title",
+                    #         "",
+                    #         key="job",
+                    #     )
 
-                        company = st.text_input(
-                            "company (optional)",
-                            "",
-                            key = "company"
-                        )
+                    #     company = st.text_input(
+                    #         "company (optional)",
+                    #         "",
+                    #         key = "company"
+                    #     )
                     
-                    with col2:
-                        st.text('or')
+                    # with col2:
+                    #     st.text('or')
                     
-                    with col3:
-                        posting = st.text_input(
-                            "job posting link",
-                            "",
-                            key = "posting"
-                        )
+                    # with col3:
+                    #     posting = st.text_input(
+                    #         "job posting link",
+                    #         "",
+                    #         key = "posting"
+                    #     )
 
                     uploaded_file = st.file_uploader(label="Upload your resume", type=["pdf","odt", "docx","txt"])
                     # if uploaded_file is not None:
@@ -203,11 +203,12 @@ class Chat():
 
                     submit_button = st.form_submit_button(label='Submit')
 
-                    if submit_button and uploaded_file is not None and (job is not None or posting is not None): 
-                        if "job" not in st.session_state:
-                            st.session_state["job"] = job
-                        if "company" not in st.session_state:
-                            st.session_state['company'] = company
+                    # if submit_button and uploaded_file is not None and (job is not None or posting is not None): 
+                        # if "job" not in st.session_state:
+                        #     st.session_state["job"] = job
+                        # if "company" not in st.session_state:
+                        #     st.session_state['company'] = company
+                    if submit_button:
 
 
                         # Save resume file 
@@ -233,15 +234,15 @@ class Chat():
                             st.write("sorry, that didn't work, please try again.")
 
                         
-                        if posting:
-                            save_path = os.path.join(posting_path, st.session_state.userid+".txt")
-                            if (retrieve_web_content(posting, save_path = save_path)):
-                                if (evaluate_content(save_path, "job posting")):
-                                    st.write("link accepted")
-                                else:
-                                    st.write("sorry, please check the content of the link and try again. ")
-                            else:
-                                st.write("sorry, the system could not process the link. ")
+                        # if posting:
+                        #     save_path = os.path.join(posting_path, st.session_state.userid+".txt")
+                        #     if (retrieve_web_content(posting, save_path = save_path)):
+                        #         if (evaluate_content(save_path, "job posting")):
+                        #             st.write("link accepted")
+                        #         else:
+                        #             st.write("sorry, please check the content of the link and try again. ")
+                        #     else:
+                        #         st.write("sorry, the system could not process the link. ")
 
 
                 add_vertical_space(3)
@@ -261,7 +262,7 @@ class Chat():
                         )
                         question = prefilled
                         # answer = chat_agent.run(mrkl_input, callbacks=[streamlit_handler])
-                        response = new_chat.askAI(st.session_state.userid, question, callbacks=[streamlit_handler])
+                        response = new_chat.askAI(st.session_state.userid, question, callbacks=[streamlit_handler]).get("output", "Sorry, something happened.")
                         st.session_state.questions.append(question)
                         st.session_state.responses.append(response)
                         # session_name = SAMPLE_QUESTIONS[question]
@@ -314,7 +315,7 @@ class Chat():
                 )
                 question = user_input
                 # answer = chat_agent.run(mrkl_input, callbacks=[streamlit_handler])
-                response = new_chat.askAI(st.session_state.userid, question, callbacks=[streamlit_handler])
+                response = new_chat.askAI(st.session_state.userid, question, callbacks=[streamlit_handler]).get("output", "Sorry, something happened.")
                 st.session_state.questions.append(question)
                 st.session_state.responses.append(response)
 

@@ -5,7 +5,7 @@ from langchain.chat_models import ChatOpenAI
 from langchain.llms import OpenAI
 from langchain.embeddings import OpenAIEmbeddings
 # from langchain.prompts import ChatPromptTemplate
-# from langchain import PromptTemplate
+from langchain import PromptTemplate
 # from langchain.agents import ConversationalChatAgent, Tool, AgentExecutor
 # from basic_utils import read_txt
 from langchain_utils import (create_QA_chain, create_QASource_chain, create_qa_tools, create_doc_tools, create_search_tools, 
@@ -18,9 +18,12 @@ from langchain_utils import (create_QA_chain, create_QASource_chain, create_qa_t
 # from typing import List, Union
 # import re
 # from langchain import LLMChain
-# from langchain.memory import ConversationSummaryBufferMemory
+from langchain.memory import ConversationSummaryBufferMemory
 from langchain.agents import initialize_agent
 from langchain.agents import AgentType
+from langchain.memory.chat_message_histories.in_memory import ChatMessageHistory
+from langchain.memory import ChatMessageHistory
+from langchain.schema import messages_from_dict, messages_to_dict
 # from langchain.agents.agent_toolkits import (
 #     create_vectorstore_agent,
 #     VectorStoreToolkit,
@@ -33,8 +36,8 @@ from generate_cover_letter import create_cover_letter_generator_tool
 from upgrade_resume import create_resume_evaluator_tool
 # from feast import FeatureStore
 import pickle
-# from fastapi import HTTPException
-# from bson import ObjectId
+import json
+
 
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
@@ -56,13 +59,14 @@ class ChatController(object):
         self.llm = ChatOpenAI(temperature=0.5, model_name="gpt-4", cache=False)
         self.embeddings = OpenAIEmbeddings()
         self.tools = []
+        self.PROMPT = None
+        self.memory = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", max_token_limit=2000, return_messages=True, input_key="input")
         self._create_chat_agent()
 
     #TODO: switch between different agents?
     def _create_chat_agent(self):
     
         #TODO: test with memory
-        # memory = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", max_token_limit=650, return_messages=True, input_key="question")
         # # OPTION 1: agent = CHAT_CONVERSATIONAL_REACT_DESCRIPTION
         cover_letter_tool = create_cover_letter_generator_tool()
 
@@ -80,7 +84,25 @@ class ChatController(object):
             specific_tool = create_db_tools(self.llm, faiss_retriever, "faiss_specific")
             self.tools +=  specific_tool
 
-        self.chat_agent  = initialize_agent(self.tools, self.llm, agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION, verbose=True)
+
+        template = """The following is a friendly conversation between a human and an AI. 
+        The AI is talkative and provides lots of specific details from its context.
+          If the AI does not know the answer to a question, it truthfully says it does not know. 
+
+        Summary of conversaion:
+        {chat_history}
+
+        Conversation:
+        Human: {input}
+        AI:"""
+        #   You are provided with information about entities the Human mentions, if relevant.
+
+        # Relevant entity information:
+        # {entities}
+        self.PROMPT = PromptTemplate(input_variables=["chat_history", "input"], template=template)  
+
+
+        self.chat_agent  = initialize_agent(self.tools, self.llm, agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION, verbose=True, memory=self.memory, prompt=self.PROMPT,   handle_parsing_errors=True,)
 
     
     
@@ -169,30 +191,28 @@ class ChatController(object):
 
 
     def askAI(self, userid, question, callbacks=None):
-        # try:
-        #     objId = ObjectId(id)
-        # except:
-        #     raise HTTPException(status_code=400, detail="Not valid id.")
 
-        # create a conversation memory and save it if it not exists 
+        # retrieve a conversation memory 
         # can be changed to/incorporated into a streaming platform such as kafka
-        # if not os.path.isfile('conv_memory/'+id+'.pickle'):
-        #     mem = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", input_key="question",return_messages=True)
-        #     with open('conv_memory/' + id + '.pickle', 'wb') as handle:
-        #         pickle.dump(mem, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        # else:
-        #     # load the memory according to the user id
-        #     with open('conv_memory/'+id+'.pickle', 'rb') as handle:
-        #         mem = pickle.load(handle)
-
-        # self.chat_agent.memory = mem
-
+        if os.path.isfile('./conv_memory/'+userid+'.pickle'):
+            # retrieve pickled memory
+            with open('./conv_memory/'+userid+'.pickle', 'rb') as handle:
+                serializable_mem = pickle.load(handle)
+                print(f"Sucessfully loaded pickled conversation: {serializable_mem}")
+            retrieved_messages = messages_from_dict(serializable_mem) 
+            self.chat_history= ChatMessageHistory(messages=retrieved_messages) 
+            self.memory = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", chat_memory=self.chat_history, max_token_limit=2000, return_messages=True, input_key="input")
+            self.chat_agent  = initialize_agent(self.tools, self.llm, agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION, verbose=True, memory=self.memory, prompt=self.PROMPT,  handle_parsing_errors=True,)
+            print("Succesfully recreated chat_agent")
+        
         # for could not parse LLM output
+        # print(f"Chat history: {self.chat_history}")
         try:
             # response = self.chat_agent.run(input=question)
             # response = self.chat_agent.run(question, callbacks=callbacks)
             # BELOW IS USED WITH CHAT_CONVERSATIONAL_REACT_DESCRIPTION 
             response = self.chat_agent({"input": question, "chat_history": []}, callbacks=callbacks)
+                
         except ValueError as e:
             response = str(e)
             if not response.startswith("Could not parse LLM output: `"):
@@ -201,9 +221,15 @@ class ChatController(object):
             response = response.removeprefix(
                 "Could not parse LLM output: `").removesuffix("`")
 
+        
         # save memory after response
-        # with open('conv_memory/' + id + '.pickle', 'wb') as handle:
-        #     pickle.dump(mem, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        extracted_messages = self.memory.chat_memory.messages
+        serializable_mem = messages_to_dict(extracted_messages)
+        # pickle memory
+        with open('conv_memory/' + userid + '.pickle', 'wb') as handle:
+            pickle.dump(serializable_mem, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            print(f"Sucessfully pickled conversation: {serializable_mem}")
+
 
         return response
     
