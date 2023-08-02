@@ -63,10 +63,10 @@ redis_client = redis.Redis.from_url(redis_url)
 # standard cache
 # langchain.llm_cache = RedisCache(redis_client)
 # semantic cache
-# langchain.llm_cache = RedisSemanticCache(
-#     embedding=OpenAIEmbeddings(),
-#     redis_url=redis_url
-# )
+langchain.llm_cache = RedisSemanticCache(
+    embedding=OpenAIEmbeddings(),
+    redis_url=redis_url
+)
 
 def split_doc(path='./web_data/', path_type='dir'):
     if (path_type=="file"):
@@ -159,15 +159,16 @@ def create_search_tools(name, top_n):
 class DocumentInput(BaseModel):
     question: str = Field()
 
-def create_db_tools(llm, retriever, name):
+def create_db_tools(llm, retriever, name, description):
     tool = [
         Tool(
         args_schema=DocumentInput,
         name=name,
-        description="useful when you want to answer questions about samples",
+        description=description,
         func=RetrievalQA.from_chain_type(llm=llm, retriever=retriever),
     ),
     ]
+    print(f"Succesfully created {name} tool")
     return tool
 
 

@@ -22,8 +22,6 @@ import sys
 from multiprocessing import Process, Queue, Value
 import pickle
 import requests
-# from generate_cover_letter import generate_basic_cover_letter
-from langchain.vectorstores import FAISS
 from langchain.embeddings import OpenAIEmbeddings
 
 
@@ -61,12 +59,8 @@ class Chat():
                 st.session_state["userid"] = str(uuid.uuid4())
                 print(st.session_state.userid)
             
-            # check if user specific vector store exists already
-            db = retrieve_faiss_vectorstore(OpenAIEmbeddings(), f"faiss_user_{st.session_state.userid}")
-            if db==None:
-                new_chat = ChatController(st.session_state.userid, False)
-            else:
-                new_chat = ChatController(st.session_state.userid, True)
+
+            new_chat = ChatController(st.session_state.userid)
 
             # Initialize chat history
             # if "messages" not in st.session_state:
@@ -125,21 +119,15 @@ class Chat():
             if 'responses' not in st.session_state:
                 st.session_state['responses'] = list()
 
-            # question_container = st.empty()
-            # results_container = st.empty()
             question_container = st.container()
             results_container = st.container()
 
-
-
+            # hack to clear text after user input
             if 'questionInput' not in st.session_state:
                 st.session_state.questionInput = ''
-
             def submit():
                 st.session_state.questionInput = st.session_state.input
                 st.session_state.input = ''    
-
-
             # User input
             ## Function for taking user provided prompt as input
             def get_text():
@@ -167,7 +155,6 @@ class Chat():
                 # st.markdown('''
                 #     Upload your resume and fill out a few questions for a quick start
                 #             ''')
-                       # A hack to "clear" the previous result when submitting a new prompt.
                 with st.form( key='my_form', clear_on_submit=True):
 
                     # col1, col2, col3= st.columns([5, 1, 5])
@@ -195,7 +182,7 @@ class Chat():
                     #         key = "posting"
                     #     )
 
-                    uploaded_file = st.file_uploader(label="Upload your resume", type=["pdf","odt", "docx","txt"])
+                    uploaded_file = st.file_uploader(label="Upload your file", type=["pdf","odt", "docx","txt"])
                     # if uploaded_file is not None:
                     #     # To convert to a string based IO:
                     #     stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))
@@ -211,22 +198,26 @@ class Chat():
                     if submit_button:
 
 
-                        # Save resume file 
+                        # Save file 
                         file_ext = Path(uploaded_file.name).suffix
                         filename = st.session_state.userid+file_ext
                         resume_save_path = os.path.join(upload_path, filename)
                         with open(resume_save_path, 'wb') as f:
                             f.write(uploaded_file.getvalue())
                         read_path =  os.path.join(upload_path, Path(filename).stem+'.txt')
-                        # Convert resume file to txt and save it to uploads
+                        # Convert file to txt and save it to uploads
                         convert_to_txt(resume_save_path, read_path)
 
                         if (check_content_safety(file=read_path)):
                             # TODO: evaludate content currently not recognizing any resume
                             # if (evaluate_content(read_path, "resume")):
-                            st.write("resume uploaded")
+                            st.write("file uploaded")
+                            # create faiss store and add it to agent tools
                             create_vectorstore(OpenAIEmbeddings(), "faiss", read_path, "file",  f"faiss_user_{st.session_state.userid}")
-                            new_chat = ChatController(st.session_state.userid, True)
+                            tool_name = "faiss_resume"
+                            tool_description = "This is user's own resume. Use it as a reference and context when answering questions about user's own resume."
+                            new_chat.add_tools(tool_name, tool_description)
+                            # new_chat = ChatController(st.session_state.userid)
                                 
                             # else:
                             #     st.write("sorry, please make sure your file is correct.")
@@ -372,5 +363,4 @@ if __name__ == '__main__':
     # create_chatbot()
     advisor = Chat()
     # asyncio.run(advisor.initialize())
-    # advisor.initialize()
     advisor.create_chatbot()

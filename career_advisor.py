@@ -53,20 +53,17 @@ resume_uploaded=False
 class ChatController(object):
 
 
-    def __init__(self, userid, user_specific):
+    def __init__(self, userid):
         self.userid = userid
-        self.user_specific = user_specific
         self.llm = ChatOpenAI(temperature=0.5, model_name="gpt-4", cache=False)
         self.embeddings = OpenAIEmbeddings()
-        self.tools = []
-        self.PROMPT = None
+        # self.tools = []
+        # self.PROMPT = None
         self.memory = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", max_token_limit=2000, return_messages=True, input_key="input")
         self._create_chat_agent()
 
-    #TODO: switch between different agents?
     def _create_chat_agent(self):
     
-        #TODO: test with memory
         # # OPTION 1: agent = CHAT_CONVERSATIONAL_REACT_DESCRIPTION
         cover_letter_tool = create_cover_letter_generator_tool()
 
@@ -74,17 +71,21 @@ class ChatController(object):
         
         redis_store = retrieve_redis_vectorstore(self.embeddings, "index_web_advice")
         redis_retriever = redis_store.as_retriever()
-        general_tool= create_db_tools(self.llm, redis_retriever, "redis_general")
+        general_tool_description = """This is a general purpose database. Use it to answer general job related questions. 
+        Prioritize other tools over this tool. """
+        general_tool= create_db_tools(self.llm, redis_retriever, "redis_general", general_tool_description)
 
         self.tools = general_tool + cover_letter_tool + resume_advice_tool
 
-        if (self.user_specific):
-            faiss_store = retrieve_faiss_vectorstore(self.embeddings, f"faiss_user_{self.userid}")
-            faiss_retriever = faiss_store.as_retriever()
-            specific_tool = create_db_tools(self.llm, faiss_retriever, "faiss_specific")
-            self.tools +=  specific_tool
+        # if (retrieve_faiss_vectorstore(self.embedding, f"faiss_user_{self.userid}"))!=None:
+        #     faiss_store = retrieve_faiss_vectorstore(self.embeddings, f"faiss_user_{self.userid}")
+        #     faiss_retriever = faiss_store.as_retriever()
+        #     specific_tool = create_db_tools(self.llm, faiss_retriever, "faiss_specific")
+        #     self.tools +=  specific_tool
 
-
+        # TODO: 
+        #  it is capable of delegating tasks to experts to complete and get reports back
+        # Therefore, think about how to improve the instructions. 
         template = """The following is a friendly conversation between a human and an AI. 
         The AI is talkative and provides lots of specific details from its context.
           If the AI does not know the answer to a question, it truthfully says it does not know. 
@@ -189,6 +190,19 @@ class ChatController(object):
 
     #     return agent
 
+    def add_tools(self, tool_name, tool_description):       
+        try:
+            faiss_store = retrieve_faiss_vectorstore(self.embeddings, f"faiss_user_{self.userid}")
+            faiss_retriever = faiss_store.as_retriever()
+            specific_tool = create_db_tools(self.llm, faiss_retriever, tool_name, tool_description)
+            self.tools +=  specific_tool
+        except Exception as e:
+            raise e
+
+    def update_prompt():
+        return None
+
+
 
     def askAI(self, userid, question, callbacks=None):
 
@@ -203,7 +217,7 @@ class ChatController(object):
             self.chat_history= ChatMessageHistory(messages=retrieved_messages) 
             self.memory = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", chat_memory=self.chat_history, max_token_limit=2000, return_messages=True, input_key="input")
             self.chat_agent  = initialize_agent(self.tools, self.llm, agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION, verbose=True, memory=self.memory, prompt=self.PROMPT,  handle_parsing_errors=True,)
-            print("Succesfully recreated chat_agent")
+            print("Succesfully updated chat agent memory")
         
         # for could not parse LLM output
         # print(f"Chat history: {self.chat_history}")
