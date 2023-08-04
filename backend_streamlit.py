@@ -13,8 +13,8 @@ from career_advisor import ChatController
 from callbacks.capturing_callback_handler import playback_callbacks
 from basic_utils import convert_to_txt, read_txt, retrieve_web_content
 from openai_api import check_content_safety, evaluate_content
-from upgrade_resume import evaluate_resume
 from dotenv import load_dotenv, find_dotenv
+from langchain_utils import split_doc,merge_faiss_vectorstore, retrieve_faiss_vectorstore, create_vectorstore
 import asyncio
 import concurrent.futures
 import subprocess
@@ -22,7 +22,8 @@ import sys
 from multiprocessing import Process, Queue, Value
 import pickle
 import requests
-from generate_cover_letter import generate_basic_cover_letter
+from langchain.embeddings import OpenAIEmbeddings
+from base import base
 
 
 _ = load_dotenv(find_dotenv()) # read local .env file
@@ -35,10 +36,16 @@ cover_letter_path = "./static/cover_letter"
 advice_path = "./static/advice"
 
 
+
 class Chat():
 
+
+    # new_chat: ChatController(str)
+
+
     def __init__(self):
-        pass
+        self._create_chatbot()
+        # super().__init__()
         # self.id = "advice"
         # self.resume = None
         # self.job = None
@@ -50,7 +57,7 @@ class Chat():
     # def nextPage(): st.session_state.page += 1
     # def firstPage(): st.session_state.page = 0
 
-    def create_chatbot(self):
+    def _create_chatbot(self):
 
         with placeholder.container():
 
@@ -58,11 +65,20 @@ class Chat():
             if "userid" not in st.session_state:
                 st.session_state["userid"] = str(uuid.uuid4())
                 print(st.session_state.userid)
+                # Chat.new_chat = ChatController(st.session_state.userid)
+                # base.save_chat(self.new_chat)
+                base.save_chat(ChatController(st.session_state.userid))
 
-            new_chat = ChatController(st.session_state.userid)
+            self.new_chat = base.get_chat()
+                # self.new_chat = self.get_chat()
 
-
-            # chat_agent = new_chat.create_chat_agent()
+ 
+            #     self.save_chat(new_chat)
+            #     print("Successfully saved new chat instance")
+            #     # new_knowledge = KnowledgeBase(st.session_state.userid)
+            # else:
+            #     new_chat = self.get_chat()
+            #     print("Sucessfully retrieved chat instance")
 
             # Initialize chat history
             # if "messages" not in st.session_state:
@@ -92,32 +108,14 @@ class Chat():
             #     with st.chat_message(message["role"]):
             #         st.markdown(message["content"])
 
-            # Accept user input
-            # if prompt := st.chat_input("What is up?"):
-                # # Add user message to chat history
-                # st.session_state.messages.append({"role": "user", "content": prompt})
-                # # Display user message in chat message container
-                # with st.chat_message("user"):
-                #     st.markdown(prompt)
-                # # Display assistant response in chat message container
-                # with st.chat_message("assistant"):
-                #     message_placeholder = st.empty()
-                #     full_response = ""
-                #     for response in openai.ChatCompletion.create(
-                #         model=st.session_state["openai_model"],
-                #         messages=[{"role": m["role"], "content": m["content"]} for m in st.session_state.messages],
-                #             stream=True,
-                #      ):
-                #         full_response += response.choices[0].delta.get("content", "")
-                #         message_placeholder.markdown(full_response + "▌")
-                #     message_placeholder.markdown(full_response)
-                # st.session_state.messages.append({"role": "assistant", "content": full_response})
+        
 
             SAMPLE_QUESTIONS = {
                 # "What are some general advices for writing an outstanding resume?": "general_advices.pickle",
                 # "What are some things I could be doing terribly wrong with my resume?": "bad_resume.pickle",
                 "help me write a cover letter": "coverletter",
-                "help me with my resume": "resume"
+                "help  evaluate my my resume": "resume",
+                "help me do a mock interview": "interview"
             }
 
             # key = "input"
@@ -139,20 +137,15 @@ class Chat():
             if 'responses' not in st.session_state:
                 st.session_state['responses'] = list()
 
-            # question_container = st.empty()
-            # results_container = st.empty()
             question_container = st.container()
             results_container = st.container()
 
-
+            # hack to clear text after user input
             if 'questionInput' not in st.session_state:
                 st.session_state.questionInput = ''
-
             def submit():
                 st.session_state.questionInput = st.session_state.input
                 st.session_state.input = ''    
-
-
             # User input
             ## Function for taking user provided prompt as input
             def get_text():
@@ -166,49 +159,48 @@ class Chat():
             #Sidebar section
             with st.sidebar:
                 st.title('Career Chat 🧸')
-                st.markdown('''
-                Hi, my name is Tebi, your AI career advisor. I can help you: 
+                # st.markdown('''
+                # Hi, my name is Tebi, your AI career advisor. I can help you: 
                             
-                - improve your resume
-                - write a cover letter
-                - search for jobs
+                # - improve your resume
+                # - write a cover letter
+                # - search for jobs
                                             
-                ''')
+                # ''')
 
                 add_vertical_space(3)
 
                 # st.markdown('''
                 #     Upload your resume and fill out a few questions for a quick start
                 #             ''')
-                       # A hack to "clear" the previous result when submitting a new prompt.
                 with st.form( key='my_form', clear_on_submit=True):
 
-                    col1, col2, col3= st.columns([5, 1, 5])
+                    # col1, col2, col3= st.columns([5, 1, 5])
 
-                    with col1:
-                        job = st.text_input(
-                            "job title",
-                            "",
-                            key="job",
-                        )
+                    # with col1:
+                    #     job = st.text_input(
+                    #         "job title",
+                    #         "",
+                    #         key="job",
+                    #     )
 
-                        company = st.text_input(
-                            "company (optional)",
-                            "",
-                            key = "company"
-                        )
+                    #     company = st.text_input(
+                    #         "company (optional)",
+                    #         "",
+                    #         key = "company"
+                    #     )
                     
-                    with col2:
-                        st.text('or')
+                    # with col2:
+                    #     st.text('or')
                     
-                    with col3:
-                        posting = st.text_input(
-                            "job posting link",
-                            "",
-                            key = "posting"
-                        )
+                    # with col3:
+                    #     posting = st.text_input(
+                    #         "job posting link",
+                    #         "",
+                    #         key = "posting"
+                    #     )
 
-                    uploaded_file = st.file_uploader(label="Upload your resume", type=["pdf","odt", "docx","txt"])
+                    uploaded_file = st.file_uploader(label="Upload your file", type=["pdf","odt", "docx","txt"])
                     # if uploaded_file is not None:
                     #     # To convert to a string based IO:
                     #     stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))
@@ -216,62 +208,54 @@ class Chat():
 
                     submit_button = st.form_submit_button(label='Submit')
 
-                    if submit_button and uploaded_file is not None and (job is not None or posting is not None): 
-                        if "job" not in st.session_state:
-                            st.session_state["job"] = job
-                        if "company" not in st.session_state:
-                            st.session_state['company'] = company
+                    # if submit_button and uploaded_file is not None and (job is not None or posting is not None): 
+                        # if "job" not in st.session_state:
+                        #     st.session_state["job"] = job
+                        # if "company" not in st.session_state:
+                        #     st.session_state['company'] = company
+                    if submit_button:
 
 
-                        # Save resume file 
+                        # Save file 
                         file_ext = Path(uploaded_file.name).suffix
                         filename = st.session_state.userid+file_ext
                         resume_save_path = os.path.join(upload_path, filename)
                         with open(resume_save_path, 'wb') as f:
                             f.write(uploaded_file.getvalue())
                         read_path =  os.path.join(upload_path, Path(filename).stem+'.txt')
-                        # Convert resume file to txt and save it to uploads
+                        # Convert file to txt and save it to uploads
                         convert_to_txt(resume_save_path, read_path)
 
                         if (check_content_safety(file=read_path)):
-                            if (evaluate_content(read_path, "resume")):
-                                st.write("resume uploaded")
-                            else:
-                                st.write("sorry, please make sure your file is correct.")
+                            # TODO: evaludate content currently not recognizing any resume
+                            # if (evaluate_content(read_path, "resume")):
+                            st.write("file uploaded")
+                            # create faiss store and add it to agent tools
+                            name = "faiss_resume"
+                            description = """This is user's own resume. Use it as a reference and context when answering questions about user's own resume."""
+                            create_vectorstore(OpenAIEmbeddings(), "faiss", read_path, "file",  f"{name}_{st.session_state.userid}")
+                            self.new_chat.add_tools(st.session_state.userid, name, description)
+                            # add resume file path to prompt (to hopefully trigger preprocessing pick it up)
+                            new_text = f"""resume file: {read_path}"""
+                            self.new_chat.update_entities(st.session_state.userid, new_text)
+
+                                
+                            # else:
+                            #     st.write("sorry, please make sure your file is correct.")
                         else:
                             st.write("sorry, that didn't work, please try again.")
 
                         
-                        if posting:
-                            save_path = os.path.join(posting_path, st.session_state.userid+".txt")
-                            if (retrieve_web_content(posting, save_path = save_path)):
-                                if (evaluate_content(save_path, "job posting")):
-                                    st.write("link accepted")
-                                else:
-                                    st.write("sorry, please check the content of the link and try again. ")
-                            else:
-                                st.write("sorry, the system could not process the link. ")
+                        # if posting:
+                        #     save_path = os.path.join(posting_path, st.session_state.userid+".txt")
+                        #     if (retrieve_web_content(posting, save_path = save_path)):
+                        #         if (evaluate_content(save_path, "job posting")):
+                        #             st.write("link accepted")
+                        #         else:
+                        #             st.write("sorry, please check the content of the link and try again. ")
+                        #     else:
+                        #         st.write("sorry, the system could not process the link. ")
 
-                            
-                
-
-                        # loop = asyncio.get_running_loop()
-                        # 3. Run in a custom process pool:
-                        # with concurrent.futures.ProcessPoolExecutor() as pool:
-                        #     result = await loop.run_in_executor(pool, self.assess(uploaded_file, text_input))
-                        #     print('custom process pool', result)
-                        # queue = Queue()
-                        # self.id = str(uuid.uuid4())
-                        # userid = self.id
-                        # self.job = job
-                        # self.company = company
-                        # p = Process(target=self.assess, args=(st.session_state.userid, uploaded_file, st.session_state.job,))
-                        # p.start()
-                        # p.join() # this blocks until the process terminates
-                        # subprocess.run([f"{sys.executable}", "assess.py"])
-                        # self.show_progress()
-                        # result = queue.get()
-                        # print(result)
 
                 add_vertical_space(3)
 
@@ -289,37 +273,47 @@ class Chat():
                             parent_container=res,
                         )
                         question = prefilled
-                        session_name = SAMPLE_QUESTIONS[question]
-                        if session_name == "coverletter":
-                            read_path = os.path.join(upload_path, st.session_state.userid+'.txt')
-                            if Path(read_path).is_file():
-                                save_path = os.path.join(cover_letter_path, st.session_state.userid+'.txt')
-                                # p = Process(target=generate_basic_cover_letter, args=(st.session_state.job, st.session_state.company, read_path, save_path))
-                                p = Process(target=self.assess, args=(st.session_state.userid, st.session_state.job,st.session_state.company, "coverletter"))
-                                p.start()
-                                # progress feedbacks
-                                p.join()
-                                response = read_txt(save_path)
-                            else:
-                                response = "Sure! Just fill out the resume form and I'll help you with it. "
-                        elif session_name=="resume":
-                            read_path = os.path.join(upload_path, st.session_state.userid+".txt")
-                            if Path(read_path).is_file():
-                                save_path = os.path.join(advice_path,  st.session_state.userid+'.txt')
-                                p = Process(target=self.assess, args=(st.session_state.userid, st.session_state.job,st.session_state.company, "resume"))
-                                p.start()
-                                p.join()
-                                response = read_txt(save_path)
-                            else:
-                                response = "Sure! Just fill out the resume form and I'll help you with it. "
-                        else: 
-                            session_path = Path(__file__).parent / "general_questions" / session_name
-                            # print(f"Playing saved session: {session_path}")
-                            response = playback_callbacks(
-                                [streamlit_handler], str(session_path), max_pause_time=3
-                            )         
+                        # answer = chat_agent.run(mrkl_input, callbacks=[streamlit_handler])
+                        response = self.new_chat.askAI(st.session_state.userid, question, callbacks=[streamlit_handler]).get("output", "Sorry, something happened.")
                         st.session_state.questions.append(question)
                         st.session_state.responses.append(response)
+                        # session_name = SAMPLE_QUESTIONS[question]
+                        # #TODO: instead of all of this, if a cover letter is already generated, it should be played back
+                        # # else, agent should use cover_letter_generator tool to do it, instead of this manual coding
+                        # if session_name == "coverletter":
+                        #     # read_path = os.path.join(upload_path, st.session_state.userid+'.txt')
+                        #     # if Path(read_path).is_file():
+                        #     #     save_path = os.path.join(cover_letter_path, st.session_state.userid+'.txt')
+                        #     #     # p = Process(target=generate_basic_cover_letter, args=(st.session_state.job, st.session_state.company, read_path, save_path))
+                        #     #     p = Process(target=self.assess, args=(st.session_state.userid, st.session_state.job,st.session_state.company, "coverletter"))
+                        #     #     p.start()
+                        #     #     # progress feedbacks
+                        #     #     p.join()     
+                        #     #     response = read_txt(save_path)
+                        #     # else:
+                        #     response = "Sure! Just fill out the resume form and I'll help you with it. "
+                        # elif session_name=="resume":
+                        #     # read_path = os.path.join(upload_path, st.session_state.userid+".txt")
+                        #     # if Path(read_path).is_file():
+                        #     #     save_path = os.path.join(advice_path,  st.session_state.userid+'.txt')
+                        #     #     p = Process(target=self.assess, args=(st.session_state.userid, st.session_state.job,st.session_state.company, "resume"))
+                        #     #     p.start()
+                        #     #     create_vectorstore(OpenAIEmbeddings(), "faiss", save_path, "file", "temp")
+                        #     #     old_db = retrieve_faiss_vectorstore(OpenAIEmbeddings(), f"faiss_user_{st.session_state.userid}")
+                        #     #     new_db = retrieve_faiss_vectorstore(OpenAIEmbeddings(), "temp")
+                        #     #     merge_faiss_vectorstore(old_db, new_db)
+                        #     #     p.join()
+                        #     #     response = read_txt(save_path)
+                        #     # else:
+                        #     response = "Sure! Just fill out the resume form and I'll help you with it. "
+                        # else: 
+                            # session_path = Path(__file__).parent / "general_questions" / session_name
+                            # # print(f"Playing saved session: {session_path}")
+                            # response = playback_callbacks(
+                            #     [streamlit_handler], str(session_path), max_pause_time=3
+                            # )         
+                            # st.session_state.questions.append(question)
+                            # st.session_state.responses.append(response)
 
 
             # Chat section
@@ -333,67 +327,27 @@ class Chat():
                 )
                 question = user_input
                 # answer = chat_agent.run(mrkl_input, callbacks=[streamlit_handler])
-                response = new_chat.askAI(st.session_state.userid, question, callbacks=[streamlit_handler])
+                response = self.new_chat.askAI(st.session_state.userid, question, callbacks=[streamlit_handler]).get("output", "Sorry, something happened.")
                 st.session_state.questions.append(question)
                 st.session_state.responses.append(response)
 
             if st.session_state['responses']:
                 user_input = ""
                 for i in range(len(st.session_state['responses'])):
-                    message(st.session_state['questions'][i], is_user=True, key=str(i) + '_user')
-                    message(st.session_state['responses'][i], key=str(i))
-
-                
+                    message(st.session_state['questions'][i], is_user=True, key=str(i) + '_user',  avatar_style="initials", seed="Yueqi")
+                    message(st.session_state['responses'][i], key=str(i), avatar_style="initials", seed="AI")
 
 
 
-
-    # def initialize(self):
-
-    #     with placeholder.container():
-
-    #         with st.form(key='my_form'):
-
-    #             text_input = st.text_input(
-    #                 "Tell me about your dream job",
-    #                 "",
-    #                 key="job",
-    #             )
-
-    #             uploaded_file = st.file_uploader(label="Upload your resume", type=["pdf","odt", "docx","txt"])
-    #             # if uploaded_file is not None:
-    #             #     # To convert to a string based IO:
-    #             #     stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))
-    #                 # st.write(stringio)
-
-    #             submit_button = st.form_submit_button(label='Send to resume advisor')
-    #             if submit_button:
-    #                 self.id = str(uuid.uuid4())
-    #                 p = Process(target=self.assess, args=(uploaded_file, text_input,))
-    #                 p.start()
-    #                 # subprocess.run([f"{sys.executable}", "assess.py"])
-    #                 self.show_progress()
-    #                 p.join() # this blocks until the process terminates
-    #                 # result = queue.get()
-    #                 # print(result)
-                        
-
-    def assess(self, userid, job, company, task):
-        # file_ext = Path(uploaded_file.name).suffix
-        # filename = userid+file_ext
-        # # uploaded_file.name = filename
-        # save_path = os.path.join(upload_path, filename)
-        # with open(save_path, 'wb') as f:
-        #     f.write(uploaded_file.getvalue())
-        # read_path =  os.path.join(upload_path, Path(filename).stem+'.txt')
-        # convert_to_txt(save_path, read_path)
-        read_path = os.path.join(upload_path, userid+".txt")
-        if (task=="resume"):
-            res_path = os.path.join(advice_path, userid+".txt")
-            evaluate_resume(job, read_path = read_path, res_path = res_path)
-        elif (task=="coverletter"):
-            res_path = os.path.join(cover_letter_path, userid+".txt")
-            generate_basic_cover_letter(job, company =company, read_path=read_path, res_path=res_path, posting_path=os.path.join(posting_path, userid+".txt"))
+    # def assess(self, userid, job, company, task):
+        
+    #     read_path = os.path.join(upload_path, userid+".txt")
+    #     if (task=="resume"):
+    #         res_path = os.path.join(advice_path, userid+".txt")
+    #         evaluate_resume(job, read_path = read_path, res_path = res_path)
+    #     elif (task=="coverletter"):
+    #         res_path = os.path.join(cover_letter_path, userid+".txt")
+    #         generate_basic_cover_letter(job, company =company, read_path=read_path, res_path=res_path, posting_path=os.path.join(posting_path, userid+".txt"))
 
     
 
@@ -429,5 +383,3 @@ if __name__ == '__main__':
     # create_chatbot()
     advisor = Chat()
     # asyncio.run(advisor.initialize())
-    # advisor.initialize()
-    advisor.create_chatbot()
