@@ -21,16 +21,13 @@ from langchain.agents.agent_toolkits import create_python_agent
 from langchain.output_parsers import CommaSeparatedListOutputParser
 from langchain.chains.summarize import load_summarize_chain
 from langchain.llms import OpenAI
-from langchain.agents.agent_toolkits import (
-    create_vectorstore_agent,
-    VectorStoreToolkit,
-    VectorStoreInfo,
-)
 from langchain.vectorstores import FAISS
 import sys
 import re
 import string
 import random
+
+
 
 
 
@@ -50,10 +47,12 @@ def extract_personal_information(resume,  llm = ChatOpenAI(temperature=0, model=
     address_schema = ResponseSchema(name="address",
                                         description="Extract the home address of the applicant. If this information is not found, output -1")
 
+
     response_schemas = [name_schema, 
                         email_schema,
                         phone_schema, 
-                        address_schema]
+                        address_schema, 
+                        ]
 
     output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
     format_instructions = output_parser.get_format_instructions()
@@ -80,7 +79,7 @@ def extract_personal_information(resume,  llm = ChatOpenAI(temperature=0, model=
     
     response = llm(messages)
     personal_info_dict = output_parser.parse(response.content)
-    print(personal_info_dict.get('email'))
+    print(f"Successfully extracted personal info: {personal_info_dict}")
     return personal_info_dict
 
 def extract_posting_information(posting, llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
@@ -114,8 +113,57 @@ def extract_posting_information(posting, llm = ChatOpenAI(temperature=0, model="
     
     response = llm(messages)
     posting_info_dict = output_parser.parse(response.content)
-    print(posting_info_dict.get('job'))
+    print(f"Successfully extracted posting info: {posting_info_dict}")
     return posting_info_dict
+
+def extract_job_title(resume):
+    response = get_completion(f"""Read the resume closely. It is delimited with {delimiter} characters. 
+                              
+                              Output a likely job position that this applicant is currently holding or a possible job position he or she is applying for.
+                              
+                              resume: {delimiter}{resume}{delimiter}. \n
+                              
+                              Response with only the job position, no punctuation or other text. """)
+    print(f"Successfull extracted job title: {response}")
+    return response
+
+
+
+def extract_fields(resume, llm=OpenAI(temperature=0, cache=False)):
+
+
+    query =  """Search and extract fields of the resume delimited with {delimiter} characters.
+
+         Some common resume fields include but not limited to personal information, objective, education, work experience, awards and honors, and skills.
+         
+         resume: {delimiter}{resume}{delimiter} \n
+         
+         {format_instructions}"""
+    
+    output_parser = CommaSeparatedListOutputParser()
+    format_instructions = output_parser.get_format_instructions()
+    prompt = PromptTemplate(
+        template=query,
+        input_variables=["delimiter", "resume"],
+        partial_variables={"format_instructions": format_instructions}
+    )
+    
+    _input = prompt.format(delimiter=delimiter, resume = resume)
+    response = llm(_input)
+    print(f"Successfully extracted fields: {response}")
+    return response
+
+def get_field_content(resume, field):
+   
+   
+   query = f"""Retrieve all the content of field {field} from the resume file delimiter with {delimiter} charactres.
+
+      resume: {delimiter}{resume}{delimiter}
+    """
+
+   response = get_completion(query)
+   print(f"Successfully got field content: {response}")
+   return response
 
 
     
@@ -138,7 +186,7 @@ def search_related_samples(job_title, directory):
         # 2. for similar jobs, compare the sample with the user's and determine areas of improvement
         file = str(path)
         content = read_txt(file)
-        print(file, len(content))
+        # print(file, len(content))
         messages = [
         {'role': 'system', 'content': system_message},
         {'role': 'user', 'content': content}
@@ -151,7 +199,7 @@ def search_related_samples(job_title, directory):
 
 
 
-
+#TODO: check this function, currently not working
 def compare_samples(job_title, query, directory, sample_type, llm=ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
 
     related_files = search_related_samples(job_title, directory)
@@ -160,10 +208,10 @@ def compare_samples(job_title, query, directory, sample_type, llm=ChatOpenAI(tem
         tools = []
         for file in related_files:
             docs = split_doc(file, "file")
-
             retriever = FAISS.from_documents(docs, OpenAIEmbeddings()).as_retriever()
-            # name of the tool is really important in the agent using the tool
-            tool = create_db_tools(llm, retriever, f"sample {sample_type} {random.choice(string.ascii_letters)}")
+            # name and description of the tool are really important in the agent using the tool
+            tool_description = "This is a {sample_type} sample. "
+            tool = create_db_tools(llm, retriever, f"sample {sample_type} {random.choice(string.ascii_letters)}", tool_description)
             tools.extend(tool)
         # Option 1: OpenAI multi functions
         agent = initialize_agent(
@@ -193,7 +241,7 @@ def get_web_resources(query, search_tool, top=10,  llm = ChatOpenAI(temperature=
         # agent=AgentType.REACT_DOCSTORE,
         agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
         handle_parsing_errors=True,
-        verbose = True,
+        # verbose = True,
         )
     try:
         response = agent.run(query)
@@ -223,11 +271,14 @@ def get_job_relevancy(file, query, doctype="file", llm = ChatOpenAI(temperature=
 
 
     agent = initialize_agent(
-    tools, llm, agent=AgentType.OPENAI_MULTI_FUNCTIONS, verbose=True
+        tools,
+        llm,
+        agent=AgentType.OPENAI_MULTI_FUNCTIONS, 
+        # verbose=True
     )
     # response = agent.run(query)
     response = agent({"input": query})
-    print(response)
+    print(f"Successfully got relevancy info: {response}")
     return response
     
 
@@ -235,9 +286,14 @@ def retrieve_from_db(path, query, llm=OpenAI(temperature=0.8)):
     index = get_index(path=path, path_type='dir')
     # Create a question-answering chain using the index
     #TODO: try vectorestore as retriever directly without creating index first, just retrieve vector store (saves memory)
-    chain = RetrievalQA.from_chain_type(llm, chain_type="stuff", verbose=True, retriever=index.vectorstore.as_retriever(), input_key="question")
+    chain = RetrievalQA.from_chain_type(
+        llm, 
+        chain_type="stuff", 
+        # verbose=True, 
+        retriever=index.vectorstore.as_retriever(),
+        input_key="question")
     response = chain.run(query)
-    print(response)
+    print(f"Successfully retrieved advice: {response}")
     return response
 
     
@@ -255,8 +311,15 @@ def get_summary(doc_path, llm=OpenAI()):
 
     chain = load_summarize_chain(llm, chain_type="stuff", prompt=PROMPT)
     response = chain.run(docs)
-    print(response)
+    print(f"Sucessfully got job posting summary: {response}")
     return response
+
+
+
+
+
+
+
 
 
 

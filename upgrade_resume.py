@@ -9,8 +9,10 @@ from langchain import PromptTemplate
 from langchain.agents import AgentType, Tool, initialize_agent
 from basic_utils import read_txt
 from common_utils import compare_samples, get_web_resources, retrieve_from_db, get_job_relevancy, extract_posting_information, get_summary, extract_fields, get_field_content, extract_job_title
+from langchain_utils import retrieve_faiss_vectorstore, create_vectorstore, merge_faiss_vectorstore
 from pathlib import Path
 import json
+from base import base
 
 
 from dotenv import load_dotenv, find_dotenv
@@ -35,7 +37,10 @@ posting_path = "./uploads/posting/accountant.txt"
 
 
     
-def evaluate_resume(my_job_title="", company="", read_path = my_resume_file, res_path="./static/advice/advice_rewrite.txt", posting_path=""):
+def evaluate_resume(my_job_title="", company="", read_path = my_resume_file, posting_path=""):
+    
+    res_path = os.path.join("./static/advice/", Path(read_path).stem + ".txt")
+    print(res_path)
 
     resume = read_txt(read_path)
 
@@ -176,42 +181,63 @@ def evaluate_resume(my_job_title="", company="", read_path = my_resume_file, res
 
       # Check potential harmful content in response
       if (check_content_safety(text_str=my_advice)):   
-          # Write the cover letter to a file
-          with open(res_path, 'a') as f:
-              try:
-                  f.write(my_advice)
-                  print("ALL SUCCESS")
-              except Exception as e:
-                  print("FAILED")
-                  # Error logging
+          if (postprocessing(my_advice, res_path)):
+              create_resume_advice_doc_tool(res_path)
+
+
+def postprocessing(response, res_path):
+    # cut the text to only cover letter
+      # transform_chain = TransformChain(
+    #     input_variables=["text"], output_variables=["output_text"], transform=transform_func)
+    # stream out the answer
+    # chat = ChatOpenAI(streaming=True, callbacks=[StreamingStdOutCallbackHandler()], temperature=0)
+    # langchain.llm_cache = InMemoryCache()
+
+    with open(res_path, 'w') as f:
+        try:
+            f.write(response)
+            print("ALL SUCCESS")
+            return True
+        except Exception as e:
+            print("FAILED")
+            return False
 
 
 
-def call_resume_evaluator(json_request):
+# receptionist
+def preprocessing(json_request):
     print(json_request)
     args = json.loads(json_request)
-    job = args["job"]
-    company = args["company"]
+    # if resume doesn't exist, ask for resume
     read_path = args["resume file"]
     if (read_path=="" or read_path=="<resume file>"):
       return "Can you provide your resume so I can further assist you? "
-    res_path = args["save path"]
-    posting_path = args["job post link"]
-    # if (job=="" and posting_path==""):
-    #     return "Can you provide a job title or a job post link so I can further assist you?"
-    res = evaluate_resume(my_job_title=job, company=company, read_path=read_path, res_path=res_path, posting_path=posting_path)
+    
+    if (args["job"] == "" or args["job"]=="<job>"):
+        job = ""
+    else:
+       job = args["job"]
+    if (args["company"] == "" or args["company"]=="<company>"):
+        company = ""
+    else:
+        company = args["company"]
+    if (args["job post link"]=="" or args["job post link"]=="<job post link>"):
+        posting_path = ""
+    else:
+        posting_path = args["job post link"]
+    res = evaluate_resume(my_job_title=job, company=company, read_path=read_path, posting_path=posting_path)
     return res
 
 def create_resume_evaluator_tool():
     name = "resume evaluator"
-    parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "save path": "<save path>", "job post link": "<job post link>"}}'
+    parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link": "<job post link>"}}'
     description = f"""Helps to evaluate a resume. Use this tool more than any other tool when user asks to evaluate, review, help with a resume. 
     Input should be JSON in the following format: {parameters} \n
     """
     tools = [
         Tool(
         name = name,
-        func = call_resume_evaluator,
+        func = preprocessing,
         description = description, 
         verbose = False,
         )
@@ -220,8 +246,18 @@ def create_resume_evaluator_tool():
     return tools
 
 
-def test_resume_tool():
+def create_resume_advice_doc_tool(read_path):   
+    userid = Path(read_path).stem
+    name = "faiss_resume_advice"
+    description = """This is user's detailed resume advice. If this tool exists, do not use the 'resume evaluator' tool anymore. 
+    Use this tool as a reference to give tailored resume advices. """
+    create_vectorstore(OpenAIEmbeddings(), "faiss", read_path, "file",  f"{name}_{userid}")
+    chat = base.get_chat()
+    chat.add_tools(userid, name, description)
 
+
+def test_resume_tool():
+    
     tools = create_resume_evaluator_tool()
     agent= initialize_agent(
         tools, 
@@ -234,10 +270,7 @@ def test_resume_tool():
                               job:  \n
                               company:  \n
                               resume file: {my_resume_file} \n
-                              save path: "./static/resume/advice.txt" \n
-                              job post links: \n
-
-                           
+                              job post links: \n            
                               """)
     return response
    

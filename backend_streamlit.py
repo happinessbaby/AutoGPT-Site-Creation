@@ -40,7 +40,7 @@ advice_path = "./static/advice"
 class Chat():
 
 
-    new_chat: ChatController(str)
+    # new_chat: ChatController(str)
 
 
     def __init__(self):
@@ -231,10 +231,10 @@ class Chat():
                             # if (evaluate_content(read_path, "resume")):
                             st.write("file uploaded")
                             # create faiss store and add it to agent tools
-                            create_vectorstore(OpenAIEmbeddings(), "faiss", read_path, "file",  f"faiss_user_{st.session_state.userid}")
-                            tool_name = "faiss_resume"
-                            tool_description = """This is user's own resume. Use it as a reference and context when answering questions about user's own resume."""
-                            self.new_chat.add_faiss_tools(st.session_state.userid, tool_name, tool_description)
+                            name = "faiss_resume"
+                            description = """This is user's own resume. Use it as a reference and context when answering questions about user's own resume."""
+                            create_vectorstore(OpenAIEmbeddings(), "faiss", read_path, "file",  f"{name}_{st.session_state.userid}")
+                            self.new_chat.add_tools(st.session_state.userid, name, description)
                             # add resume file path to prompt (to hopefully trigger preprocessing pick it up)
                             new_text = f"""resume file: {read_path}"""
                             self.new_chat.update_entities(st.session_state.userid, new_text)

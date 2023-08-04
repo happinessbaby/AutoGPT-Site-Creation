@@ -275,9 +275,9 @@ class ChatController(object):
 
         return response
     
-    def add_faiss_tools(self, userid, tool_name, tool_description):      
+    def add_tools(self, userid, tool_name, tool_description):      
         try:
-            faiss_store = retrieve_faiss_vectorstore(self.embeddings, f"faiss_user_{userid}")
+            faiss_store = retrieve_faiss_vectorstore(self.embeddings, f"{tool_name}_{userid}")
             faiss_retriever = faiss_store.as_retriever()
             specific_tool = create_db_tools(self.llm, faiss_retriever, tool_name, tool_description)
             self.tools += specific_tool
@@ -291,57 +291,6 @@ class ChatController(object):
 
     
 
- 
-class ToolBase(object):
-
-
-
-    def __init__(self, userid):
-        self.llm = ChatOpenAI(temperature=0.5, model_name="gpt-4", cache=False)
-        self.embeddings = OpenAIEmbeddings()
-        self._initialize_entities(userid)
-        self._initialize_tools(userid)
-
-    def _initialize_tools(self, userid):
-        if (tool_dict.get(userid) is None):
-            # # OPTION 1: agent = CHAT_CONVERSATIONAL_REACT_DESCRIPTION
-            cover_letter_tool = create_cover_letter_generator_tool()
-
-            resume_advice_tool = create_resume_evaluator_tool()
-            
-            redis_store = retrieve_redis_vectorstore(self.embeddings, "index_web_advice")
-            redis_retriever = redis_store.as_retriever()
-            general_tool_description = """This is a general purpose database. Use it to answer general job related questions. 
-            Prioritize other tools over this tool. """
-            general_tool= create_db_tools(self.llm, redis_retriever, "redis_general", general_tool_description)
-
-            tool_dict = {userid: general_tool + cover_letter_tool + resume_advice_tool}
-            print(f"Successfully initialized tools: {tool_dict}")
-
-    def _initialize_entities(self, userid):
-        if (entities.get(userid) is None):
-            entities = {userid: ""}
-            print(f"Successfully initialized entities: {entities}")
-
-    def add_faiss_tools(self, userid, tool_name, tool_description):      
-        try:
-            faiss_store = retrieve_faiss_vectorstore(self.embeddings, f"faiss_user_{userid}")
-            faiss_retriever = faiss_store.as_retriever()
-            specific_tool = create_db_tools(self.llm, faiss_retriever, tool_name, tool_description)
-            if tool_dict.get(userid) is None:
-                tool_dict = {userid: specific_tool} 
-            else:
-                tool_dict[userid] = tool_dict[userid] + specific_tool
-            print(f"Sucessfully added {tool_name} tool: {tool_dict}")
-        except Exception as e:
-            raise e
-        
-    def update_entities(self, userid, text):
-        if (entities.get(userid) is None):
-            entities = {userid: text}
-        else:
-            entities[userid] = entities[userid] + f"\n{text}\n"
-        print(f"Successfully added {text} entities: {entities}.")
 
 
 
