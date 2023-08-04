@@ -37,6 +37,11 @@ from upgrade_resume import create_resume_evaluator_tool
 # from feast import FeatureStore
 import pickle
 import json
+import langchain
+
+
+# debugging log: very useful
+langchain.debug=True
 
 
 from dotenv import load_dotenv, find_dotenv
@@ -57,14 +62,15 @@ class ChatController(object):
         self.userid = userid
         self.llm = ChatOpenAI(temperature=0.5, model_name="gpt-4", cache=False)
         self.embeddings = OpenAIEmbeddings()
-        # self.tools = []
-        # self.PROMPT = None
-        self.memory = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", max_token_limit=2000, return_messages=True, input_key="input")
+        # self.memory = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", max_token_limit=2000, return_messages=True, input_key="input")
         self._create_chat_agent()
+
 
     def _create_chat_agent(self):
     
         # # OPTION 1: agent = CHAT_CONVERSATIONAL_REACT_DESCRIPTION
+
+        # initialize tools
         cover_letter_tool = create_cover_letter_generator_tool()
 
         resume_advice_tool = create_resume_evaluator_tool()
@@ -77,33 +83,46 @@ class ChatController(object):
 
         self.tools = general_tool + cover_letter_tool + resume_advice_tool
 
+        # initialize entities
+        self.entities = ""
+
+
+
+
         # if (retrieve_faiss_vectorstore(self.embedding, f"faiss_user_{self.userid}"))!=None:
         #     faiss_store = retrieve_faiss_vectorstore(self.embeddings, f"faiss_user_{self.userid}")
         #     faiss_retriever = faiss_store.as_retriever()
-        #     specific_tool = create_db_tools(self.llm, faiss_retriever, "faiss_specific")
+        #     specific_tool = create_db_tools(self.llm, faiss_retriever, "faiss_resume")
         #     self.tools +=  specific_tool
 
-        # TODO: 
-        #  it is capable of delegating tasks to experts to complete and get reports back
-        # Therefore, think about how to improve the instructions. 
-        template = """The following is a friendly conversation between a human and an AI. 
+
+        self.template = """The following is a friendly conversation between a human and an AI. 
         The AI is talkative and provides lots of specific details from its context.
           If the AI does not know the answer to a question, it truthfully says it does not know. 
 
-        Summary of conversaion:
-        {chat_history}
+          You are provided with information about entities the Human mentions, if relevant.
+
+        Relevant entity information:
+        {entities}
+
 
         Conversation:
         Human: {input}
         AI:"""
-        #   You are provided with information about entities the Human mentions, if relevant.
 
-        # Relevant entity information:
-        # {entities}
-        self.PROMPT = PromptTemplate(input_variables=["chat_history", "input"], template=template)  
+        # initialize memory
+        self.memory = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history",return_messages=True, input_key="input")
 
-
-        self.chat_agent  = initialize_agent(self.tools, self.llm, agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION, verbose=True, memory=self.memory, prompt=self.PROMPT,   handle_parsing_errors=True,)
+        self.chat_agent  = initialize_agent(self.tools, 
+                                            self.llm, 
+                                            agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION, 
+                                            verbose=True, 
+                                            memory=self.memory, 
+                                            handle_parsing_errors=True,)
+        
+        prompt = self.chat_agent.agent.create_prompt(system_message=self.template, input_variables=["entities", "input", "agent_scratchpad", "chat_history"], tools=self.tools)
+        self.chat_agent.agent.llm_chain.prompt = prompt
+        
 
     
     
@@ -190,21 +209,21 @@ class ChatController(object):
 
     #     return agent
 
-    def add_tools(self, tool_name, tool_description):       
-        try:
-            faiss_store = retrieve_faiss_vectorstore(self.embeddings, f"faiss_user_{self.userid}")
-            faiss_retriever = faiss_store.as_retriever()
-            specific_tool = create_db_tools(self.llm, faiss_retriever, tool_name, tool_description)
-            self.tools +=  specific_tool
-        except Exception as e:
-            raise e
+    # def add_tools(self, tool_name, tool_description):       
+    #     try:
+    #         faiss_store = retrieve_faiss_vectorstore(self.embeddings, f"faiss_user_{self.userid}")
+    #         faiss_retriever = faiss_store.as_retriever()
+    #         specific_tool = create_db_tools(self.llm, faiss_retriever, tool_name, tool_description)
+    #         self.tools +=  specific_tool
+    #     except Exception as e:
+    #         raise e
 
-    def update_prompt():
-        return None
+
 
 
 
     def askAI(self, userid, question, callbacks=None):
+
 
         # retrieve a conversation memory 
         # can be changed to/incorporated into a streaming platform such as kafka
@@ -214,19 +233,28 @@ class ChatController(object):
                 serializable_mem = pickle.load(handle)
                 print(f"Sucessfully loaded pickled conversation: {serializable_mem}")
             retrieved_messages = messages_from_dict(serializable_mem) 
-            self.chat_history= ChatMessageHistory(messages=retrieved_messages) 
-            self.memory = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", chat_memory=self.chat_history, max_token_limit=2000, return_messages=True, input_key="input")
-            self.chat_agent  = initialize_agent(self.tools, self.llm, agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION, verbose=True, memory=self.memory, prompt=self.PROMPT,  handle_parsing_errors=True,)
+            chat_history= ChatMessageHistory(messages=retrieved_messages) 
+            # update memory
+            self.memory = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", chat_memory=chat_history, max_token_limit=2000, return_messages=True, input_key="input")
             print("Succesfully updated chat agent memory")
-        
-        # for could not parse LLM output
-        # print(f"Chat history: {self.chat_history}")
+
+            
+        # reinitialize agent with updated memory, prompt, tools
         try:
+            self.chat_agent  =  initialize_agent(self.tools,
+                                            self.llm, 
+                                            agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION, 
+                                            verbose=True, 
+                                            memory=self.memory, 
+                                            handle_parsing_errors=True,)
+            # change the default prompt to updated prompt
+            prompt = self.chat_agent.agent.create_prompt(system_message=self.template, input_variables=["entities", "input", "agent_scratchpad", "chat_history"], tools = self.tools)
+            self.chat_agent.agent.llm_chain.prompt = prompt
+            print("Successfully reinitialized agent")            
             # response = self.chat_agent.run(input=question)
             # response = self.chat_agent.run(question, callbacks=callbacks)
             # BELOW IS USED WITH CHAT_CONVERSATIONAL_REACT_DESCRIPTION 
-            response = self.chat_agent({"input": question, "chat_history": []}, callbacks=callbacks)
-                
+            response = self.chat_agent({"input": question, "chat_history": [], "entities": self.entities}, callbacks=callbacks)             
         except ValueError as e:
             response = str(e)
             if not response.startswith("Could not parse LLM output: `"):
@@ -246,5 +274,84 @@ class ChatController(object):
 
 
         return response
+    
+    def add_faiss_tools(self, userid, tool_name, tool_description):      
+        try:
+            faiss_store = retrieve_faiss_vectorstore(self.embeddings, f"faiss_user_{userid}")
+            faiss_retriever = faiss_store.as_retriever()
+            specific_tool = create_db_tools(self.llm, faiss_retriever, tool_name, tool_description)
+            self.tools += specific_tool
+            print(f"Successfully added tool {specific_tool}")
+        except Exception as e:
+            raise e
+        
+    def update_entities(self, userid, text):
+        self.entities += f"\n{text}\n"
+        print(f"Successfully added {self.entities}.")
+
+    
+
+ 
+class ToolBase(object):
+
+
+
+    def __init__(self, userid):
+        self.llm = ChatOpenAI(temperature=0.5, model_name="gpt-4", cache=False)
+        self.embeddings = OpenAIEmbeddings()
+        self._initialize_entities(userid)
+        self._initialize_tools(userid)
+
+    def _initialize_tools(self, userid):
+        if (tool_dict.get(userid) is None):
+            # # OPTION 1: agent = CHAT_CONVERSATIONAL_REACT_DESCRIPTION
+            cover_letter_tool = create_cover_letter_generator_tool()
+
+            resume_advice_tool = create_resume_evaluator_tool()
+            
+            redis_store = retrieve_redis_vectorstore(self.embeddings, "index_web_advice")
+            redis_retriever = redis_store.as_retriever()
+            general_tool_description = """This is a general purpose database. Use it to answer general job related questions. 
+            Prioritize other tools over this tool. """
+            general_tool= create_db_tools(self.llm, redis_retriever, "redis_general", general_tool_description)
+
+            tool_dict = {userid: general_tool + cover_letter_tool + resume_advice_tool}
+            print(f"Successfully initialized tools: {tool_dict}")
+
+    def _initialize_entities(self, userid):
+        if (entities.get(userid) is None):
+            entities = {userid: ""}
+            print(f"Successfully initialized entities: {entities}")
+
+    def add_faiss_tools(self, userid, tool_name, tool_description):      
+        try:
+            faiss_store = retrieve_faiss_vectorstore(self.embeddings, f"faiss_user_{userid}")
+            faiss_retriever = faiss_store.as_retriever()
+            specific_tool = create_db_tools(self.llm, faiss_retriever, tool_name, tool_description)
+            if tool_dict.get(userid) is None:
+                tool_dict = {userid: specific_tool} 
+            else:
+                tool_dict[userid] = tool_dict[userid] + specific_tool
+            print(f"Sucessfully added {tool_name} tool: {tool_dict}")
+        except Exception as e:
+            raise e
+        
+    def update_entities(self, userid, text):
+        if (entities.get(userid) is None):
+            entities = {userid: text}
+        else:
+            entities[userid] = entities[userid] + f"\n{text}\n"
+        print(f"Successfully added {text} entities: {entities}.")
+
+
+
+
+
+
+
+
+
+
+
     
     

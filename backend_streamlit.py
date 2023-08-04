@@ -23,6 +23,7 @@ from multiprocessing import Process, Queue, Value
 import pickle
 import requests
 from langchain.embeddings import OpenAIEmbeddings
+from base import base
 
 
 _ = load_dotenv(find_dotenv()) # read local .env file
@@ -35,10 +36,16 @@ cover_letter_path = "./static/cover_letter"
 advice_path = "./static/advice"
 
 
+
 class Chat():
 
+
+    new_chat: ChatController(str)
+
+
     def __init__(self):
-        pass
+        self._create_chatbot()
+        # super().__init__()
         # self.id = "advice"
         # self.resume = None
         # self.job = None
@@ -50,7 +57,7 @@ class Chat():
     # def nextPage(): st.session_state.page += 1
     # def firstPage(): st.session_state.page = 0
 
-    def create_chatbot(self):
+    def _create_chatbot(self):
 
         with placeholder.container():
 
@@ -58,9 +65,20 @@ class Chat():
             if "userid" not in st.session_state:
                 st.session_state["userid"] = str(uuid.uuid4())
                 print(st.session_state.userid)
-            
+                # Chat.new_chat = ChatController(st.session_state.userid)
+                # base.save_chat(self.new_chat)
+                base.save_chat(ChatController(st.session_state.userid))
 
-            new_chat = ChatController(st.session_state.userid)
+            self.new_chat = base.get_chat()
+                # self.new_chat = self.get_chat()
+
+ 
+            #     self.save_chat(new_chat)
+            #     print("Successfully saved new chat instance")
+            #     # new_knowledge = KnowledgeBase(st.session_state.userid)
+            # else:
+            #     new_chat = self.get_chat()
+            #     print("Sucessfully retrieved chat instance")
 
             # Initialize chat history
             # if "messages" not in st.session_state:
@@ -215,9 +233,12 @@ class Chat():
                             # create faiss store and add it to agent tools
                             create_vectorstore(OpenAIEmbeddings(), "faiss", read_path, "file",  f"faiss_user_{st.session_state.userid}")
                             tool_name = "faiss_resume"
-                            tool_description = "This is user's own resume. Use it as a reference and context when answering questions about user's own resume."
-                            new_chat.add_tools(tool_name, tool_description)
-                            # new_chat = ChatController(st.session_state.userid)
+                            tool_description = """This is user's own resume. Use it as a reference and context when answering questions about user's own resume."""
+                            self.new_chat.add_faiss_tools(st.session_state.userid, tool_name, tool_description)
+                            # add resume file path to prompt (to hopefully trigger preprocessing pick it up)
+                            new_text = f"""resume file: {read_path}"""
+                            self.new_chat.update_entities(st.session_state.userid, new_text)
+
                                 
                             # else:
                             #     st.write("sorry, please make sure your file is correct.")
@@ -253,7 +274,7 @@ class Chat():
                         )
                         question = prefilled
                         # answer = chat_agent.run(mrkl_input, callbacks=[streamlit_handler])
-                        response = new_chat.askAI(st.session_state.userid, question, callbacks=[streamlit_handler]).get("output", "Sorry, something happened.")
+                        response = self.new_chat.askAI(st.session_state.userid, question, callbacks=[streamlit_handler]).get("output", "Sorry, something happened.")
                         st.session_state.questions.append(question)
                         st.session_state.responses.append(response)
                         # session_name = SAMPLE_QUESTIONS[question]
@@ -306,7 +327,7 @@ class Chat():
                 )
                 question = user_input
                 # answer = chat_agent.run(mrkl_input, callbacks=[streamlit_handler])
-                response = new_chat.askAI(st.session_state.userid, question, callbacks=[streamlit_handler]).get("output", "Sorry, something happened.")
+                response = self.new_chat.askAI(st.session_state.userid, question, callbacks=[streamlit_handler]).get("output", "Sorry, something happened.")
                 st.session_state.questions.append(question)
                 st.session_state.responses.append(response)
 
@@ -316,8 +337,7 @@ class Chat():
                     message(st.session_state['questions'][i], is_user=True, key=str(i) + '_user',  avatar_style="initials", seed="Yueqi")
                     message(st.session_state['responses'][i], key=str(i), avatar_style="initials", seed="AI")
 
-            
-                        
+
 
     # def assess(self, userid, job, company, task):
         
@@ -363,4 +383,3 @@ if __name__ == '__main__':
     # create_chatbot()
     advisor = Chat()
     # asyncio.run(advisor.initialize())
-    advisor.create_chatbot()
