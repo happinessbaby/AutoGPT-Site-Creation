@@ -14,7 +14,7 @@ from langchain.agents import AgentType
 from langchain.chains import RetrievalQA
 from pathlib import Path
 from basic_utils import read_txt
-from langchain_utils import create_wiki_tools, create_search_tools, create_db_tools, create_QA_chain, create_qa_tools, create_doc_tools, split_doc, retrieve_redis_vectorstore, get_index
+from langchain_utils import create_wiki_tools, create_search_tools, create_db_tools, create_qa_tools, create_doc_tools, split_doc, retrieve_redis_vectorstore, get_index
 from langchain import PromptTemplate
 from langchain.experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
 from langchain.agents.agent_toolkits import create_python_agent
@@ -22,10 +22,12 @@ from langchain.output_parsers import CommaSeparatedListOutputParser
 from langchain.chains.summarize import load_summarize_chain
 from langchain.llms import OpenAI
 from langchain.vectorstores import FAISS
+from langchain.retrievers import BM25Retriever, EnsembleRetriever
 import sys
 import re
 import string
 import random
+import json
 
 
 
@@ -207,19 +209,28 @@ def compare_samples(job_title, query, directory, sample_type, llm=ChatOpenAI(tem
     if (related_files):
         tools = []
         for file in related_files:
+            # initialize the bm25 retriever and faiss retriever for hybrid search
+            # https://python.langchain.com/docs/modules/data_connection/retrievers/ensemble
             docs = split_doc(file, "file")
-            retriever = FAISS.from_documents(docs, OpenAIEmbeddings()).as_retriever()
+            bm25_retriever = BM25Retriever.from_documents(docs)
+            bm25_retriever.k = 2
+            faiss_retriever = FAISS.from_documents(docs, OpenAIEmbeddings()).as_retriever(search_kwargs={"k": 2})
+            ensemble_retriever = EnsembleRetriever(retrievers=[bm25_retriever, faiss_retriever], weights=[0.5, 0.5])
             # name and description of the tool are really important in the agent using the tool
-            tool_description = "This is a {sample_type} sample. "
-            tool = create_db_tools(llm, retriever, f"sample {sample_type} {random.choice(string.ascii_letters)}", tool_description)
+            tool_description = f"This is a {sample_type} sample. Use it to compare with other {sample_type} samples"
+            tool = create_db_tools(llm, ensemble_retriever, f"{sample_type} {random.choice(string.ascii_letters)}", tool_description)
             tools.extend(tool)
         # Option 1: OpenAI multi functions
         agent = initialize_agent(
-            tools, llm, agent=AgentType.OPENAI_MULTI_FUNCTIONS, verbose=True
+            tools, 
+            llm, 
+            agent=AgentType.OPENAI_MULTI_FUNCTIONS, 
+            max_iterations=2,
+            early_stopping_method="generate",
+            # verbose=True
             )
-        # response = agent.run(query)
-        response = agent({"input": query})
-        print(response)
+        response = agent({"input": query}).get("output", "")
+        print(f"Successfully compared samples for best practices: {response}")
         return response
     else:
         return ""
@@ -238,13 +249,13 @@ def get_web_resources(query, search_tool, top=10,  llm = ChatOpenAI(temperature=
     agent= initialize_agent(
         tools, 
         llm, 
-        # agent=AgentType.REACT_DOCSTORE,
         agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
         handle_parsing_errors=True,
         # verbose = True,
         )
     try:
         response = agent.run(query)
+        print(f"Successfully retrieved web data advice: {response}")
         return response
     except ValueError as e:
         response = str(e)
@@ -253,6 +264,7 @@ def get_web_resources(query, search_tool, top=10,  llm = ChatOpenAI(temperature=
             raise e
         response = response.removeprefix(
             "Could not parse LLM output: `").removesuffix("`")
+        print(f"Successfully retrieved web data advice: {response}")
         return response
     # Option 2: better at providing details but tend to be very slow and error prone and too many tokens
     planner = load_chat_planner(llm)
@@ -274,24 +286,29 @@ def get_job_relevancy(file, query, doctype="file", llm = ChatOpenAI(temperature=
         tools,
         llm,
         agent=AgentType.OPENAI_MULTI_FUNCTIONS, 
+        max_iterations=2,
+        early_stopping_method="generate",
         # verbose=True
     )
-    # response = agent.run(query)
-    response = agent({"input": query})
+    response = agent({"input": query}).get("output", "")
+
+    
     print(f"Successfully got relevancy info: {response}")
     return response
     
 
-def retrieve_from_db(path, query, llm=OpenAI(temperature=0.8)):
-    index = get_index(path=path, path_type='dir')
-    # Create a question-answering chain using the index
-    #TODO: try vectorestore as retriever directly without creating index first, just retrieve vector store (saves memory)
+def retrieve_from_db(query, llm=OpenAI(temperature=0.8)):
+    # index = get_index(path=path, path_type='dir')
+    # # Create a question-answering chain using the index
+    redis_store = retrieve_redis_vectorstore(OpenAIEmbeddings(), "index_web_advice")
+    redis_retriever = redis_store.as_retriever()
     chain = RetrievalQA.from_chain_type(
         llm, 
         chain_type="stuff", 
         # verbose=True, 
-        retriever=index.vectorstore.as_retriever(),
-        input_key="question")
+        retriever=redis_retriever,
+        # input_key="question"
+        )
     response = chain.run(query)
     print(f"Successfully retrieved advice: {response}")
     return response

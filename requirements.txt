@@ -22,4 +22,5 @@ pinecone-client
 unstructured
 redis
 faiss-cpu
-
+tiktoken
+rank_bm25

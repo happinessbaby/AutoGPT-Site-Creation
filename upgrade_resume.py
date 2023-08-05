@@ -10,6 +10,7 @@ from langchain.agents import AgentType, Tool, initialize_agent
 from basic_utils import read_txt
 from common_utils import compare_samples, get_web_resources, retrieve_from_db, get_job_relevancy, extract_posting_information, get_summary, extract_fields, get_field_content, extract_job_title
 from langchain_utils import retrieve_faiss_vectorstore, create_vectorstore, merge_faiss_vectorstore
+from langchain.text_splitter import MarkdownHeaderTextSplitter
 from pathlib import Path
 import json
 from base import base
@@ -106,7 +107,7 @@ def evaluate_resume(my_job_title="", company="", read_path = my_resume_file, pos
 
       query_advice =  f"how to best wriite {field} for resume?"
 
-      resume_advices = retrieve_from_db(resume_advice_path, query_advice)
+      resume_advices = retrieve_from_db(query_advice)
 
       query_samples = f""" 
         Research sample resume provided. 
@@ -186,6 +187,9 @@ def evaluate_resume(my_job_title="", company="", read_path = my_resume_file, pos
 
 
 def postprocessing(response, res_path):
+    
+    # TODO: user markdownheadersplitter to split according to delimiters before vs storage
+
     # cut the text to only cover letter
       # transform_chain = TransformChain(
     #     input_variables=["text"], output_variables=["output_text"], transform=transform_func)
@@ -209,19 +213,20 @@ def preprocessing(json_request):
     print(json_request)
     args = json.loads(json_request)
     # if resume doesn't exist, ask for resume
-    read_path = args["resume file"]
-    if (read_path=="" or read_path=="<resume file>"):
+    if ("resume file" not in args or args["resume file"]=="" or args["resume file"]=="<resume file>"):
       return "Can you provide your resume so I can further assist you? "
-    
-    if (args["job"] == "" or args["job"]=="<job>"):
+    else:
+      # may need to clean up the path first
+        read_path = args["resume file"]
+    if ("job" not in args or args["job"] == "" or args["job"]=="<job>"):
         job = ""
     else:
        job = args["job"]
-    if (args["company"] == "" or args["company"]=="<company>"):
+    if ("company" not in args or args["company"] == "" or args["company"]=="<company>"):
         company = ""
     else:
         company = args["company"]
-    if (args["job post link"]=="" or args["job post link"]=="<job post link>"):
+    if ("job post link" not in args or args["job post link"]=="" or args["job post link"]=="<job post link>"):
         posting_path = ""
     else:
         posting_path = args["job post link"]
@@ -251,7 +256,7 @@ def create_resume_advice_doc_tool(read_path):
     name = "faiss_resume_advice"
     description = """This is user's detailed resume advice. If this tool exists, do not use the 'resume evaluator' tool anymore. 
     Use this tool as a reference to give tailored resume advices. """
-    create_vectorstore(OpenAIEmbeddings(), "faiss", read_path, "file",  f"{name}_{userid}")
+    create_vectorstore(embeddings, "faiss", read_path, "file",  f"{name}_{userid}")
     chat = base.get_chat()
     chat.add_tools(userid, name, description)
 

@@ -28,7 +28,7 @@ import subprocess
 import sys
 import os
 from feast import FeatureStore
-from langchain.text_splitter import CharacterTextSplitter
+from langchain.text_splitter import CharacterTextSplitter,  RecursiveCharacterTextSplitter
 from langchain.vectorstores.redis import Redis
 from langchain.embeddings import OpenAIEmbeddings
 import redis
@@ -68,13 +68,20 @@ langchain.llm_cache = RedisSemanticCache(
     redis_url=redis_url
 )
 
-def split_doc(path='./web_data/', path_type='dir'):
+
+def split_doc(path='./web_data/', path_type='dir', chunk_size=200, chunk_overlap=20):
     if (path_type=="file"):
         loader = TextLoader(path)
     elif (path_type=="dir"):
         loader = DirectoryLoader(path, glob="*.txt", recursive=True)
     documents = loader.load()
-    text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
+    # Option 1: tiktoken from openai
+    text_splitter = CharacterTextSplitter.from_tiktoken_encoder(chunk_size=100, chunk_overlap=0)
+    # option 2: 
+    # text_splitter = RecursiveCharacterTextSplitter(
+    #     chunk_size=chunk_size, 
+    #     length_function = len,
+    #     chunk_overlap=chunk_overlap)
     docs = text_splitter.split_documents(documents)
     return docs
 
@@ -171,7 +178,6 @@ def create_db_tools(llm, retriever, name, description):
     print(f"Succesfully created {name} tool")
     return tool
 
-
 # def create_vectorstore_agent_toolkit(embeddings, llm, vs_type, redis_index_name="", faiss_index_name=""):
 #     if vs_type=="general":
 #         redis_store = retrieve_redis_vectorstore(embeddings, redis_index_name)
@@ -203,34 +209,6 @@ def create_db_tools(llm, retriever, name, description):
 #         vectorstores=[redis_vectorstore_info, faiss_vectorstore_info], llm=llm
 #             )   
 #     return router_toolkit
-
-def create_QA_chain(llm, db, docs=None, chain_type="stuff", output_parse=None):
-
-    # output_parser =  output_parse
-    # prompt_template = """If the context is not relevant, 
-    # please answer the question by using your own knowledge about the topic
-    
-    # {context}
-    
-    # Question: {question}
-    # """
-
-    # PROMPT = PromptTemplate(
-    #     template=prompt_template, input_variables=["context", "question"], output_parser=output_parser
-    # )c
-
-    # chain_type_kwargs = {"prompt": PROMPT}
-
-    qa = RetrievalQA.from_chain_type(
-        llm=llm, 
-        chain_type=chain_type,
-        # can also pass in a "search_type" to as_retriever() 
-        retriever=db.as_retriever(), 
-        # verbose=True, 
-        # chain_type_kwargs=chain_type_kwargs,
-    )
-
-    return qa
 
 
 
