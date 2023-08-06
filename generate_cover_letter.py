@@ -13,6 +13,7 @@ from pathlib import Path
 import json
 from langchain.agents import AgentType, Tool, initialize_agent
 from langchain_utils import create_vectorstore
+from multiprocessing import Process, Queue, Value
 from base import base
 
 
@@ -41,12 +42,17 @@ cover_letter_samples_path = "./sample_cover_letters/"
 
 def generate_basic_cover_letter(my_job_title="", company="", read_path=my_resume_file,  posting_path=""):
     
-    res_path = os.path.join("./static/cover_letter/", Path(read_path).stem + ".txt")
+    userid = Path(read_path).stem
+    res_path = os.path.join("./static/cover_letter/", userid + ".txt")
     print(res_path)
+
+    generated_responses = {}
     
     resume_content = read_txt(read_path)
     # Get personal information from resume
     personal_info_dict = extract_personal_information(resume_content)
+    generated_responses.update(personal_info_dict)
+    
 
     job_specification = ""
     if (Path(posting_path).is_file()):
@@ -58,6 +64,8 @@ def generate_basic_cover_letter(my_job_title="", company="", read_path=my_resume
 
     if (my_job_title==""):
         my_job_title = extract_job_title(resume_content)
+    generated_responses.update({"job": my_job_title})
+    generated_responses.update({"company": company})
   
     # Get job description using Google serach
     query_samples = f""" 
@@ -68,10 +76,12 @@ def generate_basic_cover_letter(my_job_title="", company="", read_path=my_resume
       what should I put in my cover letter? \n
 
       """
-    practices = compare_samples(my_job_title,  query_samples, cover_letter_samples_path, "cover letter")
-    
+    practices = compare_samples(my_job_title,  query_samples, cover_letter_samples_path, "cover_letter")
+    generated_responses.update({"sample practices": practices})
+
     job_query  = f"""Research what a {my_job_title} does and output a detailed description of the common skills, responsibilities, education, experience needed. """
     job_description = get_web_resources(job_query, "google")
+    generated_responses.update({"job description": job_description})
 
     # Get company descriptiong using Wikipedia lookup
     # for future probably will need to go into company site and scrape more information
@@ -81,6 +91,7 @@ def generate_basic_cover_letter(my_job_title="", company="", read_path=my_resume
                           
                           Look up the exact name of the company. If it doesn't exist or the search result does not return a company, output you don't know"""
       company_description = get_web_resources(company_query, "wiki")
+    generated_responses.update({"company description": company_description})
 
 
     query_relevancy = f"""Determine the relevant and irrelevant information contained in the resume document delimited with {delimiter} characters.
@@ -105,6 +116,7 @@ def generate_basic_cover_letter(my_job_title="", company="", read_path=my_resume
 
         """
     relevancy = get_job_relevancy(read_path, query_relevancy)
+    generated_responses.update({"job relevancy": relevancy})
 
     # Get advices on cover letter
     advice_query = """Find answers to the following questions:
@@ -112,8 +124,11 @@ def generate_basic_cover_letter(my_job_title="", company="", read_path=my_resume
     1. What are some best practices when writing a cover letter?  """
     # advices = retrieve_from_vectorstore(embeddings, advice_query, index_name="redis_cover_letter_advice")
     advices = retrieve_from_db(advice_query)
+    generated_responses.update({"expert advices": advices})
     # Get cover letter examples
 
+    P = Process(target=create_cover_letter_doc_tool, args = (userid, res_path, generated_responses))
+    P.start()
 
     
     # Use an LLM to generate a cover letter that is specific to the resume file that is being read
@@ -193,18 +208,17 @@ def generate_basic_cover_letter(my_job_title="", company="", read_path=my_resume
     )
 
     my_cover_letter = llm(cover_letter_message).content
+    
+    P.join()
 
     # Check potential harmful content in response
     if (check_content_safety(text_str=my_cover_letter)):   
-        if postprocessing(my_cover_letter, res_path):
-        # return my_cover_letter.split(delimiter4)[-1].strip()
-          create_cover_letter_doc_tool(res_path)
-          return read_txt(res_path)
-                  # Error logging
+      response = postprocessing(my_cover_letter)
+      return response
 
 #TODO
-def postprocessing(response, res_path):
-    my_cover_letter= my_cover_letter.split(delimiter4)[-1].strip()
+def postprocessing(response):
+    # my_cover_letter= my_cover_letter.split(delimiter4)[-1].strip()
     # cut the text to only cover letter
       # transform_chain = TransformChain(
     #     input_variables=["text"], output_variables=["output_text"], transform=transform_func)
@@ -212,14 +226,13 @@ def postprocessing(response, res_path):
     # chat = ChatOpenAI(streaming=True, callbacks=[StreamingStdOutCallbackHandler()], temperature=0)
     # langchain.llm_cache = InMemoryCache()
 
-    with open(res_path, 'w') as f:
-        try:
-            f.write(response)
-            print("ALL SUCCESS")
-            return True
-        except Exception as e:
-            print("FAILED")
-            return False
+    # with open(res_path, 'w') as f:
+    #     try:
+    #         f.write(response)
+    #         print("ALL SUCCESS")
+    #     except Exception as e:
+    #         print("FAILED")
+    return response
 
 
 
@@ -254,11 +267,12 @@ def preprocessing(json_request):
     res = generate_basic_cover_letter(my_job_title=job, company=company, read_path=read_path, posting_path=posting_path)
     return res
     
-def create_cover_letter_doc_tool(read_path):   
-    userid = Path(read_path).stem
-    name = "faiss_cover_letter"
-    description = """This is user's cover letter. Use it as a reference and context when answering questions about user's cover letter."""
-    create_vectorstore(embeddings, "faiss", read_path, "file",  f"{name}_{userid}")
+def create_cover_letter_doc_tool(userid, res_path, response_dict):   
+    with open(res_path, 'w') as handle:
+      json.dump(response_dict, handle)
+    name = "faiss_cover_letter_adivce"
+    description = """This is advices on user's cover letter. Use it as a reference and context when answering questions about user's cover letter."""
+    create_vectorstore(embeddings, "faiss", res_path, "file",  f"{name}_{userid}")
     # if testing without ui, the below will not run
     chat = base.get_chat()
     chat.add_tools(userid, name, description)

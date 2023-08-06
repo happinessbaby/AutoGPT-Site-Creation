@@ -16,7 +16,7 @@ from pathlib import Path
 from basic_utils import read_txt
 from langchain_utils import create_wiki_tools, create_search_tools, create_db_tools, create_qa_tools, create_doc_tools, split_doc, retrieve_redis_vectorstore, get_index
 from langchain import PromptTemplate
-from langchain.experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
+# from langchain.experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
 from langchain.agents.agent_toolkits import create_python_agent
 from langchain.output_parsers import CommaSeparatedListOutputParser
 from langchain.chains.summarize import load_summarize_chain
@@ -200,8 +200,6 @@ def search_related_samples(job_title, directory):
     return related_files
 
 
-
-#TODO: check this function, currently not working
 def compare_samples(job_title, query, directory, sample_type, llm=ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
 
     related_files = search_related_samples(job_title, directory)
@@ -218,7 +216,7 @@ def compare_samples(job_title, query, directory, sample_type, llm=ChatOpenAI(tem
             ensemble_retriever = EnsembleRetriever(retrievers=[bm25_retriever, faiss_retriever], weights=[0.5, 0.5])
             # name and description of the tool are really important in the agent using the tool
             tool_description = f"This is a {sample_type} sample. Use it to compare with other {sample_type} samples"
-            tool = create_db_tools(llm, ensemble_retriever, f"{sample_type} {random.choice(string.ascii_letters)}", tool_description)
+            tool = create_db_tools(llm, ensemble_retriever, f"{sample_type}_{random.choice(string.ascii_letters)}", tool_description)
             tools.extend(tool)
         # Option 1: OpenAI multi functions
         agent = initialize_agent(

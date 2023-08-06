@@ -8,7 +8,7 @@ from langchain.embeddings import OpenAIEmbeddings
 from langchain import PromptTemplate
 # from langchain.agents import ConversationalChatAgent, Tool, AgentExecutor
 # from basic_utils import read_txt
-from langchain_utils import (create_QA_chain, create_QASource_chain, create_qa_tools, create_doc_tools, create_search_tools, 
+from langchain_utils import (create_QASource_chain, create_qa_tools, create_doc_tools, create_search_tools, 
                              retrieve_redis_vectorstore, split_doc, CustomOutputParser, CustomPromptTemplate,
                              create_db_tools, retrieve_faiss_vectorstore)
 # from langchain.prompts import BaseChatPromptTemplate
@@ -24,6 +24,9 @@ from langchain.agents import AgentType
 from langchain.memory.chat_message_histories.in_memory import ChatMessageHistory
 from langchain.memory import ChatMessageHistory
 from langchain.schema import messages_from_dict, messages_to_dict
+from langchain.utilities import GoogleSearchAPIWrapper
+from langchain.retrievers.web_research import WebResearchRetriever
+from langchain.docstore import InMemoryDocstore
 # from langchain.agents.agent_toolkits import (
 #     create_vectorstore_agent,
 #     VectorStoreToolkit,
@@ -38,6 +41,7 @@ from upgrade_resume import create_resume_evaluator_tool
 import pickle
 import json
 import langchain
+import faiss
 
 
 # debugging log: very useful
@@ -60,7 +64,7 @@ class ChatController(object):
 
     def __init__(self, userid):
         self.userid = userid
-        self.llm = ChatOpenAI(temperature=0.5, model_name="gpt-4", cache=False)
+        self.llm = ChatOpenAI(temperature=0.5, model_name="gpt-4", cache=False, streaming=True)
         self.embeddings = OpenAIEmbeddings()
         # self.memory = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", max_token_limit=2000, return_messages=True, input_key="input")
         self._create_chat_agent()
@@ -81,7 +85,19 @@ class ChatController(object):
         Prioritize other tools over this tool. """
         general_tool= create_db_tools(self.llm, redis_retriever, "redis_general", general_tool_description)
 
-        self.tools = general_tool + cover_letter_tool + resume_advice_tool
+        search = GoogleSearchAPIWrapper()
+        embedding_size = 1536  
+        index = faiss.IndexFlatL2(embedding_size)  
+        vectorstore = FAISS(self.embeddings.embed_query, index, InMemoryDocstore({}), {})
+        web_research_retriever = WebResearchRetriever.from_llm(
+            vectorstore=vectorstore,
+            llm=self.llm, 
+            search=search, 
+        )
+        web_tool_description="""This is a web research tool. Use it only when you cannot find answers elsewhere. Always add source information."""
+        web_tool = create_db_tools(self.llm, web_research_retriever, "faiss_web", web_tool_description)
+
+        self.tools = general_tool + cover_letter_tool + resume_advice_tool + web_tool
 
         # initialize entities
         self.entities = ""
