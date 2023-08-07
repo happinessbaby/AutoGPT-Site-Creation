@@ -18,7 +18,7 @@ from langchain_utils import (create_QASource_chain, create_qa_tools, create_doc_
 # from typing import List, Union
 # import re
 # from langchain import LLMChain
-from langchain.memory import ConversationSummaryBufferMemory
+from langchain.memory import ConversationBufferMemory
 from langchain.agents import initialize_agent
 from langchain.agents import AgentType
 from langchain.memory.chat_message_histories.in_memory import ChatMessageHistory
@@ -27,6 +27,12 @@ from langchain.schema import messages_from_dict, messages_to_dict
 from langchain.utilities import GoogleSearchAPIWrapper
 from langchain.retrievers.web_research import WebResearchRetriever
 from langchain.docstore import InMemoryDocstore
+from langchain.agents.agent_toolkits import create_conversational_retrieval_agent
+from langchain.agents.openai_functions_agent.agent_token_buffer_memory import AgentTokenBufferMemory
+from langchain.agents.openai_functions_agent.base import OpenAIFunctionsAgent
+from langchain.schema.messages import SystemMessage
+from langchain.prompts import MessagesPlaceholder
+from langchain.agents import AgentExecutor
 # from langchain.agents.agent_toolkits import (
 #     create_vectorstore_agent,
 #     VectorStoreToolkit,
@@ -66,13 +72,11 @@ class ChatController(object):
         self.userid = userid
         self.llm = ChatOpenAI(temperature=0.5, model_name="gpt-4", cache=False, streaming=True)
         self.embeddings = OpenAIEmbeddings()
-        # self.memory = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", max_token_limit=2000, return_messages=True, input_key="input")
         self._create_chat_agent()
 
 
     def _create_chat_agent(self):
     
-        # # OPTION 1: agent = CHAT_CONVERSATIONAL_REACT_DESCRIPTION
 
         # initialize tools
         cover_letter_tool = create_cover_letter_generator_tool()
@@ -103,15 +107,6 @@ class ChatController(object):
         self.entities = ""
 
 
-
-
-        # if (retrieve_faiss_vectorstore(self.embedding, f"faiss_user_{self.userid}"))!=None:
-        #     faiss_store = retrieve_faiss_vectorstore(self.embeddings, f"faiss_user_{self.userid}")
-        #     faiss_retriever = faiss_store.as_retriever()
-        #     specific_tool = create_db_tools(self.llm, faiss_retriever, "faiss_resume")
-        #     self.tools +=  specific_tool
-
-
         self.template = """The following is a friendly conversation between a human and an AI. 
         The AI is talkative and provides lots of specific details from its context.
           If the AI does not know the answer to a question, it truthfully says it does not know. 
@@ -126,9 +121,11 @@ class ChatController(object):
         Human: {input}
         AI:"""
 
+        # OPTION 1: agent = CHAT_CONVERSATIONAL_REACT_DESCRIPTION
         # initialize memory
-        self.memory = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history",return_messages=True, input_key="input")
 
+        self.memory = ConversationBufferMemory(llm=self.llm, memory_key="chat_history",return_messages=True, input_key="input")
+    
         self.chat_agent  = initialize_agent(self.tools, 
                                             self.llm, 
                                             agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION, 
@@ -148,10 +145,37 @@ class ChatController(object):
         #     agent=agent, tools=self.tools, verbose=True, memory=memory
         # )
 
-        # Option 3: agent = Plant & Execute
-        # planner = load_chat_planner(self.llm)
-        # executor = load_agent_executor(self.llm, self.tools, verbose=True)
-        # self.chat_agent = PlanAndExecute(planner=planner, executor=executor, verbose=True, memory=memory)
+        # Option 3: agent = conversational retrieval agent
+
+        # template = f"""The following is a friendly conversation between a human and an AI. 
+        # The AI is talkative and provides lots of specific details from its context.
+        #   If the AI does not know the answer to a question, it truthfully says it does not know. 
+
+
+        # Before answering each question, check your tools and see which ones you can use to answer the question. 
+
+        #   Only when none can be used should you not use any tools. You should use the tools whenever you can.  
+
+
+        #   You are provided with information about entities the Human mentions, if relevant.
+
+        # Relevant entity information:
+        # {self.entities}
+        # """
+
+        # self.memory = AgentTokenBufferMemory(memory_key="chat_history", llm=self.llm, return_messages=True, input_key="input")
+        # system_message = SystemMessage(
+        # content=(
+        #     template
+        #     ),
+        # )
+        # self.prompt = OpenAIFunctionsAgent.create_prompt(
+        #     system_message=system_message,
+        #     extra_prompt_messages=[MessagesPlaceholder(variable_name="chat_history")],
+        # )
+        # agent = OpenAIFunctionsAgent(llm=self.llm, tools=self.tools, prompt=self.prompt)
+        # self.chat_agent = AgentExecutor(agent=agent, tools=self.tools, memory=self.memory, verbose=True,
+        #                            return_intermediate_steps=True)
 
         # Option 4 vectorstore agent
     
@@ -225,14 +249,6 @@ class ChatController(object):
 
     #     return agent
 
-    # def add_tools(self, tool_name, tool_description):       
-    #     try:
-    #         faiss_store = retrieve_faiss_vectorstore(self.embeddings, f"faiss_user_{self.userid}")
-    #         faiss_retriever = faiss_store.as_retriever()
-    #         specific_tool = create_db_tools(self.llm, faiss_retriever, tool_name, tool_description)
-    #         self.tools +=  specific_tool
-    #     except Exception as e:
-    #         raise e
 
 
 
@@ -243,34 +259,61 @@ class ChatController(object):
 
         # retrieve a conversation memory 
         # can be changed to/incorporated into a streaming platform such as kafka
-        if os.path.isfile('./conv_memory/'+userid+'.pickle'):
-            # retrieve pickled memory
-            with open('./conv_memory/'+userid+'.pickle', 'rb') as handle:
-                serializable_mem = pickle.load(handle)
-                print(f"Sucessfully loaded pickled conversation: {serializable_mem}")
-            retrieved_messages = messages_from_dict(serializable_mem) 
-            chat_history= ChatMessageHistory(messages=retrieved_messages) 
-            # update memory
-            self.memory = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", chat_memory=chat_history, max_token_limit=2000, return_messages=True, input_key="input")
-            print("Succesfully updated chat agent memory")
+        # if os.path.isfile('./conv_memory/'+userid+'.pickle'):
+        #     # retrieve pickled memory
+        #     with open('./conv_memory/'+userid+'.pickle', 'rb') as handle:
+        #         serializable_mem = pickle.load(handle)
+        #         print(f"Sucessfully loaded pickled conversation: {serializable_mem}")
+        #     retrieved_messages = messages_from_dict(serializable_mem) 
+        #     chat_history= ChatMessageHistory(messages=retrieved_messages) 
+        #     # update memory
+        #     self.memory = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", chat_memory=chat_history, max_token_limit=2000, return_messages=True, input_key="input")
+        #     print("Succesfully updated chat agent memory")
 
             
         # reinitialize agent with updated memory, prompt, tools
         try:
+            #Option 1
             self.chat_agent  =  initialize_agent(self.tools,
                                             self.llm, 
                                             agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION, 
                                             verbose=True, 
                                             memory=self.memory, 
                                             handle_parsing_errors=True,)
-            # change the default prompt to updated prompt
             prompt = self.chat_agent.agent.create_prompt(system_message=self.template, input_variables=["entities", "input", "agent_scratchpad", "chat_history"], tools = self.tools)
             self.chat_agent.agent.llm_chain.prompt = prompt
-            print("Successfully reinitialized agent")            
-            # response = self.chat_agent.run(input=question)
-            # response = self.chat_agent.run(question, callbacks=callbacks)
+            # print("Successfully reinitialized agent")            
             # BELOW IS USED WITH CHAT_CONVERSATIONAL_REACT_DESCRIPTION 
-            response = self.chat_agent({"input": question, "chat_history": [], "entities": self.entities}, callbacks=callbacks)             
+            response = self.chat_agent({"input": question, "chat_history": [], "entities": self.entities}, callbacks=callbacks)  
+        #     template = f"""The following is a friendly conversation between a human and an AI. 
+        #     The AI is talkative and provides lots of specific details from its context.
+        #     If the AI does not know the answer to a question, it truthfully says it does not know. 
+
+
+        #   Before answering each question, check your tools and see which ones you can use to answer the question. 
+
+        #   Only when none can be used should you not use any tools. You should use the tools whenever you can.  
+
+        #     You are provided with information about entities the Human mentions, if relevant. These should 
+
+        #     Relevant entity information:
+        #     {self.entities}
+        #     """
+
+        #     # self.memory = AgentTokenBufferMemory(memory_key="chat_history", llm=self.llm, return_messages=True, input_key="input")
+        #     system_message = SystemMessage(
+        #     content=(
+        #         template
+        #         ),
+        #     )
+        #     self.prompt = OpenAIFunctionsAgent.create_prompt(
+        #         system_message=system_message,
+        #         extra_prompt_messages=[MessagesPlaceholder(variable_name="chat_history")],
+        #     )
+        #     agent = OpenAIFunctionsAgent(llm=self.llm, tools=self.tools, prompt=self.prompt)
+        #     self.chat_agent = AgentExecutor(agent=agent, tools=self.tools, memory=self.memory, verbose=True,
+        #                            return_intermediate_steps=True)
+        #     response = self.chat_agent({"input": question}, callbacks=callbacks)             
         except ValueError as e:
             response = str(e)
             if not response.startswith("Could not parse LLM output: `"):

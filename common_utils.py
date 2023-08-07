@@ -11,7 +11,7 @@ from langchain.document_loaders import CSVLoader, TextLoader
 from langchain.vectorstores import DocArrayInMemorySearch
 from langchain.tools.python.tool import PythonREPLTool
 from langchain.agents import AgentType
-from langchain.chains import RetrievalQA
+from langchain.chains import RetrievalQA,  HypotheticalDocumentEmbedder, LLMChain
 from pathlib import Path
 from basic_utils import read_txt
 from langchain_utils import create_wiki_tools, create_search_tools, create_db_tools, create_qa_tools, create_doc_tools, split_doc, retrieve_redis_vectorstore, get_index
@@ -23,6 +23,7 @@ from langchain.chains.summarize import load_summarize_chain
 from langchain.llms import OpenAI
 from langchain.vectorstores import FAISS
 from langchain.retrievers import BM25Retriever, EnsembleRetriever
+import os
 import sys
 import re
 import string
@@ -84,7 +85,10 @@ def extract_personal_information(resume,  llm = ChatOpenAI(temperature=0, model=
     print(f"Successfully extracted personal info: {personal_info_dict}")
     return personal_info_dict
 
+
+
 def extract_posting_information(posting, llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
+
     job_schema = ResponseSchema(name="job",
                              description="Extract the job position of the job listing. If this information is not found, output -1")
     company_schema = ResponseSchema(name="company",
@@ -111,12 +115,13 @@ def extract_posting_information(posting, llm = ChatOpenAI(temperature=0, model="
     messages = prompt.format_messages(text=posting, 
                                 format_instructions=format_instructions,
                                 delimiter=delimiter)
-
-    
+ 
     response = llm(messages)
     posting_info_dict = output_parser.parse(response.content)
     print(f"Successfully extracted posting info: {posting_info_dict}")
     return posting_info_dict
+
+
 
 def extract_job_title(resume):
     response = get_completion(f"""Read the resume closely. It is delimited with {delimiter} characters. 
@@ -132,7 +137,6 @@ def extract_job_title(resume):
 
 
 def extract_fields(resume, llm=OpenAI(temperature=0, cache=False)):
-
 
     query =  """Search and extract fields of the resume delimited with {delimiter} characters.
 
@@ -156,13 +160,11 @@ def extract_fields(resume, llm=OpenAI(temperature=0, cache=False)):
     return response
 
 def get_field_content(resume, field):
-   
-   
+     
    query = f"""Retrieve all the content of field {field} from the resume file delimiter with {delimiter} charactres.
 
       resume: {delimiter}{resume}{delimiter}
     """
-
    response = get_completion(query)
    print(f"Successfully got field content: {response}")
    return response
@@ -170,8 +172,6 @@ def get_field_content(resume, field):
 
     
 def search_related_samples(job_title, directory):
-    # related_jobs = get_completion(f"Generate a list of job titles that are similar to {job_title} or relevant to {job_title}")
-    # print(related_jobs)
 
     system_message = f"""
 		You are an assistant that evaluates whether the job position described in the content is similar to {job_title} or relevant to {job_title}. 
@@ -184,8 +184,6 @@ def search_related_samples(job_title, directory):
 		"""
     related_files = []
     for path in  Path(directory).glob('**/*.txt'):
-        # 1. extract job from sample resume/cover letter and do a similarity search with job_title
-        # 2. for similar jobs, compare the sample with the user's and determine areas of improvement
         file = str(path)
         content = read_txt(file)
         # print(file, len(content))
@@ -200,38 +198,36 @@ def search_related_samples(job_title, directory):
     return related_files
 
 
-def compare_samples(job_title, query, directory, sample_type, llm=ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
 
-    related_files = search_related_samples(job_title, directory)
-    print(related_files)
-    if (related_files):
-        tools = []
-        for file in related_files:
-            # initialize the bm25 retriever and faiss retriever for hybrid search
-            # https://python.langchain.com/docs/modules/data_connection/retrievers/ensemble
-            docs = split_doc(file, "file")
-            bm25_retriever = BM25Retriever.from_documents(docs)
-            bm25_retriever.k = 2
-            faiss_retriever = FAISS.from_documents(docs, OpenAIEmbeddings()).as_retriever(search_kwargs={"k": 2})
-            ensemble_retriever = EnsembleRetriever(retrievers=[bm25_retriever, faiss_retriever], weights=[0.5, 0.5])
-            # name and description of the tool are really important in the agent using the tool
-            tool_description = f"This is a {sample_type} sample. Use it to compare with other {sample_type} samples"
-            tool = create_db_tools(llm, ensemble_retriever, f"{sample_type}_{random.choice(string.ascii_letters)}", tool_description)
-            tools.extend(tool)
-        # Option 1: OpenAI multi functions
-        agent = initialize_agent(
-            tools, 
-            llm, 
-            agent=AgentType.OPENAI_MULTI_FUNCTIONS, 
-            max_iterations=2,
-            early_stopping_method="generate",
-            # verbose=True
-            )
-        response = agent({"input": query}).get("output", "")
-        print(f"Successfully compared samples for best practices: {response}")
-        return response
-    else:
-        return ""
+def compare_samples(related_samples, query,  sample_type, llm=ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
+
+    tools = []
+
+    for file in related_samples:
+        # initialize the bm25 retriever and faiss retriever for hybrid search
+        # https://python.langchain.com/docs/modules/data_connection/retrievers/ensemble
+        docs = split_doc(file, "file")
+        bm25_retriever = BM25Retriever.from_documents(docs)
+        bm25_retriever.k = 2
+        faiss_retriever = FAISS.from_documents(docs, OpenAIEmbeddings()).as_retriever(search_kwargs={"k": 2})
+        ensemble_retriever = EnsembleRetriever(retrievers=[bm25_retriever, faiss_retriever], weights=[0.5, 0.5])
+        # name and description of the tool are really important in the agent using the tool
+        tool_description = f"This is a {sample_type} sample. Use it to compare with other {sample_type} samples"
+        tool = create_db_tools(llm, ensemble_retriever, f"{sample_type}_{random.choice(string.ascii_letters)}", tool_description)
+        tools.extend(tool)
+    # Option 1: OpenAI multi functions
+    agent = initialize_agent(
+        tools, 
+        llm, 
+        agent=AgentType.OPENAI_MULTI_FUNCTIONS, 
+        max_iterations=2,
+        early_stopping_method="generate",
+        # verbose=True
+        )
+
+    response = agent({"input": query}).get("output", "")
+    print(f"Successfully compared samples for best practices: {response}")
+    return response
 
 
 
@@ -243,6 +239,7 @@ def get_web_resources(query, search_tool, top=10,  llm = ChatOpenAI(temperature=
         tools = create_search_tools("google", top)
     elif (search_tool=="wiki"):
         tools = create_wiki_tools()
+
     # Option 1: ReACt decent enough, tend to summarize too much 
     agent= initialize_agent(
         tools, 
@@ -276,9 +273,7 @@ def get_web_resources(query, search_tool, top=10,  llm = ChatOpenAI(temperature=
     
 def get_job_relevancy(file, query, doctype="file", llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
 
-
     tools = create_doc_tools(file, doctype)
-
 
     agent = initialize_agent(
         tools,
@@ -288,9 +283,7 @@ def get_job_relevancy(file, query, doctype="file", llm = ChatOpenAI(temperature=
         early_stopping_method="generate",
         # verbose=True
     )
-    response = agent({"input": query}).get("output", "")
-
-    
+    response = agent({"input": query}).get("output", "")   
     print(f"Successfully got relevancy info: {response}")
     return response
     
@@ -298,16 +291,26 @@ def get_job_relevancy(file, query, doctype="file", llm = ChatOpenAI(temperature=
 def retrieve_from_db(query, llm=OpenAI(temperature=0.8)):
     # index = get_index(path=path, path_type='dir')
     # # Create a question-answering chain using the index
-    redis_store = retrieve_redis_vectorstore(OpenAIEmbeddings(), "index_web_advice")
-    redis_retriever = redis_store.as_retriever()
-    chain = RetrievalQA.from_chain_type(
-        llm, 
-        chain_type="stuff", 
-        # verbose=True, 
-        retriever=redis_retriever,
-        # input_key="question"
-        )
-    response = chain.run(query)
+    prompt_template = """Please answer the user's question about resume, cover letter, or job application: 
+        Question: {question}
+        Answer:"""
+    prompt = PromptTemplate(input_variables=["question"], template=prompt_template)
+    llm_chain = LLMChain(llm=llm, prompt=prompt)
+    base_embeddings = OpenAIEmbeddings()
+    # HyDE: https://python.langchain.com/docs/use_cases/question_answering/how_to/hyde
+    embeddings = HypotheticalDocumentEmbedder(llm_chain = llm_chain, base_embeddings = base_embeddings)
+    redis_store = retrieve_redis_vectorstore(embeddings, "index_web_advice")
+    docs = redis_store.similarity_search(query)
+    response = docs[0].page_content
+    # redis_retriever = redis_store.as_retriever()
+    # chain = RetrievalQA.from_chain_type(
+    #     llm, 
+    #     chain_type="stuff", 
+    #     # verbose=True, 
+    #     retriever=redis_retriever,
+    #     # input_key="question"
+    #     )
+    # response = chain.run(query)
     print(f"Successfully retrieved advice: {response}")
     return response
 
@@ -328,6 +331,7 @@ def get_summary(doc_path, llm=OpenAI()):
     response = chain.run(docs)
     print(f"Sucessfully got job posting summary: {response}")
     return response
+
 
 
 
