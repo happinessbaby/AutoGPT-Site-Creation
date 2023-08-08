@@ -7,10 +7,11 @@ from langchain import PromptTemplate
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
 from basic_utils import read_txt
-from common_utils import extract_personal_information, get_web_resources,  get_job_relevancy, retrieve_from_db, get_summary, extract_posting_information, compare_samples, extract_job_title, search_related_samples
+from common_utils import extract_personal_information, get_web_resources,  get_job_relevancy, retrieve_from_db, get_summary, extract_posting_information, compare_cover_letter_samples, extract_job_title
 from datetime import date
 from pathlib import Path
 import json
+from json import JSONDecodeError
 from langchain.agents import AgentType, Tool, initialize_agent
 from langchain_utils import create_vectorstore
 from multiprocessing import Process, Queue, Value
@@ -71,10 +72,7 @@ def generate_basic_cover_letter(my_job_title="", company="", read_path=my_resume
       Research sample cover letters provided. Reference the samples to answer the following questions: 
       what should I put in my cover letter? 
       """
-    related_samples = search_related_samples(my_job_title, cover_letter_samples_path)
-    if not related_samples:
-        related_samples = os.listdir(cover_letter_samples_path)[0]
-    practices = compare_samples(related_samples,  query_samples, "cover_letter")
+    practices = compare_cover_letter_samples(my_job_title, cover_letter_samples_path,  query_samples)
     
 
     # Get job description using Google serach
@@ -203,7 +201,6 @@ def postprocessing(res_path, response):
     # stream out the answer
     # chat = ChatOpenAI(streaming=True, callbacks=[StreamingStdOutCallbackHandler()], temperature=0)
     # langchain.llm_cache = InMemoryCache()
-    expand_qa()
     with open(res_path, 'w') as f:
         try:
             f.write(response)
@@ -211,11 +208,15 @@ def postprocessing(res_path, response):
         except Exception as e:
             print("FAILED")
     return response
-
-# process the cover letter and expand on missing information
-def expand_qa():
-    return None
-
+      
+def expand_qa(cover_letter, query):
+    query = f"""Generate a list of things that are obviously missing in the cover letter delimited with {delimiter} characters.
+    cover letter: {delimiter}{cover_letter}{delimiter}
+    """
+    response = get_completion(query)
+    print(response)
+    return response
+    
 
 
 # tbd: parse the dict json in transform chain before passing into retrievalqaresourcechain
@@ -226,9 +227,11 @@ def transform_func(inputs: dict) -> dict:
     return {"output_text": shortened_text}
 
 def preprocessing(json_request):
-    
     print(json_request)
-    args = json.loads(json_request)
+    try:
+        args = json.loads(json_request)
+    except JSONDecodeError:
+        return "Format in JSON and try again." 
     # if resume doesn't exist, ask for resume
     if ("resume file" not in args or args["resume file"]=="" or args["resume file"]=="<resume file>"):
       return "Can you provide your resume so I can further assist you? "
@@ -238,7 +241,7 @@ def preprocessing(json_request):
     if ("job" not in args or args["job"] == "" or args["job"]=="<job>"):
         job = ""
     else:
-       job = args["job"]
+      job = args["job"]
     if ("company" not in args or args["company"] == "" or args["company"]=="<company>"):
         company = ""
     else:
@@ -268,6 +271,7 @@ def create_cover_letter_generator_tool():
     parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link": "<job post link>"}}'
     description = f"""Helps to generate a cover letter. Use this tool more than any other tool when user asks to write a cover letter. 
     Input should be JSON in the following format: {parameters} \n
+    (remember to respond with a markdown code snippet of a json blob with a single action, and NOTHING else) 
     """
     tools = [
         Tool(

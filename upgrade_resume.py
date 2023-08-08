@@ -6,15 +6,18 @@ from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
 from langchain.output_parsers import CommaSeparatedListOutputParser
 from langchain import PromptTemplate
-from langchain.agents import AgentType, Tool, initialize_agent
+from langchain.agents import AgentType, Tool, initialize_agent, create_json_agent
 from basic_utils import read_txt
-from common_utils import compare_samples, get_web_resources, retrieve_from_db, get_job_relevancy, extract_posting_information, get_summary, extract_fields, get_field_content, extract_job_title, search_related_samples
+from common_utils import get_web_resources, retrieve_from_db, get_job_relevancy, extract_posting_information, get_summary, extract_fields, get_field_content, extract_job_title, search_related_samples, get_missing_field_items, create_sample_tools
 from langchain_utils import retrieve_faiss_vectorstore, create_vectorstore, merge_faiss_vectorstore
-from langchain.text_splitter import MarkdownHeaderTextSplitter
+# from langchain.text_splitter import MarkdownHeaderTextSplitter
 from pathlib import Path
 import json
+from json import JSONDecodeError
 from base import base
 from multiprocessing import Process, Queue, Value
+from langchain.tools.json.tool import JsonSpec
+from langchain.agents.agent_toolkits import JsonToolkit
 
 
 from dotenv import load_dotenv, find_dotenv
@@ -80,19 +83,44 @@ def evaluate_resume(my_job_title="", company="", read_path = my_resume_file, pos
 
     related_samples = search_related_samples(my_job_title, resume_samples_path)
 
+    sample_tools = create_sample_tools(related_samples, "resume")
+
     for field in resume_fields:
 
       field_dict = { }
-
       print(f"CURRENT FIELD IS: {field}")
-
       field_dict[field]= {}
+      resume_field_content = get_field_content(resume, field)
 
-      field_content = get_field_content(resume, field)
+      # sample_field_content = ""
+      # for sample in related_samples:
+      #   sample_field_content += f"sample {field}: " + delimiter1 + get_field_content(sample, field) + delimiter1 + "\n"
+      # TODO: update this chain: 0/10
+     
+      # Get sample comparisons
+      query_missing = f""" 
 
-      field_dict[field]["field content"] = field_content
+        Compare the {field} in the resume samples with the applicant's field content.
+
+        The applicant's field content is delimited with {delimiter} characters.
+      
+
+        applicant's field content: {delimiter}{resume_field_content}{delimiter}
+
+         Answer the following question: 
+        
+         What is missing in the {field} section of the applicant's resume that are in the samples' {field}?
+
+         Generalize your answer. 
+
+        """
+      missing = get_missing_field_items(query_missing, sample_tools)
+     
+      field_dict[field]["missing field content"]=missing
+
+
           
-      query_relevancy = f"""Determine the relevant and irrelevant information contained in the resume field.
+      query_relevancy = f"""Determine the relevant and irrelevant information contained in {field}. 
 
         You are  provided with job specification for an opening position. 
         
@@ -104,38 +132,36 @@ def evaluate_resume(my_job_title="", company="", read_path = my_resume_file, pos
 
         If job specification is not provided, use general job description as your primarily guideline. 
 
-        reusme field: {field_content}\n
+        field name: {field}
+
+        field content: {resume_field_content}\n
 
         job specification: {job_specification}\n
 
         general job description: {job_description} \n
 
-        Generate a list of irrelevant information that should not be included in the resume and a list of relevant information that should be included in the field. 
+        Generate a list of irrelevant information that should not be included in the resume and a list of relevant information that should be included in {field}. 
 
           """
+      # TODO: Update this chain: 3/10
       relevancy = get_job_relevancy(read_path, query_relevancy)
-      field_dict[field]["job relevancy"] = relevancy
+      field_dict[field]["field relevancy"] = relevancy
 
+      # 6/10, with enough data, this is decent
       # Get expert advices 
       advice_query = f"""What are some best practices when writing {field} for a resume to make it most CTS-friendly?  """
       advices = retrieve_from_db(advice_query)
-      field_dict[field]["expert advices"] = advices
 
-      # Get sample comparisons
-      # query_samples = f""" 
-      #   Research sample resume provided. Reference the samples to answer the following questions: 
-      #   what should I put in the {field} of my resume to make it most CTS-friendly for {my_job_title}?
-      #   """
-      # practices = compare_samples(related_samples,  query_samples, "resume")
-      # field_dict[field]["best practices"] = practices
 
-      generated_responses.update(field_dict)
-      print(generated_responses)
 
-    P = Process(target=postprocessing, args=(generated_responses, res_path))
+    q = Queue()
+    P = Process(target=postprocessing, args=(generated_responses, res_path, q))
     P.start()
     create_resume_advice_doc_tool(userid, res_path, generated_responses)
+    response = q.get()
     P.join()
+    return response
+
     
 
 
@@ -204,8 +230,27 @@ def evaluate_resume(my_job_title="", company="", read_path = my_resume_file, pos
       #         create_resume_advice_doc_tool(res_path)
 
 # process response to be outputted to chatbot
-def postprocessing(response_dict, res_path):
+def postprocessing(response_dict, res_path, q):
     
+    with open(res_path, 'w') as handle:
+        try:
+            json.dump(response_dict, handle)
+            print("ALL SUCCESS")
+        except Exception as e:
+            print("FAILED")
+    with open(res_path, "r") as handle:
+       data = json.load(handle)
+
+    json_spec = JsonSpec(dict_=data, max_value_length=4000)
+    json_toolkit = JsonToolkit(spec=json_spec)
+
+    json_agent_executor = create_json_agent(
+        llm=OpenAI(temperature=0), toolkit=json_toolkit, verbose=True
+    )
+    
+    response = json_agent_executor.run("Convert and condense this JSON document into human readable text")
+    print(response)
+    q.put(response)
     # TODO: user markdownheadersplitter to split according to delimiters before vs storage
 
     # cut the text to only cover letter
@@ -215,12 +260,6 @@ def postprocessing(response_dict, res_path):
     # chat = ChatOpenAI(streaming=True, callbacks=[StreamingStdOutCallbackHandler()], temperature=0)
     # langchain.llm_cache = InMemoryCache()
 
-    with open(res_path, 'w') as handle:
-        try:
-            json.dump(response_dict, handle)
-            print("ALL SUCCESS")
-        except Exception as e:
-            print("FAILED")
 
 
 
@@ -228,6 +267,10 @@ def postprocessing(response_dict, res_path):
 def preprocessing(json_request):
     
     print(json_request)
+    try:
+      args = json.loads(json_request)
+    except JSONDecodeError:
+      return "Format in JSON and try again." 
     args = json.loads(json_request)
     # if resume doesn't exist, ask for resume
     if ("resume file" not in args or args["resume file"]=="" or args["resume file"]=="<resume file>"):
@@ -256,6 +299,7 @@ def create_resume_evaluator_tool():
     parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link": "<job post link>"}}'
     description = f"""Helps to evaluate a resume. Use this tool more than any other tool when user asks to evaluate, review, help with a resume. 
     Input should be JSON in the following format: {parameters} \n
+    (remember to respond with a markdown code snippet of a json blob with a single action, and NOTHING else) 
     """
     tools = [
         Tool(

@@ -23,6 +23,8 @@ from langchain.chains.summarize import load_summarize_chain
 from langchain.llms import OpenAI
 from langchain.vectorstores import FAISS
 from langchain.retrievers import BM25Retriever, EnsembleRetriever
+from langchain.tools.convert_to_openai import  format_tool_to_openai_function
+from langchain.schema import HumanMessage
 import os
 import sys
 import re
@@ -199,23 +201,11 @@ def search_related_samples(job_title, directory):
 
 
 
-def compare_samples(related_samples, query,  sample_type, llm=ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
+def compare_cover_letter_samples(job_title, directory, query,  llm=ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
 
-    tools = []
+    related_samples = search_related_samples(job_title, directory)
+    tools = create_sample_tools(related_samples, "cover_letter")
 
-    for file in related_samples:
-        # initialize the bm25 retriever and faiss retriever for hybrid search
-        # https://python.langchain.com/docs/modules/data_connection/retrievers/ensemble
-        docs = split_doc(file, "file")
-        bm25_retriever = BM25Retriever.from_documents(docs)
-        bm25_retriever.k = 2
-        faiss_retriever = FAISS.from_documents(docs, OpenAIEmbeddings()).as_retriever(search_kwargs={"k": 2})
-        ensemble_retriever = EnsembleRetriever(retrievers=[bm25_retriever, faiss_retriever], weights=[0.5, 0.5])
-        # name and description of the tool are really important in the agent using the tool
-        tool_description = f"This is a {sample_type} sample. Use it to compare with other {sample_type} samples"
-        tool = create_db_tools(llm, ensemble_retriever, f"{sample_type}_{random.choice(string.ascii_letters)}", tool_description)
-        tools.extend(tool)
-    # Option 1: OpenAI multi functions
     agent = initialize_agent(
         tools, 
         llm, 
@@ -261,13 +251,7 @@ def get_web_resources(query, search_tool, top=10,  llm = ChatOpenAI(temperature=
             "Could not parse LLM output: `").removesuffix("`")
         print(f"Successfully retrieved web data advice: {response}")
         return response
-    # Option 2: better at providing details but tend to be very slow and error prone and too many tokens
-    planner = load_chat_planner(llm)
-    executor = load_agent_executor(llm, tools, verbose=True)
-    agent = PlanAndExecute(planner=planner, executor=executor, verbose=True)
-    response = agent.run(query)
-    print(response)
-    return response
+
 
 
     
@@ -291,15 +275,15 @@ def get_job_relevancy(file, query, doctype="file", llm = ChatOpenAI(temperature=
 def retrieve_from_db(query, llm=OpenAI(temperature=0.8)):
     # index = get_index(path=path, path_type='dir')
     # # Create a question-answering chain using the index
-    prompt_template = """Please answer the user's question about resume, cover letter, or job application: 
-        Question: {question}
-        Answer:"""
-    prompt = PromptTemplate(input_variables=["question"], template=prompt_template)
-    llm_chain = LLMChain(llm=llm, prompt=prompt)
+    # prompt_template = """Please answer the user's question about resume, cover letter, or job application: 
+    #     Question: {question}
+    #     Answer:"""
+    # prompt = PromptTemplate(input_variables=["question"], template=prompt_template)
+    # llm_chain = LLMChain(llm=llm, prompt=prompt)
     base_embeddings = OpenAIEmbeddings()
-    # HyDE: https://python.langchain.com/docs/use_cases/question_answering/how_to/hyde
-    embeddings = HypotheticalDocumentEmbedder(llm_chain = llm_chain, base_embeddings = base_embeddings)
-    redis_store = retrieve_redis_vectorstore(embeddings, "index_web_advice")
+    # # HyDE: https://python.langchain.com/docs/use_cases/question_answering/how_to/hyde
+    # embeddings = HypotheticalDocumentEmbedder(llm_chain = llm_chain, base_embeddings = base_embeddings)
+    redis_store = retrieve_redis_vectorstore(base_embeddings, "index_web_advice")
     docs = redis_store.similarity_search(query)
     response = docs[0].page_content
     # redis_retriever = redis_store.as_retriever()
@@ -332,7 +316,47 @@ def get_summary(doc_path, llm=OpenAI()):
     print(f"Sucessfully got job posting summary: {response}")
     return response
 
+def get_missing_field_items(query, tools, llm=ChatOpenAI(temperature=0)):
 
+    agent = initialize_agent(
+        tools,
+        llm,
+        agent=AgentType.OPENAI_MULTI_FUNCTIONS,
+        max_iterations=2,
+        early_stopping_method="generate",
+        verbose=True
+    )
+
+    response = agent({"input": query}).get("output", "")   
+
+    # Option 2: better at providing details but tend to be very slow and error prone and too many tokens
+
+    # planner = load_chat_planner(llm)
+    # executor = load_agent_executor(llm, tools, verbose=True)
+    # agent = PlanAndExecute(planner=planner, executor=executor, verbose=True)
+    # response = agent.run(query)
+    print(f"Sucessfully got missing field content: {response}")
+    return response
+
+def create_sample_tools(related_samples, sample_type, llm=ChatOpenAI()):
+
+    tools = []
+    for file in related_samples:
+        # initialize the bm25 retriever and faiss retriever for hybrid search
+        # https://python.langchain.com/docs/modules/data_connection/retrievers/ensemble
+        docs = split_doc(file, "file")
+        bm25_retriever = BM25Retriever.from_documents(docs)
+        bm25_retriever.k = 2
+        faiss_retriever = FAISS.from_documents(docs, OpenAIEmbeddings()).as_retriever(search_kwargs={"k": 2})
+        ensemble_retriever = EnsembleRetriever(retrievers=[bm25_retriever, faiss_retriever], weights=[0.5, 0.5])
+        # name and description of the tool are really important in the agent using the tool
+        tool_description = f"This is a {sample_type} sample. Use it to compare with other {sample_type} samples"
+        tool = create_db_tools(llm, ensemble_retriever, f"{sample_type}_{random.choice(string.ascii_letters)}", tool_description)
+        tools.extend(tool)
+    print(f"Successfully created {sample_type} tools")
+    return tools
+
+    
 
 
 
