@@ -22,7 +22,7 @@ import sys
 from multiprocessing import Process, Queue, Value
 import pickle
 import requests
-from langchain.embeddings import OpenAIEmbeddings
+# from langchain.embeddings import OpenAIEmbeddings
 from base import base
 
 
@@ -61,14 +61,13 @@ class Chat():
 
         with placeholder.container():
 
-            # st_callback = StreamlitCallbackHandler(st.container())
             if "userid" not in st.session_state:
                 st.session_state["userid"] = str(uuid.uuid4())
                 print(st.session_state.userid)
                 # Chat.new_chat = ChatController(st.session_state.userid)
                 # base.save_chat(self.new_chat)
                 base.save_chat(ChatController(st.session_state.userid))
-
+            #TODO: explore why occasionaly this errors
             self.new_chat = base.get_chat()
                 # self.new_chat = self.get_chat()
 
@@ -233,7 +232,7 @@ class Chat():
                             # create faiss store and add it to agent tools
                             name = "faiss_resume"
                             description = """This is user's own resume. Use it as a reference and context when answering questions about user's own resume."""
-                            create_vectorstore(OpenAIEmbeddings(), "faiss", read_path, "file",  f"{name}_{st.session_state.userid}")
+                            create_vectorstore(self.new_chat.embeddings, "faiss", read_path, "file",  f"{name}_{st.session_state.userid}")
                             self.new_chat.add_tools(st.session_state.userid, name, description)
                             # add resume file path to prompt (to hopefully trigger preprocessing pick it up)
                             new_text = f"""resume file: {read_path}"""
@@ -274,7 +273,7 @@ class Chat():
                         )
                         question = prefilled
                         # answer = chat_agent.run(mrkl_input, callbacks=[streamlit_handler])
-                        response = self.new_chat.askAI(st.session_state.userid, question, callbacks=[streamlit_handler]).get("output", "Sorry, something happened.")
+                        response = self.new_chat.askAI(st.session_state.userid, question, callbacks=streamlit_handler).get("output", "Sorry, something happened.")
                         st.session_state.questions.append(question)
                         st.session_state.responses.append(response)
                         # session_name = SAMPLE_QUESTIONS[question]
@@ -327,10 +326,9 @@ class Chat():
                 )
                 question = user_input
                 # answer = chat_agent.run(mrkl_input, callbacks=[streamlit_handler])
-                response = self.new_chat.askAI(st.session_state.userid, question, callbacks=[streamlit_handler]).get("output", "Sorry, something happened.")
+                response = self.new_chat.askAI(st.session_state.userid, question, callbacks = streamlit_handler).get("output", "Sorry, something happened.")
                 st.session_state.questions.append(question)
                 st.session_state.responses.append(response)
-
             if st.session_state['responses']:
                 user_input = ""
                 for i in range(len(st.session_state['responses'])):

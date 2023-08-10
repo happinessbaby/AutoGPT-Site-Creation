@@ -23,11 +23,15 @@ from langchain.agents import initialize_agent
 from langchain.agents import AgentType
 from langchain.memory.chat_message_histories.in_memory import ChatMessageHistory
 from langchain.memory import ChatMessageHistory
-from langchain.schema import messages_from_dict, messages_to_dict
+from langchain.schema import messages_from_dict, messages_to_dict, AgentAction
 from langchain.utilities import GoogleSearchAPIWrapper
 from langchain.retrievers.web_research import WebResearchRetriever
 from langchain.docstore import InMemoryDocstore
 from langchain.tools.human.tool import HumanInputRun
+from langchain.callbacks.base import BaseCallbackManager
+from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
+from langchain.callbacks import get_openai_callback, StdOutCallbackHandler, FileCallbackHandler
+from langchain.callbacks.base import BaseCallbackHandler
 # from langchain.agents.agent_toolkits import create_conversational_retrieval_agent
 # from langchain.agents.openai_functions_agent.agent_token_buffer_memory import AgentTokenBufferMemory
 # from langchain.agents.openai_functions_agent.base import OpenAIFunctionsAgent
@@ -49,21 +53,23 @@ import pickle
 import json
 import langchain
 import faiss
-
-
-# debugging log: very useful
-langchain.debug=True
+from loguru import logger
+from langchain.evaluation import load_evaluator
 
 
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
 
-delimiter = "####"
 
+# debugging log: very useful
+langchain.debug=True
+evaluate_result = True
+
+
+delimiter = "####"
 advice_path = "./static/advice/"
 resume_path = "./uploads/"
-resume_uploaded=False
-
+log_path = "./log/"
 
 
 class ChatController(object):
@@ -71,13 +77,14 @@ class ChatController(object):
 
     def __init__(self, userid):
         self.userid = userid
-        self.llm = ChatOpenAI(temperature=0.5, model_name="gpt-4", cache=False, streaming=True)
+        self.llm = ChatOpenAI(temperature=0.5, model_name="gpt-4", cache=False, streaming=True,)
         self.embeddings = OpenAIEmbeddings()
-        self._create_chat_agent()
-        self._initialize_meta_chain()
+        self.handler = None
+        self._initialize_chat_agent()
+        self._initialize_meta_agent()
 
 
-    def _create_chat_agent(self):
+    def _initialize_chat_agent(self):
     
 
         # initialize tools
@@ -104,6 +111,14 @@ class ChatController(object):
         web_tool = create_db_tools(self.llm, web_research_retriever, "faiss_web", web_tool_description)
 
         self.tools = general_tool + cover_letter_tool + resume_advice_tool + web_tool 
+
+        # initialize callback handler and evaluator
+        if (evaluate_result):
+            logfile = log_path + f"{self.userid}.log"
+            self.handler = FileCallbackHandler(logfile)
+            logger.add(logfile,  enqueue=True)
+            self.evaluator = load_evaluator("trajectory", agent_tools=self.tools)
+
 
         # initialize dynamic args for tools
         self.entities = ""
@@ -143,23 +158,26 @@ class ChatController(object):
 
         # OPTION 1: agent = CHAT_CONVERSATIONAL_REACT_DESCRIPTION
         # initialize memory
-
         # self.memory = ConversationBufferMemory(llm=self.llm, memory_key="chat_history",return_messages=True, input_key="input")
         # self.memory = AgentTokenBufferMemory(memory_key="chat_history", llm=self.llm, return_messages=True, input_key="input")
         self.memory = ConversationBufferMemory(llm=self.llm, memory_key="chat_history", return_messages=True, input_key="input")
+        self.memory.output_key = "output"
         
         # initialize agent
         self.chat_agent  = initialize_agent(self.tools, 
                                             self.llm, 
                                             agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION, 
-                                            verbose=True, 
+                                            # verbose=True, 
                                             memory=self.memory, 
-                
-                                            handle_parsing_errors=True,)
+                                            return_intermediate_steps = True,
+                                            handle_parsing_errors=True,
+                                            callbacks = [self.handler])
         # modify default agent prompt
         prompt = self.chat_agent.agent.create_prompt(system_message=template, input_variables=['chat_history', 'input', 'entities', 'agent_scratchpad', 'instructions'], tools=self.tools)
         self.chat_agent.agent.llm_chain.prompt = prompt
-        
+
+            
+
 
     
     
@@ -273,6 +291,43 @@ class ChatController(object):
 
     #     return agent
 
+    def _initialize_meta_agent(self):
+        # chat histories will be stored in vector store to be used as a chat debugging guideline 
+        # chat histories should include intermediate steps so that the wrong steps can be corrected
+        # db = retrieve_faiss_vectorstore(self.embeddings, "faiss_chat_history")
+        # if db is None:
+        db = create_vectorstore(self.embeddings, "faiss", "./log/", "dir", "chat_debug")
+        description = """This is used for debugging chat errors when you encounter one. 
+        This stores all the chat history in the past. """
+        tools = create_db_tools(self.llm, db.as_retriever(), "chat_debug", description)
+        meta_template = """
+        Assistant has just had the below interactions with a User. Assistant followed their "Instructions" closely. Your job is to revise the Instructions so that Assistant would quickly and correctly respond in the future.
+
+        ####
+
+        {chat_history}
+
+        ####
+
+        Please reflect on these interactions. Use tools, if needed, to reference old instructions and improve upon them or debug error messages.
+
+        You should revise the Instructions so that Assistant would quickly and correctly respond in the future. Assistant's goal is to satisfy the user in as few interactions as possible. Assistant will only see the new Instructions, not the interaction history, so anything important must be summarized in the Instructions. Don't forget any important details in the current Instructions! Indicate the new Instructions by "Instructions: ...".
+        """
+        self.meta_agent = initialize_agent(
+                tools,
+                self.llm, 
+                agent = AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+                 agent_kwargs={
+                    'prefix':meta_template,
+                    # 'format_instructions':FORMAT_INSTRUCTIONS,
+                    # 'suffix':SUFFIX
+                    "input_variables": ["input", "agent_scratchpad","chat_history"]
+                },
+        )
+        # modify default agent prompt
+        # prompt = self.meta_agent.agent.create_prompt(system_message=meta_template, input_variables=['chat_history'], tools=self.tools)
+        # self.meta_agent.agent.llm_chain.prompt = prompt
+
 
 
 
@@ -280,22 +335,6 @@ class ChatController(object):
 
     def askAI(self, userid, question, callbacks=None):
 
-
-        # retrieve a conversation memory 
-        # can be changed to/incorporated into a streaming platform such as kafka
-        # if os.path.isfile('./conv_memory/'+userid+'.pickle'):
-        #     # retrieve pickled memory
-        #     with open('./conv_memory/'+userid+'.pickle', 'rb') as handle:
-        #         serializable_mem = pickle.load(handle)
-        #         print(f"Sucessfully loaded pickled conversation: {serializable_mem}")
-        #     retrieved_messages = messages_from_dict(serializable_mem) 
-        #     chat_history= ChatMessageHistory(messages=retrieved_messages) 
-        #     # update memory
-        #     self.memory = ConversationSummaryBufferMemory(llm=self.llm, memory_key="chat_history", chat_memory=chat_history, max_token_limit=2000, return_messages=True, input_key="input")
-        #     print("Succesfully updated chat agent memory")
-
-            
-        # reinitialize agent with updated memory, prompt, tools
         try:
             #Option 1
             # self.chat_agent  =  initialize_agent(self.tools,
@@ -308,7 +347,18 @@ class ChatController(object):
             # self.chat_agent.agent.llm_chain.prompt = prompt
             # print("Successfully reinitialized agent")            
             # BELOW IS USED WITH CHAT_CONVERSATIONAL_REACT_DESCRIPTION 
-            response = self.chat_agent({"input": question, "chat_history":[], "entities": self.entities, "instructions":self.instructions}, callbacks=callbacks)  
+            # def new_agent_action(*args, **kwargs):
+            #     print("AGENT ACTION", args, kwargs, flush=True)
+            # with get_openai_callback() as cb:
+                # cb.on_agent_action = new_agent_action
+            response = self.chat_agent({"input": question, "chat_history":[], "entities": self.entities, "instructions":self.instructions}, callbacks = [callbacks]) 
+
+               # update instruction from feedback 
+            chat_history = self.get_chat_history()
+            feedback = self.meta_agent({"input":"", "chat_history":chat_history}).get("output", "")
+            self.update_instructions(feedback)
+        
+        
         #     template = f"""The following is a friendly conversation between a human and an AI. 
         #     The AI is talkative and provides lots of specific details from its context.
         #     If the AI does not know the answer to a question, it truthfully says it does not know. 
@@ -342,38 +392,51 @@ class ChatController(object):
             response = str(e)
             if not response.startswith("Could not parse LLM output: `"):
                 print(e)
+                raise e
+
                 # instead of raising any errors, will feed the errors back to meta agent and try again
+                #TODO: let meta agent search for similar error in log and give instruction on how it's solved
             response = response.removeprefix(
                 "Could not parse LLM output: `").removesuffix("`")
+    
+        # logger.info(response)
+
+     
+
+        # get evaluation 
+        if (evaluate_result):
+            evaluation_result = self.evaluator.evaluate_agent_trajectory(
+                prediction=response["output"],
+                input=response["input"],
+                agent_trajectory=response["intermediate_steps"],
+                )
+            evaluation_result 
+            # print(evaluation_result)
+            # add evaluation and instruction to log
+            self.update_meta_data(evaluation_result)
 
 
 
-        # update instruction from feedback 
-        chat_history = self.get_chat_history(self.memory)
-        feedback = self.meta_chain.predict(chat_history = chat_history)
-        self.update_instructions(feedback)
+        # pickle memory (sanity check)
+        with open('conv_memory/' + userid + '.pickle', 'wb') as handle:
+            pickle.dump(chat_history, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            print(f"Sucessfully pickled conversation: {chat_history}")
 
-        # pickle memory 
-        # with open('conv_memory/' + userid + '.pickle', 'wb') as handle:
-        #     pickle.dump(chat_history, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        #     print(f"Sucessfully pickled conversation: {chat_history}")
-
-        # save chat history to be used for future debugging by meta agent
-        memory_path ='conv_memory/' + userid + '.txt'
-        with open(memory_path, 'w') as f:
-            conversation = str(chat_history)
-            f.write(conversation)
-            print(f"Sucessfully saved conversation: {conversation}")
+        # save log and evalution (meta agent debugging)
+        # memory_path ='conv_memory/' + userid + '.txt'
+        # with open(memory_path, 'w') as f:
+        #     f.write(conversation)
+        #     print(f"Sucessfully saved conversation: {conversation}")
 
         return response
 
 
-    def get_chat_history(self, chain_memory):
+    def get_chat_history(self):
         # memory_key = chain_memory.memory_key
         # chat_history = chain_memory.load_memory_variables(memory_key)[memory_key]
         extracted_messages = self.memory.chat_memory.messages
         chat_history = messages_to_dict(extracted_messages)
-        print(chat_history)
+        # print(chat_history)
         return chat_history
 
     
@@ -397,66 +460,54 @@ class ChatController(object):
         self.instructions = new_instructions
         print(f"Successfully updated instruction to: {new_instructions}")
 
+    def update_meta_data(self, evaluation_result):
+         with open(log_path+f"{self.userid}.log", "a") as f:
+             f.write(self.instructions + "\n"+ str(evaluation_result))
+             
+                # content = f.read()
+                # delimiter = """```"""
+                # content = content[content.find(delimiter)+len(delimiter) + len("json"): content.rfind(delimiter)]
+                # print(content)
+                # json_content = json.loads(content)
+                # with open(meta_path+f"{self.userid}.json", "w") as f:
+                #     json.dump(json_content, f,  indent=4, 
+                #       separators=(',', ': '), ensure_ascii=False)
+
+
+
     # TEMPORARY BEFORE SWITHCING TO AGENT 
-    def _initialize_meta_chain(self):
-        meta_template = """
-        Assistant has just had the below interactions with a User. Assistant followed their "Instructions" closely. Your job is to critique the Assistant's performance and then revise the Instructions so that Assistant would quickly and correctly respond in the future.
+    # def _initialize_meta_chain(self):
+    #     meta_template = """
+    #     Assistant has just had the below interactions with a User. Assistant followed their "Instructions" closely. Your job is to critique the Assistant's performance and then revise the Instructions so that Assistant would quickly and correctly respond in the future.
 
-        ####
+    #     ####
 
-        {chat_history}
+    #     {chat_history}
 
-        ####
+    #     ####
 
-        Please reflect on these interactions.
+    #     Please reflect on these interactions.
 
-        You should first critique Assistant's performance. What could Assistant have done better? What should the Assistant remember about this user? Are there things this user always wants? Indicate this with "Critique: ...".
+    #     You should first critique Assistant's performance. What could Assistant have done better? What should the Assistant remember about this user? Are there things this user always wants? Indicate this with "Critique: ...".
 
-        You should next revise the Instructions so that Assistant would quickly and correctly respond in the future. Assistant's goal is to satisfy the user in as few interactions as possible. Assistant will only see the new Instructions, not the interaction history, so anything important must be summarized in the Instructions. Don't forget any important details in the current Instructions! Indicate the new Instructions by "Instructions: ...".
-        """
+    #     You should next revise the Instructions so that Assistant would quickly and correctly respond in the future. Assistant's goal is to satisfy the user in as few interactions as possible. Assistant will only see the new Instructions, not the interaction history, so anything important must be summarized in the Instructions. Don't forget any important details in the current Instructions! Indicate the new Instructions by "Instructions: ...".
+    #     """
 
-        meta_prompt = PromptTemplate(
-            input_variables=["chat_history"], template=meta_template
-        )
+    #     meta_prompt = PromptTemplate(
+    #         input_variables=["chat_history"], template=meta_template
+    #     )
 
-        self.meta_chain = LLMChain(
-            llm=OpenAI(temperature=0),
-            prompt=meta_prompt,
-            verbose=True,
-        )
-        return self.meta_chain
-
-    def _initialize_meta_agent(self):
-        # chat histories will be stored in vector store to be used as a chat debugging guideline 
-        # chat histories should include intermediate steps so that the wrong steps can be corrected
-        db = retrieve_faiss_vectorstore(self.embeddings, "faiss_chat_history")
-        description = """This is used for debugging chat errors when you encounter one. 
-        This stores all the chat history in the past. """
-        tools = create_db_tools(self.llm, db.as_retriever(), "chat_debug", description)
-        self.meta_agent = initialize_agent(
-            tools, self.llm, agent = AgentType.ZERO_SHOT_REACT_DESCRIPTION
-        )
-        meta_template = """
-        Assistant has just had the below interactions with a User. Assistant followed their "Instructions" closely. Your job is to critique the Assistant's performance and then revise the Instructions so that Assistant would quickly and correctly respond in the future.
-
-        ####
-
-        {chat_history}
-
-        ####
-
-        Please reflect on these interactions.
-
-        You should first critique Assistant's performance. What could Assistant have done better? What should the Assistant remember about this user? Are there things this user always wants? Indicate this with "Critique: ...".
-
-        You should next revise the Instructions so that Assistant would quickly and correctly respond in the future. Assistant's goal is to satisfy the user in as few interactions as possible. Assistant will only see the new Instructions, not the interaction history, so anything important must be summarized in the Instructions. Don't forget any important details in the current Instructions! Indicate the new Instructions by "Instructions: ...".
-        """
-        # modify default agent prompt
-        prompt = self.chat_agent.agent.create_prompt(system_message=meta_template, input_variables=['chat_history'], tools=self.tools)
-        self.chat_agent.agent.llm_chain.prompt = prompt
+    #     self.meta_chain = LLMChain(
+    #         llm=OpenAI(temperature=0),
+    #         prompt=meta_prompt,
+    #         verbose=True,
+    #     )
+    #     return self.meta_chain
 
 
-        
+
+
+
 
     
 
