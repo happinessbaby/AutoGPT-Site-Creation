@@ -55,6 +55,8 @@ import langchain
 import faiss
 from loguru import logger
 from langchain.evaluation import load_evaluator
+from basic_utils import convert_to_txt
+from langchain.schema import OutputParserException
 
 
 from dotenv import load_dotenv, find_dotenv
@@ -82,6 +84,7 @@ class ChatController(object):
         self.handler = None
         self._initialize_chat_agent()
         self._initialize_meta_agent()
+        self._initialize_log()
 
 
     def _initialize_chat_agent(self):
@@ -125,7 +128,6 @@ class ChatController(object):
 
         # initialize feedbacks
         self.instructions = ""
-
 
         template = """The following is a friendly conversation between a human and an AI. 
         The AI is talkative and provides lots of specific details from its context.
@@ -175,6 +177,16 @@ class ChatController(object):
         # modify default agent prompt
         prompt = self.chat_agent.agent.create_prompt(system_message=template, input_variables=['chat_history', 'input', 'entities', 'agent_scratchpad', 'instructions'], tools=self.tools)
         self.chat_agent.agent.llm_chain.prompt = prompt
+
+
+    def _initialize_log(self):
+        for path in  Path("./log/").glob('**/*.log'):
+            file = str(path)
+            file_name = path.stem
+            if os.stat(file).st_size != 0:  
+                convert_to_txt(file, f"./log/{file_name}.txt")
+            os.remove(file)
+
 
             
 
@@ -309,7 +321,10 @@ class ChatController(object):
 
         ####
 
-        Please reflect on these interactions. Use tools, if needed, to reference old instructions and improve upon them or debug error messages.
+
+        Please reflect on these interactions. Use tools, if needed, to reference old instructions and improve upon them/
+        
+        If there's a error message, treat it as your priority. 
 
         You should revise the Instructions so that Assistant would quickly and correctly respond in the future. Assistant's goal is to satisfy the user in as few interactions as possible. Assistant will only see the new Instructions, not the interaction history, so anything important must be summarized in the Instructions. Don't forget any important details in the current Instructions! Indicate the new Instructions by "Instructions: ...".
         """
@@ -337,96 +352,50 @@ class ChatController(object):
 
         try:
             #Option 1
-            # self.chat_agent  =  initialize_agent(self.tools,
-            #                                 self.llm, 
-            #                                 agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION, 
-            #                                 verbose=True, 
-            #                                 memory=self.memory, 
-            #                                 handle_parsing_errors=True,)
-            # prompt = self.chat_agent.agent.create_prompt(system_message=self.template, input_variables=["entities", "input", "chat_history", "agent_scratchpad"], tools = self.tools)
-            # self.chat_agent.agent.llm_chain.prompt = prompt
             # print("Successfully reinitialized agent")            
             # BELOW IS USED WITH CHAT_CONVERSATIONAL_REACT_DESCRIPTION 
-            # def new_agent_action(*args, **kwargs):
-            #     print("AGENT ACTION", args, kwargs, flush=True)
-            # with get_openai_callback() as cb:
-                # cb.on_agent_action = new_agent_action
-            response = self.chat_agent({"input": question, "chat_history":[], "entities": self.entities, "instructions":self.instructions}, callbacks = [callbacks]) 
-
-               # update instruction from feedback 
-            chat_history = self.get_chat_history()
-            feedback = self.meta_agent({"input":"", "chat_history":chat_history}).get("output", "")
+            response = self.chat_agent({"input": question, "chat_history":[], "entities": self.entities, "instructions":self.instructions}, callbacks = [callbacks])
+            # update instruction from feedback 
+            self.chat_history = self.get_chat_history()
+            try: 
+                feedback = self.meta_agent({"input":"", "chat_history":self.chat_history}).get("output", "")
+            except OutputParserException as e:
+                feedback = str(e)
+                feedback = feedback.removeprefix("Could not parse LLM output: `").removesuffix("`")
             self.update_instructions(feedback)
-        
-        
-        #     template = f"""The following is a friendly conversation between a human and an AI. 
-        #     The AI is talkative and provides lots of specific details from its context.
-        #     If the AI does not know the answer to a question, it truthfully says it does not know. 
 
-
-        #   Before answering each question, check your tools and see which ones you can use to answer the question. 
-
-        #   Only when none can be used should you not use any tools. You should use the tools whenever you can.  
-
-        #     You are provided with information about entities the Human mentions, if relevant. These should 
-
-        #     Relevant entity information:
-        #     {self.entities}
-        #     """
-
-        #     # self.memory = AgentTokenBufferMemory(memory_key="chat_history", llm=self.llm, return_messages=True, input_key="input")
-        #     system_message = SystemMessage(
-        #     content=(
-        #         template
-        #         ),
-        #     )
-        #     self.prompt = OpenAIFunctionsAgent.create_prompt(
-        #         system_message=system_message,
-        #         extra_prompt_messages=[MessagesPlaceholder(variable_name="chat_history")],
-        #     )
-        #     agent = OpenAIFunctionsAgent(llm=self.llm, tools=self.tools, prompt=self.prompt)
-        #     self.chat_agent = AgentExecutor(agent=agent, tools=self.tools, memory=self.memory, verbose=True,
-        #                            return_intermediate_steps=True)
-        #     response = self.chat_agent({"input": question}, callbacks=callbacks)             
+            if (evaluate_result):
+                evaluation_result = self.evaluator.evaluate_agent_trajectory(
+                    prediction=response["output"],
+                    input=response["input"],
+                    agent_trajectory=response["intermediate_steps"],
+                    )
+                # print(evaluation_result)
+                # add evaluation and instruction to log
+                self.update_meta_data(evaluation_result)
+            
+            # convert dict to string for chat output
+            response = response.get("output", "sorry, something happened, try again.")
+           
         except Exception as e:
-            response = str(e)
-            if not response.startswith("Could not parse LLM output: `"):
-                print(e)
-                raise e
-
-                # instead of raising any errors, will feed the errors back to meta agent and try again
-                #TODO: let meta agent search for similar error in log and give instruction on how it's solved
-            response = response.removeprefix(
-                "Could not parse LLM output: `").removesuffix("`")
-    
-        # logger.info(response)
-
-     
-
-        # get evaluation 
-        if (evaluate_result):
-            evaluation_result = self.evaluator.evaluate_agent_trajectory(
-                prediction=response["output"],
-                input=response["input"],
-                agent_trajectory=response["intermediate_steps"],
-                )
-            evaluation_result 
-            # print(evaluation_result)
-            # add evaluation and instruction to log
-            self.update_meta_data(evaluation_result)
-
+            error_msg = str(e)
+            query = f""""Debug the error message and provide instruction for Assistent for the next step: {error_msg}
+                """
+            try: 
+                feedback = self.meta_agent({"input": query, "chat_history": self.chat_history}).get("output", "")
+            except OutputParserException as e:
+                feedback = str(e)
+                feedback = feedback.removeprefix("Could not parse LLM output: `").removesuffix("`")
+            self.update_instructions(feedback)
+            # give chat agent new instruction on how to fix the error
+            # TODO: update log with updated instruction, no need for evaluation
+            self.askAI(userid, question, callbacks)        
 
 
         # pickle memory (sanity check)
         with open('conv_memory/' + userid + '.pickle', 'wb') as handle:
-            pickle.dump(chat_history, handle, protocol=pickle.HIGHEST_PROTOCOL)
-            print(f"Sucessfully pickled conversation: {chat_history}")
-
-        # save log and evalution (meta agent debugging)
-        # memory_path ='conv_memory/' + userid + '.txt'
-        # with open(memory_path, 'w') as f:
-        #     f.write(conversation)
-        #     print(f"Sucessfully saved conversation: {conversation}")
+            pickle.dump(self.chat_history, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            # print(f"Sucessfully pickled conversation: {chat_history}")
 
         return response
 
@@ -454,6 +423,7 @@ class ChatController(object):
         self.entities += f"\n{text}\n"
         print(f"Successfully added {self.entities}.")
 
+
     def update_instructions(self, meta_output):
         delimiter = "Instructions: "
         new_instructions = meta_output[meta_output.find(delimiter) + len(delimiter) :]
@@ -463,46 +433,9 @@ class ChatController(object):
     def update_meta_data(self, evaluation_result):
          with open(log_path+f"{self.userid}.log", "a") as f:
              f.write(self.instructions + "\n"+ str(evaluation_result))
+
+
              
-                # content = f.read()
-                # delimiter = """```"""
-                # content = content[content.find(delimiter)+len(delimiter) + len("json"): content.rfind(delimiter)]
-                # print(content)
-                # json_content = json.loads(content)
-                # with open(meta_path+f"{self.userid}.json", "w") as f:
-                #     json.dump(json_content, f,  indent=4, 
-                #       separators=(',', ': '), ensure_ascii=False)
-
-
-
-    # TEMPORARY BEFORE SWITHCING TO AGENT 
-    # def _initialize_meta_chain(self):
-    #     meta_template = """
-    #     Assistant has just had the below interactions with a User. Assistant followed their "Instructions" closely. Your job is to critique the Assistant's performance and then revise the Instructions so that Assistant would quickly and correctly respond in the future.
-
-    #     ####
-
-    #     {chat_history}
-
-    #     ####
-
-    #     Please reflect on these interactions.
-
-    #     You should first critique Assistant's performance. What could Assistant have done better? What should the Assistant remember about this user? Are there things this user always wants? Indicate this with "Critique: ...".
-
-    #     You should next revise the Instructions so that Assistant would quickly and correctly respond in the future. Assistant's goal is to satisfy the user in as few interactions as possible. Assistant will only see the new Instructions, not the interaction history, so anything important must be summarized in the Instructions. Don't forget any important details in the current Instructions! Indicate the new Instructions by "Instructions: ...".
-    #     """
-
-    #     meta_prompt = PromptTemplate(
-    #         input_variables=["chat_history"], template=meta_template
-    #     )
-
-    #     self.meta_chain = LLMChain(
-    #         llm=OpenAI(temperature=0),
-    #         prompt=meta_prompt,
-    #         verbose=True,
-    #     )
-    #     return self.meta_chain
 
 
 

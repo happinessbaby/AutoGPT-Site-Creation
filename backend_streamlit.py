@@ -67,8 +67,11 @@ class Chat():
                 # Chat.new_chat = ChatController(st.session_state.userid)
                 # base.save_chat(self.new_chat)
                 base.save_chat(ChatController(st.session_state.userid))
-            #TODO: explore why occasionaly this errors
-            self.new_chat = base.get_chat()
+            try:
+                self.new_chat = base.get_chat()
+            except AttributeError as e:
+                base.save_chat(ChatController(st.session_state.userid))
+                self.new_chat = base.get_chat()
                 # self.new_chat = self.get_chat()
 
  
@@ -273,7 +276,7 @@ class Chat():
                         )
                         question = prefilled
                         # answer = chat_agent.run(mrkl_input, callbacks=[streamlit_handler])
-                        response = self.new_chat.askAI(st.session_state.userid, question, callbacks=streamlit_handler).get("output", "Sorry, something happened.")
+                        response = self.new_chat.askAI(st.session_state.userid, question, callbacks=streamlit_handler)
                         st.session_state.questions.append(question)
                         st.session_state.responses.append(response)
                         # session_name = SAMPLE_QUESTIONS[question]
@@ -326,11 +329,12 @@ class Chat():
                 )
                 question = user_input
                 # answer = chat_agent.run(mrkl_input, callbacks=[streamlit_handler])
-                response = self.new_chat.askAI(st.session_state.userid, question, callbacks = streamlit_handler).get("output", "Sorry, something happened.")
+                response = self.new_chat.askAI(st.session_state.userid, question, callbacks = streamlit_handler)
                 st.session_state.questions.append(question)
                 st.session_state.responses.append(response)
-            if st.session_state['responses']:
                 user_input = ""
+            if st.session_state['responses']:
+                # user_input = ""
                 for i in range(len(st.session_state['responses'])):
                     message(st.session_state['questions'][i], is_user=True, key=str(i) + '_user',  avatar_style="initials", seed="Yueqi")
                     message(st.session_state['responses'][i], key=str(i), avatar_style="initials", seed="AI")
