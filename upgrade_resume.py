@@ -8,7 +8,7 @@ from langchain.output_parsers import CommaSeparatedListOutputParser
 from langchain import PromptTemplate
 from langchain.agents import AgentType, Tool, initialize_agent, create_json_agent
 from basic_utils import read_txt
-from common_utils import get_web_resources, retrieve_from_db, get_job_relevancy, extract_posting_information, get_summary, extract_fields, get_field_content, extract_job_title, search_related_samples, get_missing_field_items, create_sample_tools
+from common_utils import get_web_resources, retrieve_from_db, get_job_relevancy, extract_posting_information, get_summary, extract_fields, get_field_content, extract_job_title, search_related_samples, create_sample_tools
 from langchain_utils import retrieve_faiss_vectorstore, create_vectorstore, merge_faiss_vectorstore
 # from langchain.text_splitter import MarkdownHeaderTextSplitter
 from pathlib import Path
@@ -68,6 +68,7 @@ def evaluate_resume(my_job_title="", company="", read_path = my_resume_file, pos
       my_job_title = extract_job_title(resume)
     generated_responses.update({"job title": my_job_title})
     generated_responses.update({"company name": company})
+    generated_responses.update({"job specification": job_specification})
 
  
     query_job  = f"""Research what a {my_job_title} does, including details of the common skills, responsibilities, education, experience needed for the job."""
@@ -81,24 +82,143 @@ def evaluate_resume(my_job_title="", company="", read_path = my_resume_file, pos
       company_description = get_web_resources(company_query, "wiki")
     generated_responses.update({"company description": company_description})
 
-    related_samples = search_related_samples(my_job_title, resume_samples_path)
+    # process all fields in parallel
+    processes = [Process(target = rewrite_resume_fields, args = (generated_responses, field, read_path, res_path)) for field in resume_fields]
 
-    sample_tools = create_sample_tools(related_samples, "resume")
+    # start all processes
+    for p in processes:
+       p.start()
 
-    for field in resume_fields:
+    for p in processes:
+       p.join()
 
-      field_dict = { }
-      print(f"CURRENT FIELD IS: {field}")
-      field_dict[field]= {}
-      resume_field_content = get_field_content(resume, field)
+    create_resume_advice_doc_tool(userid, res_path, generated_responses)
+    # related_samples = search_related_samples(my_job_title, resume_samples_path)
+    # sample_tools = create_sample_tools(related_samples, "resume")
+    # get_missing_field_items(related_samples, sample_tools)
+    return read_txt(res_path)
 
-      # sample_field_content = ""
+
+def rewrite_resume_fields(generated_response, field, read_path, res_path):
+    field_dict = { }
+    print(f"CURRENT FIELD IS: {field}")
+    field_dict[field]= {}
+    resume = read_txt(read_path)
+    resume_field_content = get_field_content(resume, field)
+    my_job_title = generated_response["job title"]
+    company_description = generated_response["company description"]
+    job_specification = generated_response["job specification"]
+    job_description = generated_response["job description"]
+            
+    query_relevancy = f"""Determine the relevant and irrelevant information contained in the field content. 
+
+      You are provided with job specification for an opening position. 
+      
+      Use it as a primarily guidelines when generating your answer. 
+
+      You are also provided with a general job decription of the requirement of {my_job_title}. 
+      
+      Use it as a secondary guideline when forming your answer.
+
+      If job specification is not provided, use general job description as your primarily guideline. 
+
+      field name: {field}
+
+      field content: {resume_field_content}\n
+
+      job specification: {job_specification}\n
+
+      general job description: {job_description} \n
+
+      Generate a list of irrelevant information that should not be included in the field content and a list of relevant information that should be included. 
+
+        """
+    # TODO: Update this chain: 3/10
+    relevancy = get_job_relevancy(read_path, query_relevancy)
+    field_dict[field]["field relevancy"] = relevancy
+
+    # 6/10, with enough data, this is decent
+    # Get expert advices 
+    advice_query = f"""What are some best practices when writing {field} for a resume to make it most CTS-friendly?  """
+    advices = retrieve_from_db(advice_query)
+                                
+
+    template_string = """" Your task is to analyze and help improve the content of resume field {field}. 
+
+    The content of the field is delimiter with {delimiter} characters. Always use this as contenxt and do not make things up. 
+
+    field content: {delimiter}{field_content}{delimiter} \n
+    
+    Step 1: You're given some expert advices on how to write {field} . Keep these advices in mind for the next steps.
+
+        expert advices: {advices} \n
+
+    Step 2: You're provided with some company informtion, job specification, and job description.
+
+      Try to make resume field cater to the compnay and job position, if possible. 
+
+      company information: {company_description}.  \n
+
+      job specification: {job_specification}.    \n
+
+      job description: {job_description}
+
+    Step 3: You are given two lists of information delimited with {delimiter2} characters. One is content to be included in the {field} and the other is content to be rewritten. 
+
+        information list: {delimiter2}{relevancy}{delimiter2} \n
+
+    Step 4: Rewrite the list of irrelevant content in Step 3 to make them appear more relevant to job position. 
+
+    Step 5: Polish the list of relevant content in Step 3 to make them more ATS-friendly. 
+
+    Use the following format:
+        Step 1:{delimiter4} <step 1 reasoning>
+        Step 2:{delimiter4} <step 2 reasoning>
+        Step 3:{delimiter4} <step 3 reasoning>
+        Step 4:{delimiter4} <rewrite the irrelevant content>
+        Step 5:{delimiter4} <polish the relevant content>
+
+
+      Make sure to include {delimiter4} to separate every step.
+    
+    """
+
+    prompt_template = ChatPromptTemplate.from_template(template_string)
+    upgrade_resume_message = prompt_template.format_messages(
+        field = field,
+        field_content = resume_field_content,
+        job = my_job_title,
+        advices=advices,
+        relevancy = relevancy,
+        company_description = company_description,
+        job_specification = job_specification, 
+        job_description = job_description,
+        delimiter = delimiter,
+        delimiter2 = delimiter2,
+        delimiter4 = delimiter4, 
+        
+    )
+
+    my_advice = llm(upgrade_resume_message).content
+    postprocessing(my_advice, res_path)
+
+   
+
+
+
+# process response to be outputted to chatbot
+def postprocessing(response, res_path):
+    
+    with open(res_path, 'a') as f:
+       f.write(response)
+
+
+def get_missing_field_items(related_samples, tools, llm=ChatOpenAI(temperature=0)):
+          # sample_field_content = ""
       # for sample in related_samples:
       #   sample_field_content += f"sample {field}: " + delimiter1 + get_field_content(sample, field) + delimiter1 + "\n"
-      # TODO: update this chain: 0/10
-     
-      # Get sample comparisons
-      query_missing = f""" 
+
+    query = f""" 
 
         Compare the {field} in the resume samples with the applicant's field content.
 
@@ -114,152 +234,26 @@ def evaluate_resume(my_job_title="", company="", read_path = my_resume_file, pos
          Generalize your answer. 
 
         """
-      missing = get_missing_field_items(query_missing, sample_tools)
-     
-      field_dict[field]["missing field content"]=missing
 
-
-          
-      query_relevancy = f"""Determine the relevant and irrelevant information contained in {field}. 
-
-        You are  provided with job specification for an opening position. 
-        
-        Use it as a primarily guidelines when generating your answer. 
-
-        You are also provided with a general job decription of the requirement of {my_job_title}. 
-        
-        Use it as a secondary guideline when forming your answer.
-
-        If job specification is not provided, use general job description as your primarily guideline. 
-
-        field name: {field}
-
-        field content: {resume_field_content}\n
-
-        job specification: {job_specification}\n
-
-        general job description: {job_description} \n
-
-        Generate a list of irrelevant information that should not be included in the resume and a list of relevant information that should be included in {field}. 
-
-          """
-      # TODO: Update this chain: 3/10
-      relevancy = get_job_relevancy(read_path, query_relevancy)
-      field_dict[field]["field relevancy"] = relevancy
-
-      # 6/10, with enough data, this is decent
-      # Get expert advices 
-      advice_query = f"""What are some best practices when writing {field} for a resume to make it most CTS-friendly?  """
-      advices = retrieve_from_db(advice_query)
-
-
-
-    q = Queue()
-    P = Process(target=postprocessing, args=(generated_responses, res_path, q))
-    P.start()
-    create_resume_advice_doc_tool(userid, res_path, generated_responses)
-    response = q.get()
-    P.join()
-    return response
-
-    
-
-
-
-
-      # template_string = """" Your task is to analyze and help improve the content of resume field {field}. 
-
-      # The content of the field is delimiter with {delimiter} characters. Always use this as contenxt and do not make things up. 
-
-      # field content: {delimiter}{field_content}{delimiter} \n
-      
-      # Step 1: You're given some expert advices on how to write {field} . Keep these advices in mind for the next steps.
-
-      #     expert advices: {advices} \n
-
-      # step 2: You are given two lists of information delimited with {delimiter2} characters. One is content to be included in the {field} and the other is content to be removed. 
-
-      #     Use them as to generate your answer. 
-
-      #     information list: {delimiter2}{relevancy}{delimiter2} \n
-
-
-      # Step 3: You're provided with some company informtion and job specification
-
-      #   Look for ATS-friendly keywords in the job specification and company information to make the resume field cater to the compnay and job position. 
-
-      #   If company information and/or job specifcation do not pertain to the resume field, skip this step. 
-
-      #   company information: {company_description}.  \n
-
-      #   job specification: {job_specification}.    \n
-
-      # Step 4: Based on what you gathered in Step 1 through 3, rewrite the resume field {field}. Do not make up things. 
-
-      # Use the following format:
-      #     Step 1:{delimiter4} <step 1 reasoning>
-      #     Step 2:{delimiter4} <step 2 reasoning>
-      #     Step 3:{delimiter4} <step 3 reasoning>
-      #     Step 4:{delimiter4} <rewrite the resume field>
-
-
-      #   Make sure to include {delimiter4} to separate every step.
-      
-      # """
-
-      # prompt_template = ChatPromptTemplate.from_template(template_string)
-      # upgrade_resume_message = prompt_template.format_messages(
-      #     field = field,
-      #     field_content = field_content,
-      #     job = my_job_title,
-      #     advices=advices,
-      #     relevancy = relevancy,
-      #     company_description = company_description,
-      #     job_specification = job_specification, 
-      #     delimiter = delimiter,
-      #     delimiter1 = delimiter1, 
-      #     delimiter2 = delimiter2,
-      #     delimiter4 = delimiter4, 
-          
-      # )
-      # my_advice = llm(upgrade_resume_message).content
-
-      # Check potential harmful content in response
-      # if (check_content_safety(text_str=my_advice)):   
-      #     if (postprocessing(my_advice, res_path)):
-      #         create_resume_advice_doc_tool(res_path)
-
-# process response to be outputted to chatbot
-def postprocessing(response_dict, res_path, q):
-    
-    with open(res_path, 'w') as handle:
-        try:
-            json.dump(response_dict, handle)
-            print("ALL SUCCESS")
-        except Exception as e:
-            print("FAILED")
-    with open(res_path, "r") as handle:
-       data = json.load(handle)
-
-    json_spec = JsonSpec(dict_=data, max_value_length=4000)
-    json_toolkit = JsonToolkit(spec=json_spec)
-
-    json_agent_executor = create_json_agent(
-        llm=OpenAI(temperature=0), toolkit=json_toolkit, verbose=True
+    agent = initialize_agent(
+        tools,
+        llm,
+        agent=AgentType.OPENAI_MULTI_FUNCTIONS,
+        max_iterations=2,
+        early_stopping_method="generate",
+        verbose=True
     )
-    
-    response = json_agent_executor.run("Convert and condense this JSON document into human readable text")
-    print(response)
-    q.put(response)
-    # TODO: user markdownheadersplitter to split according to delimiters before vs storage
 
-    # cut the text to only cover letter
-      # transform_chain = TransformChain(
-    #     input_variables=["text"], output_variables=["output_text"], transform=transform_func)
-    # stream out the answer
-    # chat = ChatOpenAI(streaming=True, callbacks=[StreamingStdOutCallbackHandler()], temperature=0)
-    # langchain.llm_cache = InMemoryCache()
+    response = agent({"input": query}).get("output", "")   
 
+    # Option 2: better at providing details but tend to be very slow and error prone and too many tokens
+
+    # planner = load_chat_planner(llm)
+    # executor = load_agent_executor(llm, tools, verbose=True)
+    # agent = PlanAndExecute(planner=planner, executor=executor, verbose=True)
+    # response = agent.run(query)
+    print(f"Sucessfully got missing field content: {response}")
+    return response
 
 
 

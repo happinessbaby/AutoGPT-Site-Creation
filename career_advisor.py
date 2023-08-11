@@ -57,6 +57,7 @@ from loguru import logger
 from langchain.evaluation import load_evaluator
 from basic_utils import convert_to_txt
 from langchain.schema import OutputParserException
+from multiprocessing import Process, Queue, Value
 
 
 from dotenv import load_dotenv, find_dotenv
@@ -179,20 +180,7 @@ class ChatController(object):
         self.chat_agent.agent.llm_chain.prompt = prompt
 
 
-    def _initialize_log(self):
-        for path in  Path("./log/").glob('**/*.log'):
-            file = str(path)
-            file_name = path.stem
-            if os.stat(file).st_size != 0:  
-                convert_to_txt(file, f"./log/{file_name}.txt")
-            os.remove(file)
 
-
-            
-
-
-    
-    
         # OPTION 2: agent = custom LLMSingleActionAgent
         # agent = self.create_custom_llm_agent()
         # self.chat_agent = AgentExecutor.from_agent_and_tools(
@@ -304,10 +292,7 @@ class ChatController(object):
     #     return agent
 
     def _initialize_meta_agent(self):
-        # chat histories will be stored in vector store to be used as a chat debugging guideline 
-        # chat histories should include intermediate steps so that the wrong steps can be corrected
-        # db = retrieve_faiss_vectorstore(self.embeddings, "faiss_chat_history")
-        # if db is None:
+
         db = create_vectorstore(self.embeddings, "faiss", "./log/", "dir", "chat_debug")
         description = """This is used for debugging chat errors when you encounter one. 
         This stores all the chat history in the past. """
@@ -339,56 +324,58 @@ class ChatController(object):
                     "input_variables": ["input", "agent_scratchpad","chat_history"]
                 },
         )
-        # modify default agent prompt
-        # prompt = self.meta_agent.agent.create_prompt(system_message=meta_template, input_variables=['chat_history'], tools=self.tools)
-        # self.meta_agent.agent.llm_chain.prompt = prompt
 
 
 
+    def _initialize_log(self):
+        for path in  Path("./log/").glob('**/*.log'):
+            file = str(path)
+            file_name = path.stem
+            if file_name is not self.userid: 
+                # convert all non-empty log from previous sessions to txt and delete the log
+                if os.stat(file).st_size != 0:  
+                    convert_to_txt(file, f"./log/{file_name}.txt")
+                os.remove(file)
 
 
 
     def askAI(self, userid, question, callbacks=None):
 
         try:
-            #Option 1
             # print("Successfully reinitialized agent")            
             # BELOW IS USED WITH CHAT_CONVERSATIONAL_REACT_DESCRIPTION 
             response = self.chat_agent({"input": question, "chat_history":[], "entities": self.entities, "instructions":self.instructions}, callbacks = [callbacks])
             # update instruction from feedback 
-            self.chat_history = self.get_chat_history()
-            try: 
-                feedback = self.meta_agent({"input":"", "chat_history":self.chat_history}).get("output", "")
-            except OutputParserException as e:
-                feedback = str(e)
-                feedback = feedback.removeprefix("Could not parse LLM output: `").removesuffix("`")
-            self.update_instructions(feedback)
+            self.update_chat_history()
+            p = Process(target = self.askMetaAgent, args=())
+            p.start()
 
             if (evaluate_result):
-                evaluation_result = self.evaluator.evaluate_agent_trajectory(
-                    prediction=response["output"],
-                    input=response["input"],
-                    agent_trajectory=response["intermediate_steps"],
-                    )
+                try:
+                    evaluation_result = self.evaluator.evaluate_agent_trajectory(
+                        prediction=response["output"],
+                        input=response["input"],
+                        agent_trajectory=response["intermediate_steps"],
+                        )
+                except Exception as e:
+                    evaluation_result = ""
                 # print(evaluation_result)
                 # add evaluation and instruction to log
                 self.update_meta_data(evaluation_result)
-            
+
+            p.join()         
             # convert dict to string for chat output
             response = response.get("output", "sorry, something happened, try again.")
-           
+        # let meta agent handle all exceptions with feedback loop
         except Exception as e:
+            # needs to get action and action input before error and add it to error message
             error_msg = str(e)
             query = f""""Debug the error message and provide instruction for Assistent for the next step: {error_msg}
                 """
-            try: 
-                feedback = self.meta_agent({"input": query, "chat_history": self.chat_history}).get("output", "")
-            except OutputParserException as e:
-                feedback = str(e)
-                feedback = feedback.removeprefix("Could not parse LLM output: `").removesuffix("`")
-            self.update_instructions(feedback)
-            # give chat agent new instruction on how to fix the error
-            # TODO: update log with updated instruction, no need for evaluation
+            p = Process(target = self.askMetaAgent, args=(query))
+            p.start()
+            self.update_meta_data(error_msg)
+            p.join()
             self.askAI(userid, question, callbacks)        
 
 
@@ -398,15 +385,26 @@ class ChatController(object):
             # print(f"Sucessfully pickled conversation: {chat_history}")
 
         return response
+    
 
+    def askMetaAgent(self, query = ""):    
+        try: 
+            feedback = self.meta_agent({"input":query, "chat_history":self.chat_history}).get("output", "")
+        except Exception as e:
+            if type(e) == OutputParserException:
+                feedback = str(e)
+                feedback = feedback.removeprefix("Could not parse LLM output: `").removesuffix("`")
+            else:
+                raise(e)
+        self.update_instructions(feedback)
 
-    def get_chat_history(self):
+    def update_chat_history(self):
         # memory_key = chain_memory.memory_key
         # chat_history = chain_memory.load_memory_variables(memory_key)[memory_key]
         extracted_messages = self.memory.chat_memory.messages
-        chat_history = messages_to_dict(extracted_messages)
+        self.chat_history = messages_to_dict(extracted_messages)
         # print(chat_history)
-        return chat_history
+
 
     
     def add_tools(self, userid, tool_name, tool_description):      
@@ -430,9 +428,13 @@ class ChatController(object):
         self.instructions = new_instructions
         print(f"Successfully updated instruction to: {new_instructions}")
 
-    def update_meta_data(self, evaluation_result):
+    def update_meta_data(self, data):
          with open(log_path+f"{self.userid}.log", "a") as f:
-             f.write(self.instructions + "\n"+ str(evaluation_result))
+             f.write(str(data))
+    
+
+
+
 
 
              
