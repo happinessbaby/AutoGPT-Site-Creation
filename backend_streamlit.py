@@ -22,7 +22,7 @@ import sys
 from multiprocessing import Process, Queue, Value
 import pickle
 import requests
-from langchain.embeddings import OpenAIEmbeddings
+# from langchain.embeddings import OpenAIEmbeddings
 from base import base
 
 
@@ -61,15 +61,17 @@ class Chat():
 
         with placeholder.container():
 
-            # st_callback = StreamlitCallbackHandler(st.container())
             if "userid" not in st.session_state:
                 st.session_state["userid"] = str(uuid.uuid4())
                 print(st.session_state.userid)
                 # Chat.new_chat = ChatController(st.session_state.userid)
                 # base.save_chat(self.new_chat)
                 base.save_chat(ChatController(st.session_state.userid))
-
-            self.new_chat = base.get_chat()
+            try:
+                self.new_chat = base.get_chat()
+            except AttributeError as e:
+                base.save_chat(ChatController(st.session_state.userid))
+                self.new_chat = base.get_chat()
                 # self.new_chat = self.get_chat()
 
  
@@ -215,35 +217,9 @@ class Chat():
                         #     st.session_state['company'] = company
                     if submit_button:
 
-
-                        # Save file 
-                        file_ext = Path(uploaded_file.name).suffix
-                        filename = st.session_state.userid+file_ext
-                        resume_save_path = os.path.join(upload_path, filename)
-                        with open(resume_save_path, 'wb') as f:
-                            f.write(uploaded_file.getvalue())
-                        read_path =  os.path.join(upload_path, Path(filename).stem+'.txt')
-                        # Convert file to txt and save it to uploads
-                        convert_to_txt(resume_save_path, read_path)
-
-                        if (check_content_safety(file=read_path)):
-                            # TODO: evaludate content currently not recognizing any resume
-                            # if (evaluate_content(read_path, "resume")):
-                            st.write("file uploaded")
-                            # create faiss store and add it to agent tools
-                            name = "faiss_resume"
-                            description = """This is user's own resume. Use it as a reference and context when answering questions about user's own resume."""
-                            create_vectorstore(OpenAIEmbeddings(), "faiss", read_path, "file",  f"{name}_{st.session_state.userid}")
-                            self.new_chat.add_tools(st.session_state.userid, name, description)
-                            # add resume file path to prompt (to hopefully trigger preprocessing pick it up)
-                            new_text = f"""resume file: {read_path}"""
-                            self.new_chat.update_entities(st.session_state.userid, new_text)
-
-                                
-                            # else:
-                            #     st.write("sorry, please make sure your file is correct.")
-                        else:
-                            st.write("sorry, that didn't work, please try again.")
+                        p = Process(target=self.process_file, args=(uploaded_file, st.session_state.userid))
+                        p.start()
+                        p.join()
 
                         
                         # if posting:
@@ -274,46 +250,12 @@ class Chat():
                         )
                         question = prefilled
                         # answer = chat_agent.run(mrkl_input, callbacks=[streamlit_handler])
-                        response = self.new_chat.askAI(st.session_state.userid, question, callbacks=[streamlit_handler]).get("output", "Sorry, something happened.")
+                        response = self.new_chat.askAI(st.session_state.userid, question, callbacks=streamlit_handler)
                         st.session_state.questions.append(question)
                         st.session_state.responses.append(response)
                         # session_name = SAMPLE_QUESTIONS[question]
                         # #TODO: instead of all of this, if a cover letter is already generated, it should be played back
-                        # # else, agent should use cover_letter_generator tool to do it, instead of this manual coding
-                        # if session_name == "coverletter":
-                        #     # read_path = os.path.join(upload_path, st.session_state.userid+'.txt')
-                        #     # if Path(read_path).is_file():
-                        #     #     save_path = os.path.join(cover_letter_path, st.session_state.userid+'.txt')
-                        #     #     # p = Process(target=generate_basic_cover_letter, args=(st.session_state.job, st.session_state.company, read_path, save_path))
-                        #     #     p = Process(target=self.assess, args=(st.session_state.userid, st.session_state.job,st.session_state.company, "coverletter"))
-                        #     #     p.start()
-                        #     #     # progress feedbacks
-                        #     #     p.join()     
-                        #     #     response = read_txt(save_path)
-                        #     # else:
-                        #     response = "Sure! Just fill out the resume form and I'll help you with it. "
-                        # elif session_name=="resume":
-                        #     # read_path = os.path.join(upload_path, st.session_state.userid+".txt")
-                        #     # if Path(read_path).is_file():
-                        #     #     save_path = os.path.join(advice_path,  st.session_state.userid+'.txt')
-                        #     #     p = Process(target=self.assess, args=(st.session_state.userid, st.session_state.job,st.session_state.company, "resume"))
-                        #     #     p.start()
-                        #     #     create_vectorstore(OpenAIEmbeddings(), "faiss", save_path, "file", "temp")
-                        #     #     old_db = retrieve_faiss_vectorstore(OpenAIEmbeddings(), f"faiss_user_{st.session_state.userid}")
-                        #     #     new_db = retrieve_faiss_vectorstore(OpenAIEmbeddings(), "temp")
-                        #     #     merge_faiss_vectorstore(old_db, new_db)
-                        #     #     p.join()
-                        #     #     response = read_txt(save_path)
-                        #     # else:
-                        #     response = "Sure! Just fill out the resume form and I'll help you with it. "
-                        # else: 
-                            # session_path = Path(__file__).parent / "general_questions" / session_name
-                            # # print(f"Playing saved session: {session_path}")
-                            # response = playback_callbacks(
-                            #     [streamlit_handler], str(session_path), max_pause_time=3
-                            # )         
-                            # st.session_state.questions.append(question)
-                            # st.session_state.responses.append(response)
+
 
 
             # Chat section
@@ -327,27 +269,44 @@ class Chat():
                 )
                 question = user_input
                 # answer = chat_agent.run(mrkl_input, callbacks=[streamlit_handler])
-                response = self.new_chat.askAI(st.session_state.userid, question, callbacks=[streamlit_handler]).get("output", "Sorry, something happened.")
+                response = self.new_chat.askAI(st.session_state.userid, question, callbacks = streamlit_handler)
                 st.session_state.questions.append(question)
                 st.session_state.responses.append(response)
-
-            if st.session_state['responses']:
                 user_input = ""
+            if st.session_state['responses']:
+                # user_input = ""
                 for i in range(len(st.session_state['responses'])):
                     message(st.session_state['questions'][i], is_user=True, key=str(i) + '_user',  avatar_style="initials", seed="Yueqi")
                     message(st.session_state['responses'][i], key=str(i), avatar_style="initials", seed="AI")
 
 
 
-    # def assess(self, userid, job, company, task):
-        
-    #     read_path = os.path.join(upload_path, userid+".txt")
-    #     if (task=="resume"):
-    #         res_path = os.path.join(advice_path, userid+".txt")
-    #         evaluate_resume(job, read_path = read_path, res_path = res_path)
-    #     elif (task=="coverletter"):
-    #         res_path = os.path.join(cover_letter_path, userid+".txt")
-    #         generate_basic_cover_letter(job, company =company, read_path=read_path, res_path=res_path, posting_path=os.path.join(posting_path, userid+".txt"))
+    def process_file(self, uploaded_file, userid ):
+        file_ext = Path(uploaded_file.name).suffix
+        filename = userid+file_ext
+        resume_save_path = os.path.join(upload_path, filename)
+        with open(resume_save_path, 'wb') as f:
+            f.write(uploaded_file.getvalue())
+        read_path =  os.path.join(upload_path, Path(filename).stem+'.txt')
+        # Convert file to txt and save it to uploads
+        convert_to_txt(resume_save_path, read_path)
+
+        if (check_content_safety(file=read_path)):
+            # TODO: evaludate content currently not recognizing any resume
+            # if (evaluate_content(read_path, "resume")):
+            st.write("file uploaded")
+            # create faiss store and add it to agent tools
+            name = "faiss_resume"
+            description = """This is user's own resume. Use it as a reference and context when answering questions about user's own resume."""
+            create_vectorstore(self.new_chat.embeddings, "faiss", read_path, "file",  f"{name}_{userid}")
+            self.new_chat.add_tools(userid, name, description)
+            # add resume file path to prompt (to hopefully trigger preprocessing pick it up)
+            new_text = f"""resume file: {read_path}"""
+            self.new_chat.update_entities(userid, new_text)
+        else:
+            st.write("sorry, that didn't work, please try again.")
+
+
 
     
 

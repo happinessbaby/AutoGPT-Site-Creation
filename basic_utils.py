@@ -9,6 +9,7 @@ import csv
 import bs4
 import urllib.request
 from urllib.request import Request, urlopen
+import uuid
 
 
 
@@ -24,6 +25,16 @@ def convert_to_txt(file, output_path):
             convert_doc_to_txt(file, output_path)
         except Exception as e:
             print(e)
+    elif (file_ext==".log"):
+        convert_log_to_txt(file, output_path)
+
+def convert_log_to_txt(file, output_path):
+    with open(file, "r") as f:
+        content = f.read()
+        print(content)
+        with open(output_path, "w") as f:
+            f.write(content)
+
 
 
 def convert_pdf_to_txt(pdf_file, output_path):
@@ -101,8 +112,8 @@ def retrieve_web_content(link, save_path="./web_data/test.txt"):
 
 if __name__=="__main__":
     retrieve_web_content(
-        "https://www.google.com/search?q=accountant+job+posting&oq=accountant+job+posting&gs_lcrp=EgZjaHJvbWUqBwgAEAAYgAQyBwgAEAAYgAQyBwgBEAAYgAQyBwgCEAAYgAQyBwgDEAAYgAQyBwgEEAAYgAQyBwgFEAAYgAQyCggGEAAYhgMYigUyCggHEAAYhgMYigXSAQgzNTc2ajBqN6gCALACAA&sourceid=chrome&ie=UTF-8&ibp=htl;jobs&sa=X&ved=2ahUKEwjZ4KPy1bGAAxWvOkQIHUCTAHMQkd0GegQIJRAB#fpstate=tldetail&htivrt=jobs&htiq=accountant+job+posting&htidocid=d18qY4tf7BQAAAAAAAAAAA%3D%3D&sxsrf=AB5stBh4sXF7HWPyg6G5alg1IAJfXhu1eQ:1690556544124",
-        save_path = "./uploads/posting/accountant.txt")
+        "https://enhancv.com/blog/should-i-include-irrelevant-experience-on-a-resume/",
+        save_path = f"./web_data/{str(uuid.uuid4())}.txt")
 
 
 

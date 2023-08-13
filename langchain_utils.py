@@ -3,7 +3,7 @@ from langchain.document_loaders import TextLoader, DirectoryLoader
 from langchain.docstore.wikipedia import Wikipedia
 from langchain.vectorstores import DocArrayInMemorySearch
 from langchain.indexes import VectorstoreIndexCreator
-from langchain.agents import Tool
+from langchain.chat_models import ChatOpenAI
 from langchain.tools.python.tool import PythonREPLTool
 from langchain.utilities import SerpAPIWrapper
 from langchain.utilities import GoogleSearchAPIWrapper
@@ -13,7 +13,7 @@ from langchain.embeddings import ElasticsearchEmbeddings
 from elasticsearch import Elasticsearch
 from ssl import create_default_context
 from langchain.prompts import BaseChatPromptTemplate
-from langchain.agents import Tool, AgentExecutor, LLMSingleActionAgent, AgentOutputParser
+from langchain.agents import Tool, AgentExecutor, LLMSingleActionAgent, AgentOutputParser, initialize_agent, Tool
 from langchain.schema import AgentAction, AgentFinish, HumanMessage
 from typing import List, Union
 import re
@@ -28,7 +28,7 @@ import subprocess
 import sys
 import os
 from feast import FeatureStore
-from langchain.text_splitter import CharacterTextSplitter
+from langchain.text_splitter import CharacterTextSplitter,  RecursiveCharacterTextSplitter
 from langchain.vectorstores.redis import Redis
 from langchain.embeddings import OpenAIEmbeddings
 import redis
@@ -49,6 +49,12 @@ from langchain.agents.agent_toolkits import (
     VectorStoreRouterToolkit,
     VectorStoreInfo,
 )
+from langchain.document_transformers import EmbeddingsRedundantFilter
+from langchain.retrievers.document_compressors import DocumentCompressorPipeline
+from langchain.text_splitter import CharacterTextSplitter
+from langchain.retrievers.document_compressors import EmbeddingsFilter
+from langchain.retrievers import ContextualCompressionRetriever
+from langchain.docstore.document import Document
 
 
 
@@ -63,18 +69,28 @@ redis_client = redis.Redis.from_url(redis_url)
 # standard cache
 # langchain.llm_cache = RedisCache(redis_client)
 # semantic cache
+# !!!!RedisSentimentCache does not support caching ChatModel outputs.
 langchain.llm_cache = RedisSemanticCache(
     embedding=OpenAIEmbeddings(),
     redis_url=redis_url
 )
 
-def split_doc(path='./web_data/', path_type='dir'):
+
+def split_doc(path='./web_data/', path_type='dir', splitter_type = "recursive", chunk_size=100, chunk_overlap=10):
     if (path_type=="file"):
         loader = TextLoader(path)
     elif (path_type=="dir"):
         loader = DirectoryLoader(path, glob="*.txt", recursive=True)
     documents = loader.load()
-    text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
+    # Option 1: tiktoken from openai
+    if (splitter_type=="tiktoken"):
+        text_splitter = CharacterTextSplitter.from_tiktoken_encoder(chunk_size=100, chunk_overlap=0)
+    # option 2: 
+    elif (splitter_type=="recursive"):
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size, 
+            length_function = len,
+            chunk_overlap=chunk_overlap)
     docs = text_splitter.split_documents(documents)
     return docs
 
@@ -121,20 +137,6 @@ def create_qa_tools(qa_chain):
     return tools
 
 
-
-def create_doc_tools(doc, path_type):
-    index = get_index(doc, path_type)
-    tools = [
-        Tool(
-        name = f"{doc} Document",
-        func = lambda q: str(index.query(q)),
-        description="Useful for answering personalized questions",
-        # return_direct=True,
-        )
-    ]
-    return tools
-
-
 def create_search_tools(name, top_n):
     if (name=="google"):
         search = GoogleSearchAPIWrapper(k=top_n)
@@ -171,7 +173,6 @@ def create_db_tools(llm, retriever, name, description):
     print(f"Succesfully created {name} tool")
     return tool
 
-
 # def create_vectorstore_agent_toolkit(embeddings, llm, vs_type, redis_index_name="", faiss_index_name=""):
 #     if vs_type=="general":
 #         redis_store = retrieve_redis_vectorstore(embeddings, redis_index_name)
@@ -204,34 +205,6 @@ def create_db_tools(llm, retriever, name, description):
 #             )   
 #     return router_toolkit
 
-def create_QA_chain(llm, db, docs=None, chain_type="stuff", output_parse=None):
-
-    # output_parser =  output_parse
-    # prompt_template = """If the context is not relevant, 
-    # please answer the question by using your own knowledge about the topic
-    
-    # {context}
-    
-    # Question: {question}
-    # """
-
-    # PROMPT = PromptTemplate(
-    #     template=prompt_template, input_variables=["context", "question"], output_parser=output_parser
-    # )c
-
-    # chain_type_kwargs = {"prompt": PROMPT}
-
-    qa = RetrievalQA.from_chain_type(
-        llm=llm, 
-        chain_type=chain_type,
-        # can also pass in a "search_type" to as_retriever() 
-        retriever=db.as_retriever(), 
-        # verbose=True, 
-        # chain_type_kwargs=chain_type_kwargs,
-    )
-
-    return qa
-
 
 
 def create_QASource_chain(chat, vectorstore, docs=None, chain_type="stuff", index_name="redis_web_advice"):
@@ -244,6 +217,22 @@ def create_QASource_chain(chat, vectorstore, docs=None, chain_type="stuff", inde
                                      return_source_documents=True)
 
     return qa
+
+def create_compression_retriever(vectorstore = "index_web_advice"):
+    embeddings = OpenAIEmbeddings()
+    splitter = CharacterTextSplitter(chunk_size=300, chunk_overlap=0, separator=". ")
+    redundant_filter = EmbeddingsRedundantFilter(embeddings=embeddings)
+    relevant_filter = EmbeddingsFilter(embeddings=embeddings, similarity_threshold=0.76)
+    pipeline_compressor = DocumentCompressorPipeline(
+        transformers=[splitter, redundant_filter, relevant_filter]
+    )
+    redis_store = retrieve_redis_vectorstore(embeddings, vectorstore)
+    retriever = redis_store.as_retriever(search_type="similarity", search_kwargs={"k":1000, "score_threshold":"0.2"})
+
+    compression_retriever = ContextualCompressionRetriever(base_compressor=pipeline_compressor, base_retriever=retriever)
+
+    return compression_retriever
+
 
 
 
