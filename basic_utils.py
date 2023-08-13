@@ -111,13 +111,10 @@ def retrieve_web_content(link, save_path="./web_data/test.txt"):
         return False
 
 if __name__=="__main__":
-    # retrieve_web_content(
-    #     "https://www.topresume.com/career-advice/resume-objective-examples-that-get-you-hired",
-    #     save_path = f"./web_data/resume/{str(uuid.uuid4())}.txt")
-    for path in  Path("./log/").glob('**/*.log'):
-        file = str(path)
-        file_name = path.stem
-        convert_to_txt(file, f"./log/{file_name}.txt")
+    retrieve_web_content(
+        "https://enhancv.com/blog/should-i-include-irrelevant-experience-on-a-resume/",
+        save_path = f"./web_data/{str(uuid.uuid4())}.txt")
+
 
 
     

@@ -8,9 +8,9 @@ from langchain.output_parsers import CommaSeparatedListOutputParser
 from langchain import PromptTemplate
 from langchain.agents import AgentType, Tool, initialize_agent, create_json_agent
 from basic_utils import read_txt
-from common_utils import get_web_resources, retrieve_from_db, get_job_relevancy, extract_posting_information, get_summary, extract_fields, get_field_content, extract_job_title, search_related_samples, create_sample_tools
-from langchain_utils import retrieve_faiss_vectorstore, create_vectorstore, merge_faiss_vectorstore
-# from langchain.text_splitter import MarkdownHeaderTextSplitter
+from common_utils import (get_web_resources, retrieve_from_db, extract_posting_information, get_summary, generate_multifunction_response, create_n_docs_tool,
+                           extract_fields, get_field_content, extract_job_title, search_related_samples, create_sample_tools, reorder_docs)
+from langchain_utils import retrieve_faiss_vectorstore, create_vectorstore, merge_faiss_vectorstore, split_doc, create_compression_retriever
 from pathlib import Path
 import json
 from json import JSONDecodeError
@@ -18,6 +18,7 @@ from base import base
 from multiprocessing import Process, Queue, Value
 from langchain.tools.json.tool import JsonSpec
 from langchain.agents.agent_toolkits import JsonToolkit
+from typing import Dict, List
 
 
 from dotenv import load_dotenv, find_dotenv
@@ -42,21 +43,22 @@ posting_path = "./uploads/posting/accountant.txt"
 
 
     
-def evaluate_resume(my_job_title="", company="", read_path = my_resume_file, posting_path=posting_path):
+def evaluate_resume(my_job_title="", company="", read_path = my_resume_file, posting_path="") -> str:
     
     userid = Path(read_path).stem
     res_path = os.path.join("./static/advice/", Path(read_path).stem + ".txt")
     generated_responses = {}
 
+    # get resume
     resume = read_txt(read_path)
 
+    # get resume field names
     resume_fields = extract_fields(resume)
-
     resume_fields = resume_fields.split(",")
-    print(f"{resume_fields}")
     generated_responses.update({"resume fields": resume_fields})
 
     job_specification = ""
+    # get job specification and company name from job posting link, if provided
     if (Path(posting_path).is_file()):
       job_specification = get_summary(posting_path)
       posting = read_txt(posting_path)
@@ -64,26 +66,32 @@ def evaluate_resume(my_job_title="", company="", read_path = my_resume_file, pos
       my_job_title = posting_info_dict["job"]
       company = posting_info_dict["company"]
 
+    # if job title is not provided anywhere else, extract from the resume
     if (my_job_title==""):
       my_job_title = extract_job_title(resume)
     generated_responses.update({"job title": my_job_title})
     generated_responses.update({"company name": company})
     generated_responses.update({"job specification": job_specification})
 
- 
+    # get general job description
     query_job  = f"""Research what a {my_job_title} does, including details of the common skills, responsibilities, education, experience needed for the job."""
-    job_description = get_web_resources(query_job, "google")
+    job_description = get_web_resources(query_job)
     generated_responses.update({"job description": job_description})
 
+    # get company description, if provided
     company_description=""
     if (company!=""):
       company_query = f""" Research what kind of company {company} is, such as its culture, mission, and values.                         
                           Look up the exact name of the company. If it doesn't exist or the search result does not return a company, output you don't know"""     
-      company_description = get_web_resources(company_query, "wiki")
+      company_description = get_web_resources(company_query)
     generated_responses.update({"company description": company_description})
 
+    # related_samples = search_related_samples(my_job_title, resume_samples_path)
+    # sample_tools = create_sample_tools(related_samples, "resume")
+    relevancy_tools = [create_n_docs_tool]
+
     # process all fields in parallel
-    processes = [Process(target = rewrite_resume_fields, args = (generated_responses, field, read_path, res_path)) for field in resume_fields]
+    processes = [Process(target = rewrite_resume_fields, args = (generated_responses, field, read_path, res_path, relevancy_tools)) for field in resume_fields]
 
     # start all processes
     for p in processes:
@@ -91,24 +99,37 @@ def evaluate_resume(my_job_title="", company="", read_path = my_resume_file, pos
 
     for p in processes:
        p.join()
+   
+    # turn generated advices into a tool for chat agent
+    add_resume_advice_doc_tool(userid, res_path)
 
-    create_resume_advice_doc_tool(userid, res_path, generated_responses)
-    # related_samples = search_related_samples(my_job_title, resume_samples_path)
-    # sample_tools = create_sample_tools(related_samples, "resume")
-    # get_missing_field_items(related_samples, sample_tools)
+    # return result to chat agent
     return read_txt(res_path)
 
 
-def rewrite_resume_fields(generated_response, field, read_path, res_path):
-    field_dict = { }
+def rewrite_resume_fields(generated_response: Dict[str, str], field:str, read_path:str, res_path:str, relevancy_tools:List[Tool]) -> None:
+    # field_dict = { }
     print(f"CURRENT FIELD IS: {field}")
-    field_dict[field]= {}
+    # field_dict[field]= {}
     resume = read_txt(read_path)
     resume_field_content = get_field_content(resume, field)
-    my_job_title = generated_response["job title"]
-    company_description = generated_response["company description"]
-    job_specification = generated_response["job specification"]
-    job_description = generated_response["job description"]
+    my_job_title = generated_response.get("job title", "")
+    company_description = generated_response.get("company description", "")
+    job_specification = generated_response.get("job specification", "")
+    job_description = generated_response.get("job description", "")
+
+    # query_missing = f""" 
+
+    #     Compare the {field} in the sample resume with the applicant's field content.
+
+    #     The applicant's field content is delimited with {delimiter} characters.
+      
+    #     applicant's field content: {delimiter}{resume_field_content}{delimiter}
+
+    #     Generalize a list of missing items in the applicant's field content that should be included. 
+
+    #     """
+    # missing_items = get_missing_field_items(tools, query_missing)
             
     query_relevancy = f"""Determine the relevant and irrelevant information contained in the field content. 
 
@@ -134,12 +155,10 @@ def rewrite_resume_fields(generated_response, field, read_path, res_path):
 
         """
     # TODO: Update this chain: 3/10
-    relevancy = get_job_relevancy(read_path, query_relevancy)
-    field_dict[field]["field relevancy"] = relevancy
+    relevancy = generate_multifunction_response(query_relevancy, relevancy_tools)
 
-    # 6/10, with enough data, this is decent
     # Get expert advices 
-    advice_query = f"""What are some best practices when writing {field} for a resume to make it most CTS-friendly?  """
+    advice_query = f"""What are some best practices when writing {field} field for a resume to  make it ATS-friendly?  """
     advices = retrieve_from_db(advice_query)
                                 
 
@@ -207,58 +226,16 @@ def rewrite_resume_fields(generated_response, field, read_path, res_path):
 
 
 # process response to be outputted to chatbot
-def postprocessing(response, res_path):
+def postprocessing(response: str, res_path: str) -> None:
     
     with open(res_path, 'a') as f:
-       f.write(response)
+       f.write(response + "\n")
 
-
-def get_missing_field_items(related_samples, tools, llm=ChatOpenAI(temperature=0)):
-          # sample_field_content = ""
-      # for sample in related_samples:
-      #   sample_field_content += f"sample {field}: " + delimiter1 + get_field_content(sample, field) + delimiter1 + "\n"
-
-    query = f""" 
-
-        Compare the {field} in the resume samples with the applicant's field content.
-
-        The applicant's field content is delimited with {delimiter} characters.
-      
-
-        applicant's field content: {delimiter}{resume_field_content}{delimiter}
-
-         Answer the following question: 
-        
-         What is missing in the {field} section of the applicant's resume that are in the samples' {field}?
-
-         Generalize your answer. 
-
-        """
-
-    agent = initialize_agent(
-        tools,
-        llm,
-        agent=AgentType.OPENAI_MULTI_FUNCTIONS,
-        max_iterations=2,
-        early_stopping_method="generate",
-        verbose=True
-    )
-
-    response = agent({"input": query}).get("output", "")   
-
-    # Option 2: better at providing details but tend to be very slow and error prone and too many tokens
-
-    # planner = load_chat_planner(llm)
-    # executor = load_agent_executor(llm, tools, verbose=True)
-    # agent = PlanAndExecute(planner=planner, executor=executor, verbose=True)
-    # response = agent.run(query)
-    print(f"Sucessfully got missing field content: {response}")
-    return response
 
 
 
 # receptionist
-def preprocessing(json_request):
+def preprocessing(json_request: str) -> str:
     
     print(json_request)
     try:
@@ -287,7 +264,7 @@ def preprocessing(json_request):
     res = evaluate_resume(my_job_title=job, company=company, read_path=read_path, posting_path=posting_path)
     return res
 
-def create_resume_evaluator_tool():
+def create_resume_evaluator_tool() -> List[Tool]:
     
     name = "resume_evaluator"
     parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link": "<job post link>"}}'
@@ -307,10 +284,10 @@ def create_resume_evaluator_tool():
     return tools
 
 
-def create_resume_advice_doc_tool(userid, res_path, response_dict):   
+def add_resume_advice_doc_tool(userid:str, res_path:str) -> None:   
         
-    with open(res_path, 'w') as handle:
-      json.dump(response_dict, handle)
+    # with open(res_path, 'w') as handle:
+    #   json.dump(response_dict, handle)
     name = "faiss_resume_advice"
     description = """This is user's detailed resume advice. If this tool exists, do not use the 'resume evaluator' tool anymore. 
     Use this tool as a reference to give tailored resume advices. """
@@ -319,7 +296,7 @@ def create_resume_advice_doc_tool(userid, res_path, response_dict):
     chat.add_tools(userid, name, description)
 
 
-def test_resume_tool():
+def test_resume_tool() -> str:
     
     tools = create_resume_evaluator_tool()
     agent= initialize_agent(
@@ -341,6 +318,6 @@ def test_resume_tool():
 
 
 if __name__ == '__main__':
-    # evaluate_resume()
-    test_resume_tool()
+    evaluate_resume()
+    # test_resume_tool()
  

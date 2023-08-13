@@ -14,7 +14,7 @@ from langchain.agents import AgentType
 from langchain.chains import RetrievalQA,  HypotheticalDocumentEmbedder, LLMChain
 from pathlib import Path
 from basic_utils import read_txt
-from langchain_utils import create_wiki_tools, create_search_tools, create_db_tools, create_qa_tools, create_doc_tools, split_doc, retrieve_redis_vectorstore, get_index
+from langchain_utils import create_wiki_tools, create_search_tools, create_db_tools, create_compression_retriever, split_doc
 from langchain import PromptTemplate
 # from langchain.experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
 from langchain.agents.agent_toolkits import create_python_agent
@@ -25,14 +25,24 @@ from langchain.vectorstores import FAISS
 from langchain.retrievers import BM25Retriever, EnsembleRetriever
 from langchain.tools.convert_to_openai import  format_tool_to_openai_function
 from langchain.schema import HumanMessage
+from langchain.utilities import GoogleSearchAPIWrapper
+from langchain.retrievers.web_research import WebResearchRetriever
+from langchain.chains import RetrievalQAWithSourcesChain, StuffDocumentsChain
+from langchain.docstore import InMemoryDocstore
+from langchain.retrievers.multi_query import MultiQueryRetriever
+from langchain.document_transformers import (
+    LongContextReorder,
+)
+from typing import Any, List
+from langchain.docstore.document import Document
+from langchain.tools import tool
 import os
 import sys
 import re
 import string
 import random
 import json
-
-
+import faiss
 
 
 
@@ -41,7 +51,7 @@ delimiter2 = "'''"
 delimiter3 = '---'
 delimiter4 = '////'
 
-def extract_personal_information(resume,  llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
+def extract_personal_information(resume: str,  llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> Any:
 
     name_schema = ResponseSchema(name="name",
                              description="Extract the full name of the applicant. If this information is not found, output -1")
@@ -89,7 +99,7 @@ def extract_personal_information(resume,  llm = ChatOpenAI(temperature=0, model=
 
 
 
-def extract_posting_information(posting, llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
+def extract_posting_information(posting: str, llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> Any:
 
     job_schema = ResponseSchema(name="job",
                              description="Extract the job position of the job listing. If this information is not found, output -1")
@@ -125,7 +135,7 @@ def extract_posting_information(posting, llm = ChatOpenAI(temperature=0, model="
 
 
 
-def extract_job_title(resume):
+def extract_job_title(resume: str) -> str:
     response = get_completion(f"""Read the resume closely. It is delimited with {delimiter} characters. 
                               
                               Output a likely job position that this applicant is currently holding or a possible job position he or she is applying for.
@@ -138,7 +148,7 @@ def extract_job_title(resume):
 
 
 
-def extract_fields(resume, llm=OpenAI(temperature=0, cache=False)):
+def extract_fields(resume: str, llm=OpenAI(temperature=0, cache=False)) -> str:
 
     query =  """Search and extract fields of the resume delimited with {delimiter} characters.
 
@@ -161,7 +171,7 @@ def extract_fields(resume, llm=OpenAI(temperature=0, cache=False)):
     print(f"Successfully extracted fields: {response}")
     return response
 
-def get_field_content(resume, field):
+def get_field_content(resume: str, field: str) -> str:
      
    query = f"""Retrieve all the content of field {field} from the resume file delimiter with {delimiter} charactres.
 
@@ -173,7 +183,7 @@ def get_field_content(resume, field):
 
 
     
-def search_related_samples(job_title, directory):
+def search_related_samples(job_title: str, directory: str) -> List[str]:
 
     system_message = f"""
 		You are an assistant that evaluates whether the job position described in the content is similar to {job_title} or relevant to {job_title}. 
@@ -201,144 +211,105 @@ def search_related_samples(job_title, directory):
 
 
 
-def compare_cover_letter_samples(job_title, directory, query,  llm=ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
 
-    related_samples = search_related_samples(job_title, directory)
-    tools = create_sample_tools(related_samples, "cover_letter")
+def get_web_resources(query: str, llm = ChatOpenAI(temperature=0.8, model="gpt-3.5-turbo-0613", cache=False)) -> str:
 
-    agent = initialize_agent(
-        tools, 
-        llm, 
-        agent=AgentType.OPENAI_MULTI_FUNCTIONS, 
-        max_iterations=2,
-        early_stopping_method="generate",
-        # verbose=True
-        )
-
-    response = agent({"input": query}).get("output", "")
-    print(f"Successfully compared samples for best practices: {response}")
-    return response
-
-
-
-
-def get_web_resources(query, search_tool, top=10,  llm = ChatOpenAI(temperature=0.8, model="gpt-3.5-turbo-0613", cache=False)):
-
-    # SERPAPI has limited searches, for now, use plain google
-    if (search_tool=="google"):
-        tools = create_search_tools("google", top)
-    elif (search_tool=="wiki"):
-        tools = create_wiki_tools()
-
-    # Option 1: ReACt decent enough, tend to summarize too much 
-    agent= initialize_agent(
-        tools, 
-        llm, 
-        agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-        handle_parsing_errors=True,
-        # verbose = True,
-        )
-    try:
-        response = agent.run(query)
-        print(f"Successfully retrieved web data advice: {response}")
-        return response
-    except ValueError as e:
-        response = str(e)
-        if not response.startswith("Could not parse LLM output: `"):
-            print(e)
-            raise e
-        response = response.removeprefix(
-            "Could not parse LLM output: `").removesuffix("`")
-        print(f"Successfully retrieved web data advice: {response}")
-        return response
-
-
-
-    
-def get_job_relevancy(file, query, doctype="file", llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
-
-    tools = create_doc_tools(file, doctype)
-
-    agent = initialize_agent(
-        tools,
-        llm,
-        agent=AgentType.OPENAI_MULTI_FUNCTIONS, 
-        max_iterations=2,
-        early_stopping_method="generate",
-        # verbose=True
+    search = GoogleSearchAPIWrapper()
+    embedding_size = 1536  
+    index = faiss.IndexFlatL2(embedding_size)  
+    vectorstore = FAISS(OpenAIEmbeddings().embed_query, index, InMemoryDocstore({}), {})
+    web_research_retriever = WebResearchRetriever.from_llm(
+        vectorstore=vectorstore,
+        llm=llm, 
+        search=search, 
     )
-    response = agent({"input": query}).get("output", "")   
-    print(f"Successfully got relevancy info: {response}")
+    # qa_chain = RetrievalQAWithSourcesChain.from_chain_type(llm,retriever=web_research_retriever)
+    # result = qa_chain({"question": query})
+    # print(f"successfully got web resources: {result}")
+    # return result.get("answer")
+    qa_chain = RetrievalQA.from_chain_type(llm, retriever=web_research_retriever)
+    response = qa_chain.run(query)
+    print(f"Successfully got web resources: {response}")
     return response
-    
 
-def retrieve_from_db(query, llm=OpenAI(temperature=0.8)):
-    # index = get_index(path=path, path_type='dir')
-    # # Create a question-answering chain using the index
-    # prompt_template = """Please answer the user's question about resume, cover letter, or job application: 
-    #     Question: {question}
-    #     Answer:"""
-    # prompt = PromptTemplate(input_variables=["question"], template=prompt_template)
-    # llm_chain = LLMChain(llm=llm, prompt=prompt)
-    base_embeddings = OpenAIEmbeddings()
-    # # HyDE: https://python.langchain.com/docs/use_cases/question_answering/how_to/hyde
-    # embeddings = HypotheticalDocumentEmbedder(llm_chain = llm_chain, base_embeddings = base_embeddings)
-    redis_store = retrieve_redis_vectorstore(base_embeddings, "index_web_advice")
-    docs = redis_store.similarity_search(query)
-    response = docs[0].page_content
-    # redis_retriever = redis_store.as_retriever()
+
+    
+def reorder_docs(retriever: Any, query: str) -> List[Document]:
+    reordering = LongContextReorder()
+    compressed_docs = retriever.get_relevant_documents(query)
+    reordered_docs = reordering.transform_documents(compressed_docs)
+    return reordered_docs
+
+@tool
+def create_n_docs_tool(query: str) -> str:
+    """Searches for relevant documents that may contain the answer to the query."""
+    subquery_relevancy = "relevancy in resume"
+    compression_retriever = create_compression_retriever()
+    # tool_description = """This is useful when defining relevancy, use only needed. 
+    # If input has enough information to determine relevancy, you don't need to use this tool. """
+    reordered_docs = reorder_docs(compression_retriever, subquery_relevancy)
+    texts = [doc.page_content for doc in reordered_docs]
+    texts_merged = "\n\n".join(texts)
+    return texts_merged
+
+def retrieve_from_db(query: str, llm=OpenAI(temperature=0.8)) -> str:
+
+    retriever = create_compression_retriever()
+    reordered_docs = reorder_docs(retriever, query)
+
+    # Option 2: 
     # chain = RetrievalQA.from_chain_type(
     #     llm, 
-    #     chain_type="stuff", 
+    #     chain_type="map_reduce", 
     #     # verbose=True, 
-    #     retriever=redis_retriever,
+    #     retriever=retriever,
     #     # input_key="question"
     #     )
     # response = chain.run(query)
+    # Option 3:
+    # We prepare and run a custom Stuff chain with reordered docs as context.
+    # Override prompts
+    document_prompt = PromptTemplate(
+        input_variables=["page_content"], template="{page_content}"
+    )
+    document_variable_name = "context"
+    stuff_prompt_override = """Given this text extracts:
+    -----
+    {context}
+    -----
+    Please answer the following question:
+    {query}"""
+    prompt = PromptTemplate(
+        template=stuff_prompt_override, input_variables=["context", "query"]
+    )
+
+    # Instantiate the chain
+    llm_chain = LLMChain(llm=llm, prompt=prompt)
+    chain = StuffDocumentsChain(
+        llm_chain=llm_chain,
+        document_prompt=document_prompt,
+        document_variable_name=document_variable_name,
+    )
+    response = chain.run(input_documents=reordered_docs, query=query, verbose=True)
+
     print(f"Successfully retrieved advice: {response}")
     return response
 
     
-def get_summary(doc_path, llm=OpenAI()):
-    docs = split_doc(path=doc_path, path_type="file")
+def get_summary(posting_path: str, prompt_template = "", llm=OpenAI()) -> str:
+    docs = split_doc(path=posting_path, path_type="file")
     prompt_template = """Identity the job position, company then provide a summary of the following job posting:
-
         {text} \n
-
         Focus on roles and skills involved for this job. Do not include information irrelevant to this specific position.
-
-    """
-      
+      """
     PROMPT = PromptTemplate(template=prompt_template, input_variables=["text"])
-
     chain = load_summarize_chain(llm, chain_type="stuff", prompt=PROMPT)
     response = chain.run(docs)
-    print(f"Sucessfully got job posting summary: {response}")
+    print(f"Sucessfully got summary: {response}")
     return response
 
-def get_missing_field_items(query, tools, llm=ChatOpenAI(temperature=0)):
 
-    agent = initialize_agent(
-        tools,
-        llm,
-        agent=AgentType.OPENAI_MULTI_FUNCTIONS,
-        max_iterations=2,
-        early_stopping_method="generate",
-        verbose=True
-    )
-
-    response = agent({"input": query}).get("output", "")   
-
-    # Option 2: better at providing details but tend to be very slow and error prone and too many tokens
-
-    # planner = load_chat_planner(llm)
-    # executor = load_agent_executor(llm, tools, verbose=True)
-    # agent = PlanAndExecute(planner=planner, executor=executor, verbose=True)
-    # response = agent.run(query)
-    print(f"Sucessfully got missing field content: {response}")
-    return response
-
-def create_sample_tools(related_samples, sample_type, llm=ChatOpenAI()):
+def create_sample_tools(related_samples: List[str], sample_type: str, llm=ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> str:
 
     tools = []
     for file in related_samples:
@@ -355,6 +326,51 @@ def create_sample_tools(related_samples, sample_type, llm=ChatOpenAI()):
         tools.extend(tool)
     print(f"Successfully created {sample_type} tools")
     return tools
+
+
+def generate_multifunction_response(query: str, tools: List[Tool], llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> str:
+
+    agent = initialize_agent(
+        tools,
+        llm,
+        agent=AgentType.OPENAI_MULTI_FUNCTIONS, 
+        max_iterations=2,
+        early_stopping_method="generate",
+        verbose=True
+    )
+    response = agent({"input": query}).get("output", "")   
+    print(f"Successfully got info: {response}")
+    return response
+
+# def get_missing_field_items(tools, query, llm=ChatOpenAI(temperature=0)):
+#           # sample_field_content = ""
+#       # for sample in related_samples:
+#       #   sample_field_content += f"sample {field}: " + delimiter1 + get_field_content(sample, field) + delimiter1 + "\n"
+
+   
+
+#     # agent = initialize_agent(
+#     #     tools,
+#     #     llm,
+#     #     agent=AgentType.OPENAI_MULTI_FUNCTIONS,
+#     #     max_iterations=2,
+#     #     early_stopping_method="generate",
+#     #     verbose=True
+#     # )
+
+#     # response = agent({"input": query}).get("output", "")   
+
+#     # Option 2: better at providing details but tend to be very slow and error prone and too many tokens
+
+#     # planner = load_chat_planner(llm)
+#     # executor = load_agent_executor(llm, tools, verbose=True)
+#     # agent = PlanAndExecute(planner=planner, executor=executor, verbose=True)
+#     # response = agent.run(query)
+#     # print(f"Sucessfully got missing field content: {response}")
+#     # return response
+#     return None
+
+
 
     
 
