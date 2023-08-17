@@ -168,11 +168,11 @@ class Chat(ChatController):
                     #     st.text('or')
                     
                     # with col3:
-                    #     posting = st.text_input(
-                    #         "job posting link",
-                    #         "",
-                    #         key = "posting"
-                    #     )
+                    posting = st.text_input(
+                        "job posting link",
+                        "",
+                        key = "posting"
+                    )
 
                     uploaded_file = st.file_uploader(label="Upload your file", type=["pdf","odt", "docx","txt"])
                     # if uploaded_file is not None:
@@ -188,23 +188,25 @@ class Chat(ChatController):
                         # if "company" not in st.session_state:
                         #     st.session_state['company'] = company
                     if submit_button:
-
-                        # p = Process(target=self.process_file, args=(uploaded_file, st.session_state.userid))
-                        # p.start()
-                        # p.join()
-                        self.process_file(uploaded_file, st.session_state.userid)
-
+                        if uploaded_file:
+                            file_q = Queue()
+                            file_p = Process(target=self.process_file, args=(uploaded_file, st.session_state.userid, file_q, ))
+                            file_p.start()
+                            file_p.join()
+                            resume_read_path = file_q.get()
+                            if resume_read_path!="":
+                                resume_entity = f"""resume file: {resume_read_path}"""
+                                self.new_chat.update_entities(resume_entity)
                         
-                        # if posting:
-                        #     save_path = os.path.join(posting_path, st.session_state.userid+".txt")
-                        #     if (retrieve_web_content(posting, save_path = save_path)):
-                        #         if (evaluate_content(save_path, "job posting")):
-                        #             st.write("link accepted")
-                        #         else:
-                        #             st.write("sorry, please check the content of the link and try again. ")
-                        #     else:
-                        #         st.write("sorry, the system could not process the link. ")
-
+                        if posting:
+                            link_q = Queue()
+                            link_p = Process(target = self.process_link, args=(posting, st.session_state.userid, link_q, ))
+                            link_p.start()
+                            link_p.join()
+                            posting_read_path = link_q.get()
+                            if posting_read_path != "":
+                                posting_entity = f"""job post link: {posting_read_path}"""
+                                self.new_chat.update_entities(posting_entity)
 
                 add_vertical_space(3)
 
@@ -252,7 +254,7 @@ class Chat(ChatController):
                     message(st.session_state['responses'][i], key=str(i), avatar_style="initials", seed="AI")
 
 
-    def process_file(self, uploaded_file, userid ):
+    def process_file(self, uploaded_file, userid, queue):
         file_ext = Path(uploaded_file.name).suffix
         filename = userid+file_ext
         resume_save_path = os.path.join(upload_path, filename)
@@ -261,21 +263,23 @@ class Chat(ChatController):
         read_path =  os.path.join(upload_path, Path(filename).stem+'.txt')
         # Convert file to txt and save it to uploads
         convert_to_txt(resume_save_path, read_path)
-
         if (check_content_safety(file=read_path)):
             # TODO: evaludate content currently not recognizing any resume
             # if (evaluate_content(read_path, "resume")):
-            st.write("file uploaded")
-            # create faiss store and add it to agent tools
-            # name = "faiss_resume"
-            # description = """This is user's own resume. Use it as a reference and context when answering questions about user's own resume."""
-            # create_vectorstore(self.new_chat.embeddings, "faiss", read_path, "file",  f"{name}_{userid}")
-            # self.new_chat.add_tools(userid, name, description)
-            # add resume file path to prompt (to hopefully trigger preprocessing pick it up)
-            new_text = f"""resume file: {read_path}"""
-            self.new_chat.update_entities(st.session_state.userid, new_text)
+            queue.put(read_path)
         else:
-            st.write("sorry, that didn't work, please try again.")
+            queue.put("")
+
+    def process_link(self, posting, userid, queue):
+        save_path = os.path.join(posting_path, userid+".txt")
+        if (retrieve_web_content(posting, save_path = save_path)):
+            if (evaluate_content(save_path, "job posting")):
+                queue.put(save_path)
+            else:
+                queue.put("")
+        else:
+            queue.put("")
+
 
 
 

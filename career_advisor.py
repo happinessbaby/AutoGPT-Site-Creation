@@ -71,7 +71,8 @@ _ = load_dotenv(find_dotenv()) # read local .env file
 
 # debugging log: very useful
 langchain.debug=True
-evaluate_result = True
+# This process slows down chat by a lot, unless necessary, set to false
+evaluate_result = False
 
 
 delimiter = "####"
@@ -130,11 +131,13 @@ class ChatController():
 
         self.tools = general_tool + cover_letter_tool + resume_advice_tool + web_tool + file_loader_tool
 
-        # initialize callback handler and evaluator
+        # initialize file callback logging
+        logfile = log_path + f"{self.userid}.log"
+        self.handler = FileCallbackHandler(logfile)
+        logger.add(logfile,  enqueue=True)
+
+        # initialize evaluator
         if (evaluate_result):
-            logfile = log_path + f"{self.userid}.log"
-            self.handler = FileCallbackHandler(logfile)
-            logger.add(logfile,  enqueue=True)
             self.evaluator = load_evaluator("trajectory", agent_tools=self.tools)
 
 
@@ -366,25 +369,23 @@ class ChatController():
         try:            
             # BELOW IS USED WITH CHAT_CONVERSATIONAL_REACT_DESCRIPTION 
             response = self.chat_agent({"input": user_input, "chat_history":[], "entities": self.entities , "questions": self.questions, "instructions":self.instructions}, callbacks = [callbacks])
-            # update instruction from feedback 
-            self.update_chat_history()
-            p = Process(target = self.askMetaAgent, args=())
-            p.start()
 
+            self.update_chat_history()
+            instructagent_q = Queue()
+            instructagent_p = Process(target = self.askInstructAgent, args=(instructagent_q, ))
+            instructagent_p.start()
             if (evaluate_result):
-                try:
-                    evaluation_result = self.evaluator.evaluate_agent_trajectory(
-                        prediction=response["output"],
-                        input=response["input"],
-                        agent_trajectory=response["intermediate_steps"],
-                        )
-                except Exception as e:
-                    evaluation_result = ""
-                # print(evaluation_result)
+                evalagent_q = Queue()
+                evalagent_p = Process(target = self.askEvalAgent, args=(response, evalagent_q, ))
+                evalagent_p.start()
+                evalagent_p.join()
+                evaluation_result = evalagent_q.get()
                 # add evaluation and instruction to log
                 self.update_meta_data(evaluation_result)
-
-            p.join()         
+            instructagent_p.join() 
+            feedback = instructagent_q.get()
+             # update instruction from feedback 
+            self.update_instructions(feedback)        
             # convert dict to string for chat output
             response = response.get("output", "sorry, something happened, try again.")
         # let meta agent handle all exceptions with feedback loop
@@ -393,10 +394,14 @@ class ChatController():
             error_msg = str(e)
             query = f""""Debug the error message and provide instruction for Assistent for the next step: {error_msg}
                 """
-            p = Process(target = self.askMetaAgent, args=(query))
-            p.start()
-            self.update_meta_data(error_msg)
-            p.join()
+            instructagent_q = Queue()
+            instructagent_p = Process(target = self.askInstructAgent, args=(instructagent_q, query, ))
+            instructagent_p.start()
+            if evaluate_result:
+                self.update_meta_data(error_msg)
+            instructagent_p.join()
+            feedback = instructagent_q.get()
+            self.update_instructions(feedback)
             self.askAI(userid, user_input, callbacks)        
 
 
@@ -408,7 +413,8 @@ class ChatController():
         return response
     
 
-    def askMetaAgent(self, query = "") -> None:    
+    def askInstructAgent(self, queue, query = "") -> None:    
+
         try: 
             feedback = self.meta_agent({"input":query, "chat_history":self.chat_history}).get("output", "")
         except Exception as e:
@@ -417,7 +423,20 @@ class ChatController():
                 feedback = feedback.removeprefix("Could not parse LLM output: `").removesuffix("`")
             else:
                 raise(e)
-        self.update_instructions(feedback)
+        queue.put(feedback)
+    
+    def askEvalAgent(self, response, queue) -> None:
+        try:
+            evaluation_result = self.evaluator.evaluate_agent_trajectory(
+                prediction=response["output"],
+                input=response["input"],
+                agent_trajectory=response["intermediate_steps"],
+                )
+        except Exception as e:
+            evaluation_result = ""
+        queue.put(evaluation_result)
+
+
 
     def update_chat_history(self) -> None:
         # memory_key = chain_memory.memory_key
@@ -427,7 +446,7 @@ class ChatController():
 
 
     
-    def add_tools(self, userid: str, tool_name: str, tool_description:str) -> None:      
+    def update_tools(self, userid: str, tool_name: str, tool_description:str) -> None:      
         try:
             faiss_store = retrieve_faiss_vectorstore(self.embeddings, f"{tool_name}_{userid}")
             faiss_retriever = faiss_store.as_retriever()
@@ -437,7 +456,7 @@ class ChatController():
         except Exception as e:
             raise e
         
-    def update_entities(self, userid:str, text:str) -> None:
+    def update_entities(self,  text:str) -> None:
         self.entities += f"\n{text}\n"
         print(f"Successfully added entities {self.entities}.")
 
@@ -452,9 +471,9 @@ class ChatController():
         print(f"Successfully updated instruction to: {new_instructions}")
 
     def update_meta_data(self, data: str) -> None:
-         with open(log_path+f"{self.userid}.log", "a") as f:
-             f.write(str(data))
-             print(f"Successfully updated meta data: {data}")
+        with open(log_path+f"{self.userid}.log", "a") as f:
+            f.write(str(data))
+            print(f"Successfully updated meta data: {data}")
 
 
     def create_cover_letter_generator_tool(self) -> List[Tool]:
@@ -508,15 +527,15 @@ class ChatController():
         tools = [
             Tool(
             name = name,
-            func = self.load_file,
+            func = self.loader_file,
             description = description,
             verbose = False,
             )
         ]
-        print("Successfully created resume tool")
+        print("Successfully created file loader tool")
         return tools
     
-    def load_file(self, json_request) -> str:
+    def loader_file(self, json_request) -> str:
 
         print(json_request)
         try:
@@ -531,17 +550,6 @@ class ChatController():
             raise(e)
 
 
-
-    
-    # def add_cover_letter_doc_tool(self, userid: str, res_path: str) -> None:   
-      
-    #     name = "faiss_cover_letter"
-    #     description = """This is user's cover letter. 
-    #     Use it as a reference and context when user asks for any questions concerning the preexisting cover letter. """
-    #     create_vectorstore(self.embeddings, "faiss", res_path, "file",  f"{name}_{userid}")
-    #     # if testing without ui, the below will not run
-    #     print(f"Succesfully created tool: {name}")
-    #     self.add_tools(userid, name, description)
     
 
     def preprocessing_cover_letter(self, json_request: str) -> str:
@@ -571,6 +579,7 @@ class ChatController():
             posting_path = args["job post link"]
 
         res_path = generate_basic_cover_letter(my_job_title=job, company=company, read_path=read_path, posting_path=posting_path)
+        self.update_entities(f"""cover letter file: {res_path}""")
         self.postprocessing(res_path)
         return read_txt(res_path)
     
@@ -600,9 +609,10 @@ class ChatController():
             posting_path = ""
         else:
             posting_path = args["job post link"]
-        res = evaluate_resume(my_job_title=job, company=company, read_path=read_path, posting_path=posting_path)
-        self.postprocessing(res)
-        return read_txt(res)
+        res_path = evaluate_resume(my_job_title=job, company=company, read_path=read_path, posting_path=posting_path)
+        self.update_entities(f"""resume advices file: {res_path}""")
+        self.postprocessing(res_path)
+        return read_txt(res_path)
 
     def postprocessing(self, res_path: str) -> None:
         # create tool that contains the cover letter
