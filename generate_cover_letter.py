@@ -1,6 +1,6 @@
 # Import the necessary modules
 import os
-from openai_api import get_completion, evaluate_content, check_content_safety
+from openai_api import get_completion
 from langchain.chat_models import ChatOpenAI
 from langchain.llms import OpenAI
 from langchain import PromptTemplate
@@ -19,14 +19,16 @@ from multiprocessing import Process, Queue, Value
 from langchain.agents.agent_toolkits import create_python_agent
 from langchain.tools.python.tool import PythonREPLTool
 from typing import List
+import uuid
 
 
 
 
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
-
-# TBD: caching and serialization of llm
+cover_letter_path = os.environ["COVER_LETTER_PATH"]
+cover_letter_samples_path = os.environ["COVER_LETTER_SAMPLES_PATH"]
+# TODO: caching and serialization of llm
 llm = ChatOpenAI(temperature=0.0, cache=False)
 # llm = OpenAI(temperature=0, top_p=0.2, presence_penalty=0.4, frequency_penalty=0.2)
 embeddings = OpenAIEmbeddings()
@@ -37,21 +39,15 @@ delimiter3 = '---'
 delimiter4 = '////'
 delimiter5 = '~~~~'
 
-# test run defaults, change for yours
-my_job_title = 'data analyst'
-my_resume_file = 'resume_samples/resume2023v2.txt'
-posting_path = "./uploads/posting/accountant.txt"
-cover_letter_samples_path = "./sample_cover_letters/"
-
 
       
-def generate_basic_cover_letter(my_job_title="", company="", read_path=my_resume_file,  posting_path="") -> str:
+def generate_basic_cover_letter(my_job_title="", company="", resume_file="",  posting_path="") -> str:
     
-    userid = Path(read_path).stem
-    res_path = os.path.join("./static/cover_letter/", userid + ".txt")
+    filename = Path(resume_file).stem
+    res_path = os.path.join(cover_letter_path, filename+".txt")
 
     # Get resume
-    resume_content = read_txt(read_path)
+    resume_content = read_txt(resume_file)
     # Get personal information from resume
     personal_info_dict = extract_personal_information(resume_content)
     
@@ -220,7 +216,7 @@ def preprocessing(json_request: str) -> str:
       return "Can you provide your resume so I can further assist you? "
     else:
       # may need to clean up the path first
-        read_path = args["resume file"]
+        resume_file = args["resume file"]
     if ("job" not in args or args["job"] == "" or args["job"]=="<job>"):
         job = ""
     else:
@@ -235,7 +231,7 @@ def preprocessing(json_request: str) -> str:
         posting_path = args["job post link"]
 
 
-    res_path = generate_basic_cover_letter(my_job_title=job, company=company, read_path=read_path, posting_path=posting_path)
+    res_path = generate_basic_cover_letter(my_job_title=job, company=company, resume_file=resume_file, posting_path=posting_path)
     postprocessing(res_path)
     return read_txt(res_path)
 
@@ -273,8 +269,8 @@ def create_cover_letter_generator_tool() -> List[Tool]:
     return tools
 
     
-
-def test_coverletter_tool() -> str:
+# END TO END testing w/o UI
+def test_coverletter_tool(resume_file="", job="", company="", posting_link="") -> str:
 
     tools = create_cover_letter_generator_tool()
     agent= initialize_agent(
@@ -285,18 +281,20 @@ def test_coverletter_tool() -> str:
         verbose = True,
         )
     response = agent.run(f"""generate a cover letter with following information:
-                              job:  \n
-                              company:  \n
-                              resume file: {my_resume_file} \n
-                              job post links: \n                          
+                              job: {job} \n
+                              company: {company} \n
+                              resume file: {resume_file} \n
+                              job post links: {posting_link} \n                          
                               """)
     return response
   
     
  
 if __name__ == '__main__':
-    # Call the function to generate the cover letter
-    # generate_basic_cover_letter()
-    test_coverletter_tool()
+    # test run defaults, change for yours (only resume_file cannot be left empty)
+    my_job_title = 'data analyst'
+    my_resume_file = 'resume_samples/resume2023v2.txt'
+    # generate_basic_cover_letter(resume_file = my_resume_file)
+    test_coverletter_tool(resume_file=my_resume_file)
 
 

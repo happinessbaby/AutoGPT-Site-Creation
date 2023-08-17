@@ -50,6 +50,7 @@ delimiter = "####"
 delimiter2 = "'''"
 delimiter3 = '---'
 delimiter4 = '////'
+categories = ["resume", "cover letter", "job posting", "resume evaluation"]
 
 def extract_personal_information(resume: str,  llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> Any:
 
@@ -375,6 +376,32 @@ def generate_multifunction_response(query: str, tools: List[Tool], llm = ChatOpe
     response = agent({"input": query}).get("output", "")   
     print(f"Successfully got multifunction response: {response}")
     return response
+
+
+def categorize_content(content):
+
+    system_message = f"""
+        You are an assistant that categorizes content of text based on a list of categories. 
+            
+        There may be other irrelevant content in the text. Ignore them and ignore all formatting. 
+            
+        The provided categories are : {str(categories)}
+
+        Respond with the category name, if the content contains text that belongs to a provided category, with no punctuation:
+
+        Output the category name only. If the content does not belong to any of the provided categories, output -1.
+
+        """
+
+    messages = [
+    {'role': 'system', 'content': system_message},
+    {'role': 'user', 'content': content}
+    ]	
+
+    response = get_completion_from_messages(messages, max_tokens=10)
+
+    return response
+	
 
 
 

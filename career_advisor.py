@@ -67,18 +67,13 @@ from common_utils import expand_qa
 
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
-
-
-# debugging log: very useful
+log_path = os.environ["LOG_PATH"]
+# debugging langchain: very useful
 langchain.debug=True
 # This process slows down chat by a lot, unless necessary, set to false
 evaluate_result = False
-
-
 delimiter = "####"
-advice_path = "./static/advice/"
-resume_path = "./uploads/"
-log_path = "./log/"
+
 
 
 
@@ -337,11 +332,14 @@ class ChatController():
 
         You should revise the Instructions so that Assistant would quickly and correctly respond in the future. Assistant's goal is to satisfy the user in as few interactions as possible. Assistant will only see the new Instructions, not the interaction history, so anything important must be summarized in the Instructions. Don't forget any important details in the current Instructions! Indicate the new Instructions by "Instructions: ...".
         """
+        
         self.meta_agent = initialize_agent(
                 tools,
                 self.llm, 
                 agent = AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-                 agent_kwargs={
+                max_execution_time=1,
+                early_stopping_method="generate",
+                agent_kwargs={
                     'prefix':meta_template,
                     # 'format_instructions':FORMAT_INSTRUCTIONS,
                     # 'suffix':SUFFIX
@@ -352,7 +350,7 @@ class ChatController():
 
 
     def _initialize_log(self):
-        for path in  Path("./log/").glob('**/*.log'):
+        for path in  Path(log_path).glob('**/*.log'):
             file = str(path)
             file_name = path.stem
             if file_name != self.userid: 
@@ -564,7 +562,7 @@ class ChatController():
             return "Can you provide your resume so I can further assist you? "
         else:
             # may need to clean up the path first
-            read_path = args["resume file"]
+            resume_file = args["resume file"]
         if ("job" not in args or args["job"] == "" or args["job"]=="<job>"):
             job = ""
         else:
@@ -578,9 +576,10 @@ class ChatController():
         else:
             posting_path = args["job post link"]
 
-        res_path = generate_basic_cover_letter(my_job_title=job, company=company, read_path=read_path, posting_path=posting_path)
+        res_path = generate_basic_cover_letter(my_job_title=job, company=company, resume_file=resume_file, posting_path=posting_path)
         self.update_entities(f"""cover letter file: {res_path}""")
-        self.postprocessing(res_path)
+        #TODO: improve postproecessing
+        # self.postprocessing(res_path)
         return read_txt(res_path)
     
     def preprocessing_resume(self, json_request: str) -> str:
@@ -596,7 +595,7 @@ class ChatController():
             return "Can you provide your resume so I can further assist you? "
         else:
             # may need to clean up the path first
-            read_path = args["resume file"]
+            resume_file = args["resume file"]
         if ("job" not in args or args["job"] == "" or args["job"]=="<job>"):
             job = ""
         else:
@@ -609,9 +608,10 @@ class ChatController():
             posting_path = ""
         else:
             posting_path = args["job post link"]
-        res_path = evaluate_resume(my_job_title=job, company=company, read_path=read_path, posting_path=posting_path)
-        self.update_entities(f"""resume advices file: {res_path}""")
-        self.postprocessing(res_path)
+        res_path = evaluate_resume(my_job_title=job, company=company, resume_file=resume_file, posting_path=posting_path)
+        self.update_entities(f"""resume evaluation file: {res_path}""")
+        #TODO: improve postproecessing
+        # self.postprocessing(res_path)
         return read_txt(res_path)
 
     def postprocessing(self, res_path: str) -> None:

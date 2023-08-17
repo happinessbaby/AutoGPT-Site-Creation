@@ -1,5 +1,4 @@
 import os
-from openai_api import check_content_safety
 from langchain.chat_models import ChatOpenAI
 from langchain.llms import OpenAI
 from langchain.embeddings import OpenAIEmbeddings
@@ -20,37 +19,35 @@ from langchain.agents.agent_toolkits import JsonToolkit
 from langchain.agents.agent_toolkits import create_python_agent
 from langchain.tools.python.tool import PythonREPLTool
 from typing import Dict, List
+import uuid
 
 
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
-
-# TBD: caching and serialization of llm
+resume_evaluation_path = os.environ["RESUME_EVALUATION_PATH"]
+resume_samples_path = os.environ["RESUME_SAMPLES_PATH"]
+# TODO: caching and serialization of llm
 llm = ChatOpenAI(temperature=0.0, cache=False)
 # llm = OpenAI(temperature=0, top_p=0.2, presence_penalty=0.4, frequency_penalty=0.2)
 embeddings = OpenAIEmbeddings()
-# randomize delimiters from a delimiters list to prevent prompt injection
+# TODO: save these delimiters in json file to be loaded from .env
 delimiter = "####"
 delimiter1 = "````"
 delimiter2 = "////"
 delimiter3 = "<<<<"
 delimiter4 = "****"
 
-my_job_title = 'accountant'
-my_resume_file = 'resume_samples/sample1.txt'
-resume_samples_path = './resume_samples/'
-posting_path = "./uploads/posting/accountant.txt"
 
 
     
-def evaluate_resume(my_job_title="", company="", read_path = my_resume_file, posting_path="") -> str:
+def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path="") -> str:
     
-    userid = Path(read_path).stem
-    res_path = os.path.join("./static/advice/", Path(read_path).stem + ".txt")
+    filename = Path(resume_file).stem
+    res_path = os.path.join(resume_evaluation_path, filename+".txt")
     generated_responses = {}
 
     # get resume
-    resume = read_txt(read_path)
+    resume = read_txt(resume_file)
 
     # get resume field names
     resume_fields = extract_fields(resume)
@@ -91,7 +88,7 @@ def evaluate_resume(my_job_title="", company="", read_path = my_resume_file, pos
     relevancy_tools = [create_n_docs_tool]
 
     # process all fields in parallel
-    processes = [Process(target = rewrite_resume_fields, args = (generated_responses, field, read_path, res_path, relevancy_tools, sample_tools)) for field in resume_fields]
+    processes = [Process(target = rewrite_resume_fields, args = (generated_responses, field, resume_file, res_path, relevancy_tools, sample_tools)) for field in resume_fields]
 
     # start all processes
     for p in processes:
@@ -251,7 +248,7 @@ def preprocessing(json_request: str) -> str:
       return "Can you provide your resume so I can further assist you? "
     else:
       # may need to clean up the path first
-        read_path = args["resume file"]
+        resume_file = args["resume file"]
     if ("job" not in args or args["job"] == "" or args["job"]=="<job>"):
         job = ""
     else:
@@ -264,8 +261,8 @@ def preprocessing(json_request: str) -> str:
         posting_path = ""
     else:
         posting_path = args["job post link"]
-    res = evaluate_resume(my_job_title=job, company=company, read_path=read_path, posting_path=posting_path)
-    postprocessing(res)
+    res = evaluate_resume(my_job_title=job, company=company, resume_file=resume_file, posting_path=posting_path)
+    # postprocessing(res)
     return res
 
 def create_resume_evaluator_tool() -> List[Tool]:
@@ -297,7 +294,7 @@ def create_resume_evaluator_tool() -> List[Tool]:
 #     create_vectorstore(embeddings, "faiss", res_path, "file",  f"{name}_{userid}")
 
 
-def test_resume_tool() -> str:
+def test_resume_tool(resume_file="", job="", company="", posting_link="") -> str:
     
     tools = create_resume_evaluator_tool()
     agent= initialize_agent(
@@ -308,10 +305,10 @@ def test_resume_tool() -> str:
         verbose = True,
         )
     response = agent.run(f"""evaluate a resume with following information:
-                              job:  \n
-                              company:  \n
-                              resume file: {my_resume_file} \n
-                              job post links: \n            
+                              job: {job} \n
+                              company: {company} \n
+                              resume file: {resume_file} \n
+                              job post links: {posting_link}\n            
                               """)
     return response
    
@@ -319,6 +316,8 @@ def test_resume_tool() -> str:
 
 
 if __name__ == '__main__':
-    evaluate_resume()
-    # test_resume_tool()
+    my_job_title = 'accountant'
+    my_resume_file = 'resume_samples/sample1.txt'
+    # evaluate_resume()
+    test_resume_tool(resume_file=my_resume_file, job=my_job_title)
  

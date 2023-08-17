@@ -1,0 +1,15 @@
+Dear Hiring Manager,
+
+I am writing to apply for the Big Data Engineer position at [Company Name]. With a strong background in Big Data Engineering and a keen interest in developing ML products, I am confident in my ability to contribute to your team's success.
+
+I have gained valuable experience as a Big Data Engineer at Walmart, where I successfully coordinated with other engineers to evaluate and improve the low-level design of backend features. I also played a key role in updating old code bases to modern development standards, resulting in improved functionality. These experiences have honed my skills in ETL processes, data ingestion, data storage, and data analytics.
+
+In addition to my practical experience, I have completed a Machine Learning Engineer Program at FourthBrain, where I learned ML feature engineering and data modeling techniques. I have also developed automated pipelines for deployment on AWS, showcasing my ability to handle large volumes of data and optimize it for analysis. My technical skills include proficiency in Python, Scala, Spark, SQL, HDFS, MongoDB, MySQL, and AWS, which are essential for effective Big Data Engineering.
+
+I am impressed by [Company Name]'s commitment to innovation and its use of cutting-edge technologies in the field of Big Data. I am excited about the opportunity to contribute to your team and help drive data-driven decision-making processes. I believe my skills and experiences align well with the requirements of the Big Data Engineer position at [Company Name].
+
+Thank you for considering my application. I have attached my resume for your review. I would welcome the opportunity to discuss how my skills and experiences can contribute to the success of [Company Name]. Please feel free to contact me at your convenience via email at yueqipeng2021@gmail.com or phone at (205) 396-6259.
+
+Sincerely,
+
+Yueqi Peng

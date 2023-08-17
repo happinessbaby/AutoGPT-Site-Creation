@@ -12,9 +12,10 @@ from langchain.callbacks import StreamlitCallbackHandler
 from career_advisor import ChatController
 from callbacks.capturing_callback_handler import playback_callbacks
 from basic_utils import convert_to_txt, read_txt, retrieve_web_content
-from openai_api import check_content_safety, evaluate_content
+from openai_api import check_content_safety
 from dotenv import load_dotenv, find_dotenv
 from langchain_utils import split_doc,merge_faiss_vectorstore, retrieve_faiss_vectorstore, create_vectorstore
+from common_utils import categorize_content
 import asyncio
 import concurrent.futures
 import subprocess
@@ -31,12 +32,13 @@ from langchain.embeddings import OpenAIEmbeddings
 
 _ = load_dotenv(find_dotenv()) # read local .env file
 openai.api_key = os.environ['OPENAI_API_KEY']
-
+upload_file_path = os.environ["UPLOAD_FILE_PATH"]
+upload_link_path = os.environ["UPLOAD_LINK_PATH"]
 placeholder = st.empty()
-upload_path = "./uploads"
-posting_path = "./uploads/posting/"
-cover_letter_path = "./static/cover_letter"
-advice_path = "./static/advice"
+categories = ["resume", "cover letter", "job posting", "resume evaluation"]
+
+
+
 
 class Chat(ChatController):
 
@@ -168,10 +170,10 @@ class Chat(ChatController):
                     #     st.text('or')
                     
                     # with col3:
-                    posting = st.text_input(
-                        "job posting link",
+                    link = st.text_input(
+                        "input your link",
                         "",
-                        key = "posting"
+                        key = "link"
                     )
 
                     uploaded_file = st.file_uploader(label="Upload your file", type=["pdf","odt", "docx","txt"])
@@ -190,23 +192,21 @@ class Chat(ChatController):
                     if submit_button:
                         if uploaded_file:
                             file_q = Queue()
-                            file_p = Process(target=self.process_file, args=(uploaded_file, st.session_state.userid, file_q, ))
+                            file_p = Process(target=self.process_file, args=(uploaded_file, file_q, ))
                             file_p.start()
                             file_p.join()
-                            resume_read_path = file_q.get()
-                            if resume_read_path!="":
-                                resume_entity = f"""resume file: {resume_read_path}"""
-                                self.new_chat.update_entities(resume_entity)
-                        
-                        if posting:
+                            file_entity = file_q.get()
+                            if file_entity !="":
+                                self.new_chat.update_entities(file_entity)
+                            
+                        if link:
                             link_q = Queue()
-                            link_p = Process(target = self.process_link, args=(posting, st.session_state.userid, link_q, ))
+                            link_p = Process(target = self.process_link, args=(link, link_q, ))
                             link_p.start()
                             link_p.join()
-                            posting_read_path = link_q.get()
-                            if posting_read_path != "":
-                                posting_entity = f"""job post link: {posting_read_path}"""
-                                self.new_chat.update_entities(posting_entity)
+                            link_entity = link_q.get()
+                            if link_entity != "":
+                                self.new_chat.update_entities(link_entity)
 
                 add_vertical_space(3)
 
@@ -254,31 +254,52 @@ class Chat(ChatController):
                     message(st.session_state['responses'][i], key=str(i), avatar_style="initials", seed="AI")
 
 
-    def process_file(self, uploaded_file, userid, queue):
+    def process_file(self, uploaded_file, queue):
         file_ext = Path(uploaded_file.name).suffix
-        filename = userid+file_ext
-        resume_save_path = os.path.join(upload_path, filename)
-        with open(resume_save_path, 'wb') as f:
+        tmp_filename = str(uuid.uuid4())+file_ext
+        tmp_save_path = os.path.join(upload_file_path, tmp_filename)
+        with open(tmp_save_path, 'wb') as f:
             f.write(uploaded_file.getvalue())
-        read_path =  os.path.join(upload_path, Path(filename).stem+'.txt')
+        read_path =  os.path.join(upload_file_path, Path(tmp_filename).stem+'.txt')
         # Convert file to txt and save it to uploads
-        convert_to_txt(resume_save_path, read_path)
+        convert_to_txt(tmp_save_path, read_path)
         if (check_content_safety(file=read_path)):
-            # TODO: evaludate content currently not recognizing any resume
-            # if (evaluate_content(read_path, "resume")):
-            queue.put(read_path)
-        else:
-            queue.put("")
-
-    def process_link(self, posting, userid, queue):
-        save_path = os.path.join(posting_path, userid+".txt")
-        if (retrieve_web_content(posting, save_path = save_path)):
-            if (evaluate_content(save_path, "job posting")):
-                queue.put(save_path)
+            content_type = categorize_content(read_txt(read_path))
+            if (content_type in categories):
+                print(f"file content type: {content_type}")
+                    #TODO: for logged in users, user_path will not be session state variable anymore,
+                    #  and all their original uploaded files and links should be saved 
+                if content_type=="resume":
+                    new_entity = f"""resume file: {read_path}"""
+                elif content_type == "cover letter":
+                    new_entity = f"""cover letter file: {read_path}"""
+                elif content_type == "resume evaluation":
+                    new_entity = f"""resume evaluation file: {read_path}"""
+                queue.put(new_entity)
             else:
+                print("file content rejected")
                 queue.put("")
         else:
+            print("file content unsafe")
             queue.put("")
+
+    def process_link(self, posting,  queue):
+        tmp_save_path = os.path.join(upload_link_path, str(uuid.uuid4())+".txt")
+        if (retrieve_web_content(posting, save_path = tmp_save_path)):
+            content_type = categorize_content(read_txt(tmp_save_path))
+            if (content_type in categories):
+                print(f"link content type: {content_type}")
+                if content_type == "job posting":
+                    new_entity = f"""job posting link: {tmp_save_path}"""
+                    queue.put(new_entity)
+            else:
+                print("link content rejected")
+                queue.put("")
+        else:
+            print("link content unsafe")
+            queue.put("")
+    
+
 
 
 
