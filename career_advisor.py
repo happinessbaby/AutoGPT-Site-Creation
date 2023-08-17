@@ -102,9 +102,13 @@ class ChatController():
     
 
         # initialize tools
+
+        # Specific purpose 
         cover_letter_tool = self.create_cover_letter_generator_tool()
 
         resume_advice_tool = self.create_resume_evaluator_tool()
+
+        file_loader_tool = self.create_file_loader_tool()
         
         redis_store = retrieve_redis_vectorstore(self.embeddings, "index_web_advice")
         redis_retriever = redis_store.as_retriever()
@@ -124,7 +128,7 @@ class ChatController():
         web_tool_description="""This is a web research tool. Use it only when you cannot find answers elsewhere. Always add source information."""
         web_tool = create_db_tools(self.llm, web_research_retriever, "faiss_web", web_tool_description)
 
-        self.tools = general_tool + cover_letter_tool + resume_advice_tool + web_tool 
+        self.tools = general_tool + cover_letter_tool + resume_advice_tool + web_tool + file_loader_tool
 
         # initialize callback handler and evaluator
         if (evaluate_result):
@@ -492,6 +496,42 @@ class ChatController():
         ]
         print("Succesfully created resume evaluator tool.")
         return tools
+    
+    def create_file_loader_tool(self) -> List[Tool]:
+
+        name = "file"
+        parameters = '{{"file": "<file>"}}'
+        description = f"""Outputs a file. Use this whenever you need to load a file referred by user. 
+                    Do not use this for evaluation or generation purposes.
+                    Input should be JSON in the following format: {parameters}.
+                    (remember to respond with a markdown code snippet of a json blob with a single action, and NOTHING else)  """
+        tools = [
+            Tool(
+            name = name,
+            func = self.load_file,
+            description = description,
+            verbose = False,
+            )
+        ]
+        print("Successfully created resume tool")
+        return tools
+    
+    def load_file(self, json_request) -> str:
+
+        print(json_request)
+        try:
+            args = json.loads(json_request)
+        except JSONDecodeError:
+            return "Format in JSON and try again." 
+
+        try:
+            file_content = read_txt(args["file"])
+            return file_content
+        except Exception as e:
+            raise(e)
+
+
+
     
     # def add_cover_letter_doc_tool(self, userid: str, res_path: str) -> None:   
       
