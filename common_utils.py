@@ -181,6 +181,38 @@ def get_field_content(resume: str, field: str) -> str:
    print(f"Successfully got field content: {response}")
    return response
 
+##TODO: This is currently highly wild
+def expand_qa(read_path: str) -> str:
+
+    agent_executor = create_python_agent(
+          llm=ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613"),
+          tool=PythonREPLTool(),
+          verbose=True,
+          agent_type=AgentType.OPENAI_FUNCTIONS,
+          agent_executor_kwargs={"handle_parsing_errors": True},
+      )
+    content = read_txt(read_path)
+    missing_stuff=agent_executor.run(f"""
+                                    Find distinct texts in brackets. Do not output anything that's not bracketed:
+                                    {content}""")
+    
+    system_message = f""" You are an assistant that generate questions for missing information in the content.
+
+        The missing things are delimited by {delimiter} characters.
+
+        missing things: {delimiter}{missing_stuff}{delimiter}
+
+        For each missing thing, generate a question to ask the user given the content context. 
+        """
+
+    messages = [
+        {'role': 'system', 'content': system_message},
+        {'role': 'user', 'content': content}
+    ]
+    response = get_completion_from_messages(messages)
+    print(f"Sucessfully expanded questions: {response}")
+    return response
+
 
     
 def search_related_samples(job_title: str, directory: str) -> List[str]:
@@ -207,6 +239,8 @@ def search_related_samples(job_title: str, directory: str) -> List[str]:
         response = get_completion_from_messages(messages, max_tokens=1)
         if (response=="Y"):
             related_files.append(file)
+    if len(related_files)==0:
+        related_files.append(directory + "software_developer.txt")
     return related_files
 
 
@@ -252,7 +286,7 @@ def create_n_docs_tool(query: str) -> str:
     texts_merged = "\n\n".join(texts)
     return texts_merged
 
-def retrieve_from_db(query: str, llm=OpenAI(temperature=0.8)) -> str:
+def retrieve_from_db(query: str, llm=OpenAI(temperature=0.8, cache=False)) -> str:
 
     retriever = create_compression_retriever()
     reordered_docs = reorder_docs(retriever, query)
@@ -336,39 +370,15 @@ def generate_multifunction_response(query: str, tools: List[Tool], llm = ChatOpe
         agent=AgentType.OPENAI_MULTI_FUNCTIONS, 
         max_iterations=2,
         early_stopping_method="generate",
-        verbose=True
+        # verbose=True
     )
     response = agent({"input": query}).get("output", "")   
-    print(f"Successfully got info: {response}")
+    print(f"Successfully got multifunction response: {response}")
     return response
 
-# def get_missing_field_items(tools, query, llm=ChatOpenAI(temperature=0)):
-#           # sample_field_content = ""
-#       # for sample in related_samples:
-#       #   sample_field_content += f"sample {field}: " + delimiter1 + get_field_content(sample, field) + delimiter1 + "\n"
 
-   
 
-#     # agent = initialize_agent(
-#     #     tools,
-#     #     llm,
-#     #     agent=AgentType.OPENAI_MULTI_FUNCTIONS,
-#     #     max_iterations=2,
-#     #     early_stopping_method="generate",
-#     #     verbose=True
-#     # )
 
-#     # response = agent({"input": query}).get("output", "")   
-
-#     # Option 2: better at providing details but tend to be very slow and error prone and too many tokens
-
-#     # planner = load_chat_planner(llm)
-#     # executor = load_agent_executor(llm, tools, verbose=True)
-#     # agent = PlanAndExecute(planner=planner, executor=executor, verbose=True)
-#     # response = agent.run(query)
-#     # print(f"Sucessfully got missing field content: {response}")
-#     # return response
-#     return None
 
 
 
