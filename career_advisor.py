@@ -1,6 +1,7 @@
 
 import os
 from pathlib import Path
+from typing import Any
 from langchain.chat_models import ChatOpenAI
 from langchain.llms import OpenAI
 from langchain.embeddings import OpenAIEmbeddings
@@ -8,7 +9,7 @@ from langchain.embeddings import OpenAIEmbeddings
 from langchain import PromptTemplate, LLMChain
 # from langchain.agents import ConversationalChatAgent, Tool, AgentExecutor
 # from basic_utils import read_txt
-from langchain_utils import (create_QASource_chain, create_qa_tools, create_vectorstore, 
+from langchain_utils import (create_QASource_chain, create_qa_tools, create_vectorstore,
                              retrieve_redis_vectorstore, split_doc, CustomOutputParser, CustomPromptTemplate,
                              create_db_tools, retrieve_faiss_vectorstore, merge_faiss_vectorstore)
 # from langchain.prompts import BaseChatPromptTemplate
@@ -20,7 +21,7 @@ from langchain_utils import (create_QASource_chain, create_qa_tools, create_vect
 # from langchain import LLMChain
 from langchain.memory import ConversationBufferMemory
 from langchain.agents import initialize_agent
-from langchain.agents import AgentType
+from langchain.agents import AgentType, Tool
 from langchain.memory.chat_message_histories.in_memory import ChatMessageHistory
 from langchain.memory import ChatMessageHistory
 from langchain.schema import messages_from_dict, messages_to_dict, AgentAction
@@ -46,8 +47,6 @@ from langchain.callbacks.base import BaseCallbackHandler
 #     VectorStoreInfo,
 # )
 from langchain.vectorstores import FAISS
-from generate_cover_letter import create_cover_letter_generator_tool
-from upgrade_resume import create_resume_evaluator_tool
 # from feast import FeatureStore
 import pickle
 import json
@@ -55,9 +54,15 @@ import langchain
 import faiss
 from loguru import logger
 from langchain.evaluation import load_evaluator
-from basic_utils import convert_to_txt
+from basic_utils import convert_to_txt, read_txt
 from langchain.schema import OutputParserException
 from multiprocessing import Process, Queue, Value
+from generate_cover_letter import generate_basic_cover_letter
+from upgrade_resume import evaluate_resume
+from typing import List
+from json import JSONDecodeError
+from common_utils import expand_qa
+
 
 
 from dotenv import load_dotenv, find_dotenv
@@ -75,8 +80,13 @@ resume_path = "./uploads/"
 log_path = "./log/"
 
 
-class ChatController(object):
 
+        
+
+
+class ChatController():
+
+     
 
     def __init__(self, userid):
         self.userid = userid
@@ -92,9 +102,9 @@ class ChatController(object):
     
 
         # initialize tools
-        cover_letter_tool = create_cover_letter_generator_tool()
+        cover_letter_tool = self.create_cover_letter_generator_tool()
 
-        resume_advice_tool = create_resume_evaluator_tool()
+        resume_advice_tool = self.create_resume_evaluator_tool()
         
         redis_store = retrieve_redis_vectorstore(self.embeddings, "index_web_advice")
         redis_retriever = redis_store.as_retriever()
@@ -127,6 +137,9 @@ class ChatController(object):
         # initialize dynamic args for tools
         self.entities = ""
 
+        # initialize questions to ask user
+        self.questions = ""
+
         # initialize feedbacks
         self.instructions = ""
 
@@ -135,10 +148,13 @@ class ChatController(object):
           
         If the AI does not know the answer to a question, it truthfully says it does not know. 
 
-
         You are provided with information about entities the Human mentions, if relevant.
 
         Relevant entity information: {entities}
+
+        You are also provided with specific questions that would help the Human. If relevant, ask them.
+
+        Relevant questions for Human: {questions}
 
         Instructions: {instructions}
 
@@ -176,7 +192,7 @@ class ChatController(object):
                                             handle_parsing_errors=True,
                                             callbacks = [self.handler])
         # modify default agent prompt
-        prompt = self.chat_agent.agent.create_prompt(system_message=template, input_variables=['chat_history', 'input', 'entities', 'agent_scratchpad', 'instructions'], tools=self.tools)
+        prompt = self.chat_agent.agent.create_prompt(system_message=template, input_variables=['chat_history', 'input', 'entities', 'agent_scratchpad', 'instructions', 'questions'], tools=self.tools)
         self.chat_agent.agent.llm_chain.prompt = prompt
 
 
@@ -294,6 +310,7 @@ class ChatController(object):
     def _initialize_meta_agent(self):
 
         db = create_vectorstore(self.embeddings, "faiss", "./log/", "dir", "chat_debug")
+        # TODO: need to test the effective of this debugging tool
         description = """This is used for debugging chat errors when you encounter one. 
         This stores all the chat history in the past. """
         tools = create_db_tools(self.llm, db.as_retriever(), "chat_debug", description)
@@ -331,7 +348,7 @@ class ChatController(object):
         for path in  Path("./log/").glob('**/*.log'):
             file = str(path)
             file_name = path.stem
-            if file_name is not self.userid: 
+            if file_name != self.userid: 
                 # convert all non-empty log from previous sessions to txt and delete the log
                 if os.stat(file).st_size != 0:  
                     convert_to_txt(file, f"./log/{file_name}.txt")
@@ -339,12 +356,12 @@ class ChatController(object):
 
 
 
-    def askAI(self, userid, question, callbacks=None):
 
-        try:
-            # print("Successfully reinitialized agent")            
+    def askAI(self, userid:str, user_input:str, callbacks=None) -> str:
+
+        try:            
             # BELOW IS USED WITH CHAT_CONVERSATIONAL_REACT_DESCRIPTION 
-            response = self.chat_agent({"input": question, "chat_history":[], "entities": self.entities, "instructions":self.instructions}, callbacks = [callbacks])
+            response = self.chat_agent({"input": user_input, "chat_history":[], "entities": self.entities , "questions": self.questions, "instructions":self.instructions}, callbacks = [callbacks])
             # update instruction from feedback 
             self.update_chat_history()
             p = Process(target = self.askMetaAgent, args=())
@@ -376,7 +393,7 @@ class ChatController(object):
             p.start()
             self.update_meta_data(error_msg)
             p.join()
-            self.askAI(userid, question, callbacks)        
+            self.askAI(userid, user_input, callbacks)        
 
 
         # pickle memory (sanity check)
@@ -387,7 +404,7 @@ class ChatController(object):
         return response
     
 
-    def askMetaAgent(self, query = ""):    
+    def askMetaAgent(self, query = "") -> None:    
         try: 
             feedback = self.meta_agent({"input":query, "chat_history":self.chat_history}).get("output", "")
         except Exception as e:
@@ -398,39 +415,168 @@ class ChatController(object):
                 raise(e)
         self.update_instructions(feedback)
 
-    def update_chat_history(self):
+    def update_chat_history(self) -> None:
         # memory_key = chain_memory.memory_key
         # chat_history = chain_memory.load_memory_variables(memory_key)[memory_key]
         extracted_messages = self.memory.chat_memory.messages
         self.chat_history = messages_to_dict(extracted_messages)
-        # print(chat_history)
 
 
     
-    def add_tools(self, userid, tool_name, tool_description):      
+    def add_tools(self, userid: str, tool_name: str, tool_description:str) -> None:      
         try:
             faiss_store = retrieve_faiss_vectorstore(self.embeddings, f"{tool_name}_{userid}")
             faiss_retriever = faiss_store.as_retriever()
             specific_tool = create_db_tools(self.llm, faiss_retriever, tool_name, tool_description)
             self.tools += specific_tool
-            print(f"Successfully added tool {specific_tool}")
+            print(f"Successfully added tool {tool_name}")
         except Exception as e:
             raise e
         
-    def update_entities(self, userid, text):
+    def update_entities(self, userid:str, text:str) -> None:
         self.entities += f"\n{text}\n"
-        print(f"Successfully added {self.entities}.")
+        print(f"Successfully added entities {self.entities}.")
 
+    def update_questions(self, questions:str) -> None:
+        self.questions+=questions
+        print(f"Successfull added questions {self.questions}")
 
-    def update_instructions(self, meta_output):
+    def update_instructions(self, meta_output:str) -> None:
         delimiter = "Instructions: "
         new_instructions = meta_output[meta_output.find(delimiter) + len(delimiter) :]
         self.instructions = new_instructions
         print(f"Successfully updated instruction to: {new_instructions}")
 
-    def update_meta_data(self, data):
+    def update_meta_data(self, data: str) -> None:
          with open(log_path+f"{self.userid}.log", "a") as f:
              f.write(str(data))
+             print(f"Successfully updated meta data: {data}")
+
+
+    def create_cover_letter_generator_tool(self) -> List[Tool]:
+      
+      name = "cover_letter_generator"
+      parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link": "<job post link>"}}'
+      description = f"""Helps to generate a cover letter. Use this tool more than any other tool when user asks to write a cover letter. 
+      Do not use this tool if "faiss_cover_letter" tool exists. 
+      Input should be JSON in the following format: {parameters} \n
+      (remember to respond with a markdown code snippet of a json blob with a single action, and NOTHING else) 
+      """
+      tools = [
+          Tool(
+          name = name,
+          func = self.preprocessing_cover_letter,
+          description = description, 
+          verbose = False,
+          )
+      ]
+      print("Sucessfully created cover letter generator tool. ")
+      return tools
+    
+    def create_resume_evaluator_tool(self) -> List[Tool]:
+    
+        name = "resume_evaluator"
+        parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link": "<job post link>"}}'
+        description = f"""Helps to evaluate a resume. Use this tool more than any other tool when user asks to evaluate, review, help with a resume. 
+        Do not use this tool if "faiss_resume_advice" tool exists. Use "faiss_resume_advice" instead. 
+        Input should be JSON in the following format: {parameters} \n
+        (remember to respond with a markdown code snippet of a json blob with a single action, and NOTHING else) 
+        """
+        tools = [
+            Tool(
+            name = name,
+            func = self.preprocessing_resume,
+            description = description, 
+            verbose = False,
+            )
+        ]
+        print("Succesfully created resume evaluator tool.")
+        return tools
+    
+    # def add_cover_letter_doc_tool(self, userid: str, res_path: str) -> None:   
+      
+    #     name = "faiss_cover_letter"
+    #     description = """This is user's cover letter. 
+    #     Use it as a reference and context when user asks for any questions concerning the preexisting cover letter. """
+    #     create_vectorstore(self.embeddings, "faiss", res_path, "file",  f"{name}_{userid}")
+    #     # if testing without ui, the below will not run
+    #     print(f"Succesfully created tool: {name}")
+    #     self.add_tools(userid, name, description)
+    
+
+    def preprocessing_cover_letter(self, json_request: str) -> str:
+
+        print(json_request)
+        try:
+            args = json.loads(json_request)
+        except JSONDecodeError:
+            return "Format in JSON and try again." 
+        # if resume doesn't exist, ask for resume
+        if ("resume file" not in args or args["resume file"]=="" or args["resume file"]=="<resume file>"):
+            return "Can you provide your resume so I can further assist you? "
+        else:
+            # may need to clean up the path first
+            read_path = args["resume file"]
+        if ("job" not in args or args["job"] == "" or args["job"]=="<job>"):
+            job = ""
+        else:
+            job = args["job"]
+        if ("company" not in args or args["company"] == "" or args["company"]=="<company>"):
+            company = ""
+        else:
+            company = args["company"]
+        if ("job post link" not in args or args["job post link"]=="" or args["job post link"]=="<job post link>"):
+            posting_path = ""
+        else:
+            posting_path = args["job post link"]
+
+        res_path = generate_basic_cover_letter(my_job_title=job, company=company, read_path=read_path, posting_path=posting_path)
+        self.postprocessing(res_path)
+        return read_txt(res_path)
+    
+    def preprocessing_resume(self, json_request: str) -> str:
+    
+        print(json_request)
+        try:
+            args = json.loads(json_request)
+        except JSONDecodeError:
+            return "Format in JSON and try again." 
+        args = json.loads(json_request)
+        # if resume doesn't exist, ask for resume
+        if ("resume file" not in args or args["resume file"]=="" or args["resume file"]=="<resume file>"):
+            return "Can you provide your resume so I can further assist you? "
+        else:
+            # may need to clean up the path first
+            read_path = args["resume file"]
+        if ("job" not in args or args["job"] == "" or args["job"]=="<job>"):
+            job = ""
+        else:
+            job = args["job"]
+        if ("company" not in args or args["company"] == "" or args["company"]=="<company>"):
+            company = ""
+        else:
+            company = args["company"]
+        if ("job post link" not in args or args["job post link"]=="" or args["job post link"]=="<job post link>"):
+            posting_path = ""
+        else:
+            posting_path = args["job post link"]
+        res = evaluate_resume(my_job_title=job, company=company, read_path=read_path, posting_path=posting_path)
+        self.postprocessing(res)
+        return read_txt(res)
+
+    def postprocessing(self, res_path: str) -> None:
+        # create tool that contains the cover letter
+        # self.add_cover_letter_doc_tool(self.userid, res_path)
+        # convert missing stuff to questions
+        questions = expand_qa(res_path)
+        self.update_questions(questions)
+
+
+
+    
+    
+
+
     
 
 

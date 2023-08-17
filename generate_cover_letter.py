@@ -7,7 +7,7 @@ from langchain import PromptTemplate
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
 from basic_utils import read_txt
-from common_utils import (extract_personal_information, get_web_resources,  retrieve_from_db, create_n_docs_tool,
+from common_utils import (extract_personal_information, get_web_resources,  retrieve_from_db, create_n_docs_tool, expand_qa,
                           get_summary, extract_posting_information, create_sample_tools, extract_job_title, search_related_samples, generate_multifunction_response)
 from datetime import date
 from pathlib import Path
@@ -16,8 +16,11 @@ from json import JSONDecodeError
 from langchain.agents import AgentType, Tool, initialize_agent
 from langchain_utils import create_vectorstore
 from multiprocessing import Process, Queue, Value
+from langchain.agents.agent_toolkits import create_python_agent
+from langchain.tools.python.tool import PythonREPLTool
 from typing import List
-from base import base
+
+
 
 
 from dotenv import load_dotenv, find_dotenv
@@ -35,13 +38,13 @@ delimiter4 = '////'
 delimiter5 = '~~~~'
 
 # test run defaults, change for yours
-my_job_title = 'accountant'
-my_resume_file = 'resume_samples/sample1.txt'
-cover_letter_advice_path = "./web_data/cover_letter/"
+my_job_title = 'data analyst'
+my_resume_file = 'resume_samples/resume2023v2.txt'
 posting_path = "./uploads/posting/accountant.txt"
 cover_letter_samples_path = "./sample_cover_letters/"
 
 
+      
 def generate_basic_cover_letter(my_job_title="", company="", read_path=my_resume_file,  posting_path="") -> str:
     
     userid = Path(read_path).stem
@@ -114,20 +117,20 @@ def generate_basic_cover_letter(my_job_title="", company="", read_path=my_resume
     
     # Use an LLM to generate a cover letter that is specific to the resume file that is being read
 
-    # Try using a step wise instruction as seen in: https://learn.deeplearning.ai/chatgpt-building-system/lesson/5/chain-of-thought-reasoning
+    # Step wise instructions: https://learn.deeplearning.ai/chatgpt-building-system/lesson/5/chain-of-thought-reasoning
 
-        # The content you are to use as reference to create the cover letter is delimited with {delimiter} characters.
-
-        # Always use this as a context when writing the cover letter. Do not write out of context and do not make anything up. 
-
-        # content: {delimiter}{content}{delimiter}. \n
     template_string2 = """Generate a cover letter for a person applying for {job} at {company} using the following information. 
   
+        The content you are to use as reference to create the cover letter is delimited with {delimiter} characters.
+
+        Always use this as a context when writing the cover letter. Do not write out of context and do not make anything up. 
+
+        content: {delimiter}{content}{delimiter}. \n
 
       Step 1: You are given two lists of information delimited with characters. One is irrelevant to applying for {job} and the other is relevant. 
 
         Use them as a reference when determining what to include and what not to include in the cover letter. 
-     
+    
         information list: {relevancy}.  \n
 
       Step 2: You're given a list of best cover letter practices. Use them when generating the cover letter. 
@@ -181,52 +184,30 @@ def generate_basic_cover_letter(my_job_title="", company="", read_path=my_resume
                     date = date.today(),
                     company = company,
                     job = my_job_title,
-                    # content=resume_content,
+                    content=resume_content,
                     relevancy=relevancy, 
                     practices = practices, 
                     advices = advices,
                     company_description = company_description, 
+                    delimiter = delimiter,
                     delimiter4 = delimiter4,
     )
 
     my_cover_letter = llm(cover_letter_message).content
-    postprocessing(res_path, my_cover_letter)
-    add_cover_letter_doc_tool(userid, res_path)
-    return read_txt(res_path)
-
-#TODO
-def postprocessing(res_path: str, response: str) -> None:
-    response= response.split(delimiter4)[-1].strip()
-    # cut the text to only cover letter
-      # transform_chain = TransformChain(
-    #     input_variables=["text"], output_variables=["output_text"], transform=transform_func)
-    # stream out the answer
-    # chat = ChatOpenAI(streaming=True, callbacks=[StreamingStdOutCallbackHandler()], temperature=0)
-    # langchain.llm_cache = InMemoryCache()
+    cover_letter = get_completion(f"Extract the cover letter from text: {my_cover_letter}")
+    # write cover letter to file 
     with open(res_path, 'w') as f:
-        try:
-            f.write(response)
-            print("ALL SUCCESS")
-        except Exception as e:
-            print("FAILED")
-
-      
-def expand_qa(cover_letter: str, query: str) -> str: 
-    query = f"""Generate a list of things that are obviously missing in the cover letter delimited with {delimiter} characters.
-    cover letter: {delimiter}{cover_letter}{delimiter}
-    """
-    response = get_completion(query)
-    print(response)
-    return response
-    
+        f.write(cover_letter)
+        print("Sucessfully written cover letter to file")
+    return res_path
 
 
-# tbd: parse the dict json in transform chain before passing into retrievalqaresourcechain
-# def transform_func(inputs: dict) -> dict:
-    
-#     text = inputs["text"]
-#     shortened_text = "\n\n".join(text.split("\n\n")[:3])
-#     return {"output_text": shortened_text}
+def postprocessing(res_path: str) -> None:
+      # convert missing stuff to questions
+      questions = expand_qa(res_path)
+      print(questions)
+
+
 
 def preprocessing(json_request: str) -> str:
     print(json_request)
@@ -253,20 +234,21 @@ def preprocessing(json_request: str) -> str:
     else:
         posting_path = args["job post link"]
 
-    res = generate_basic_cover_letter(my_job_title=job, company=company, read_path=read_path, posting_path=posting_path)
-    return res
+
+    res_path = generate_basic_cover_letter(my_job_title=job, company=company, read_path=read_path, posting_path=posting_path)
+    postprocessing(res_path)
+    return read_txt(res_path)
 
 
-    
-def add_cover_letter_doc_tool(userid: str, res_path: str) -> None:   
-    
-    name = "faiss_cover_letter"
-    description = """This is user's cover letter. 
-    Use it as a reference and context when user asks for any questions concerning the preexisting cover letter"""
-    create_vectorstore(embeddings, "faiss", res_path, "file",  f"{name}_{userid}")
-    # if testing without ui, the below will not run
-    chat = base.get_chat()
-    chat.add_tools(userid, name, description)
+# def add_cover_letter_doc_tool(self, userid: str, res_path: str) -> None:   
+  
+#     name = "faiss_cover_letter"
+#     description = """This is user's cover letter. 
+#     Use it as a reference and context when user asks for any questions concerning the preexisting cover letter. """
+#     create_vectorstore(self.embeddings, "faiss", res_path, "file",  f"{name}_{userid}")
+#     # if testing without ui, the below will not run
+#     print(f"Succesfully created tool: {name}")
+
 
 
     
@@ -275,13 +257,14 @@ def create_cover_letter_generator_tool() -> List[Tool]:
     name = "cover_letter_generator"
     parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link": "<job post link>"}}'
     description = f"""Helps to generate a cover letter. Use this tool more than any other tool when user asks to write a cover letter. 
+    Do not use this tool if "faiss_cover_letter" tool exists. 
     Input should be JSON in the following format: {parameters} \n
     (remember to respond with a markdown code snippet of a json blob with a single action, and NOTHING else) 
     """
     tools = [
         Tool(
         name = name,
-        func = preprocessing,
+        func =preprocessing,
         description = description, 
         verbose = False,
         )
@@ -289,7 +272,7 @@ def create_cover_letter_generator_tool() -> List[Tool]:
     print("Sucessfully created cover letter generator tool. ")
     return tools
 
-  
+    
 
 def test_coverletter_tool() -> str:
 
@@ -310,10 +293,10 @@ def test_coverletter_tool() -> str:
     return response
   
     
-# Call the function to generate the cover letter
  
 if __name__ == '__main__':
-    generate_basic_cover_letter()
-    # test_coverletter_tool()
+    # Call the function to generate the cover letter
+    # generate_basic_cover_letter()
+    test_coverletter_tool()
 
 

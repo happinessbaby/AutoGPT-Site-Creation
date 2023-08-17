@@ -22,8 +22,11 @@ import sys
 from multiprocessing import Process, Queue, Value
 import pickle
 import requests
-# from langchain.embeddings import OpenAIEmbeddings
-from base import base
+from functools import lru_cache
+import multiprocessing as mp
+from langchain.embeddings import OpenAIEmbeddings
+
+
 
 
 _ = load_dotenv(find_dotenv()) # read local .env file
@@ -35,22 +38,12 @@ posting_path = "./uploads/posting/"
 cover_letter_path = "./static/cover_letter"
 advice_path = "./static/advice"
 
+class Chat(ChatController):
 
-
-class Chat():
-
-
-    # new_chat: ChatController(str)
 
 
     def __init__(self):
         self._create_chatbot()
-        # super().__init__()
-        # self.id = "advice"
-        # self.resume = None
-        # self.job = None
-        # self.company = None
-
 
     # def _initialize_page(self):
     #     if 'page' not in st.session_state: st.session_state.page = 0
@@ -63,34 +56,22 @@ class Chat():
 
             if "userid" not in st.session_state:
                 st.session_state["userid"] = str(uuid.uuid4())
-                print(st.session_state.userid)
-                # Chat.new_chat = ChatController(st.session_state.userid)
-                # base.save_chat(self.new_chat)
-                base.save_chat(ChatController(st.session_state.userid))
+                # super().__init__(st.session_state.userid)
+                new_chat = ChatController(st.session_state.userid)
+                if "basechat" not in st.session_state:
+                    st.session_state["basechat"] = new_chat
+
             try:
-                self.new_chat = base.get_chat()
+                self.new_chat = st.session_state.basechat
             except AttributeError as e:
-                base.save_chat(ChatController(st.session_state.userid))
-                self.new_chat = base.get_chat()
-                # self.new_chat = self.get_chat()
+                raise e
 
  
-            #     self.save_chat(new_chat)
-            #     print("Successfully saved new chat instance")
-            #     # new_knowledge = KnowledgeBase(st.session_state.userid)
-            # else:
-            #     new_chat = self.get_chat()
-            #     print("Sucessfully retrieved chat instance")
-
             # Initialize chat history
             # if "messages" not in st.session_state:
             #     st.session_state.messages = []
 
 
-            # Check if 'key' already exists in session_state
-            # If not, then initialize it
-            # if 'key' not in st.session_state:
-            #     st.session_state['key'] = 'value'
 
             # Set a default model
             # if "openai_model" not in st.session_state:
@@ -119,15 +100,6 @@ class Chat():
                 "help  evaluate my my resume": "resume",
                 "help me do a mock interview": "interview"
             }
-
-            # key = "input"
-            # shadow_key = "_input"
-            # key = self.id
-            # shadow_key = f"_{self.id}"
-
-
-            # if key in st.session_state and shadow_key not in st.session_state:
-            #     st.session_state[shadow_key] = st.session_state[key]
 
 
 
@@ -217,9 +189,10 @@ class Chat():
                         #     st.session_state['company'] = company
                     if submit_button:
 
-                        p = Process(target=self.process_file, args=(uploaded_file, st.session_state.userid))
-                        p.start()
-                        p.join()
+                        # p = Process(target=self.process_file, args=(uploaded_file, st.session_state.userid))
+                        # p.start()
+                        # p.join()
+                        self.process_file(uploaded_file, st.session_state.userid)
 
                         
                         # if posting:
@@ -254,7 +227,6 @@ class Chat():
                         st.session_state.questions.append(question)
                         st.session_state.responses.append(response)
                         # session_name = SAMPLE_QUESTIONS[question]
-                        # #TODO: instead of all of this, if a cover letter is already generated, it should be played back
 
 
 
@@ -280,7 +252,6 @@ class Chat():
                     message(st.session_state['responses'][i], key=str(i), avatar_style="initials", seed="AI")
 
 
-
     def process_file(self, uploaded_file, userid ):
         file_ext = Path(uploaded_file.name).suffix
         filename = userid+file_ext
@@ -296,15 +267,16 @@ class Chat():
             # if (evaluate_content(read_path, "resume")):
             st.write("file uploaded")
             # create faiss store and add it to agent tools
-            name = "faiss_resume"
-            description = """This is user's own resume. Use it as a reference and context when answering questions about user's own resume."""
-            create_vectorstore(self.new_chat.embeddings, "faiss", read_path, "file",  f"{name}_{userid}")
-            self.new_chat.add_tools(userid, name, description)
+            # name = "faiss_resume"
+            # description = """This is user's own resume. Use it as a reference and context when answering questions about user's own resume."""
+            # create_vectorstore(self.new_chat.embeddings, "faiss", read_path, "file",  f"{name}_{userid}")
+            # self.new_chat.add_tools(userid, name, description)
             # add resume file path to prompt (to hopefully trigger preprocessing pick it up)
             new_text = f"""resume file: {read_path}"""
-            self.new_chat.update_entities(userid, new_text)
+            self.new_chat.update_entities(st.session_state.userid, new_text)
         else:
             st.write("sorry, that didn't work, please try again.")
+
 
 
 
@@ -340,5 +312,10 @@ class Chat():
 
 if __name__ == '__main__':
     # create_chatbot()
+    # with mp.Manager() as manager:
+    #     chat_agents = manager.dict()
+    #     p = mp.Process(target=initialize_chats, args=(chat_agents,))
+    #     p.start()
+    #     p.join()
     advisor = Chat()
     # asyncio.run(advisor.initialize())
