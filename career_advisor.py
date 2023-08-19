@@ -57,11 +57,14 @@ from langchain.evaluation import load_evaluator
 from basic_utils import convert_to_txt, read_txt
 from langchain.schema import OutputParserException
 from multiprocessing import Process, Queue, Value
-from generate_cover_letter import generate_basic_cover_letter
-from upgrade_resume import evaluate_resume
+from generate_cover_letter import  create_cover_letter_generator_tool
+from upgrade_resume import create_resume_evaluator_tool
+from langchain.agents.agent_toolkits import create_conversational_retrieval_agent
+from langchain.agents.agent_toolkits import create_retriever_tool
 from typing import List
 from json import JSONDecodeError
-from common_utils import expand_qa
+from common_utils import create_file_loader_tool
+import re
 
 
 
@@ -100,11 +103,13 @@ class ChatController():
         # initialize tools
 
         # Specific purpose 
-        cover_letter_tool = self.create_cover_letter_generator_tool()
+        cover_letter_tool = create_cover_letter_generator_tool()
 
-        resume_advice_tool = self.create_resume_evaluator_tool()
+        resume_advice_tool = create_resume_evaluator_tool()
 
-        file_loader_tool = self.create_file_loader_tool()
+        file_loader_tool = create_file_loader_tool()
+
+        study_helper_tool = self.create_study_helper_tool()
         
         redis_store = retrieve_redis_vectorstore(self.embeddings, "index_web_advice")
         redis_retriever = redis_store.as_retriever()
@@ -124,7 +129,7 @@ class ChatController():
         web_tool_description="""This is a web research tool. Use it only when you cannot find answers elsewhere. Always add source information."""
         web_tool = create_db_tools(self.llm, web_research_retriever, "faiss_web", web_tool_description)
 
-        self.tools = general_tool + cover_letter_tool + resume_advice_tool + web_tool + file_loader_tool
+        self.tools = general_tool + cover_letter_tool + resume_advice_tool + web_tool + file_loader_tool + study_helper_tool
 
         # initialize file callback logging
         logfile = log_path + f"{self.userid}.log"
@@ -145,6 +150,9 @@ class ChatController():
         # initialize feedbacks
         self.instructions = ""
 
+        # initialize chat history
+        self.chat_history=[]
+
         template = """The following is a friendly conversation between a human and an AI. 
         The AI is talkative and provides lots of specific details from its context.
           
@@ -152,9 +160,14 @@ class ChatController():
 
         You are provided with information about entities the Human mentions, if relevant.
 
+        #%#$
+
         Relevant entity information: {entities}
 
+        #%#$
+
         You are also provided with specific questions that would help the Human. If relevant, ask them.
+
 
         Relevant questions for Human: {questions}
 
@@ -362,12 +375,44 @@ class ChatController():
 
 
 
+    def initialize_study_companion(self, json_request, level="easy", embeddings=OpenAIEmbeddings(), llm = ChatOpenAI(temperature=0.0, cache=False)):
+        try:
+            args = json.loads(json_request)
+        except JSONDecodeError:
+            return "Format in JSON and try again." 
+        args = json.loads(json_request)
+        read_path = args["study material"]
+
+        name = f"faiss_study_material_{self.userid}"
+        # description = """This is user's study material for interview. 
+        # Use it when creating question and answer pairs."""
+        create_vectorstore(embeddings, "faiss", read_path, "file", name)
+        db = retrieve_faiss_vectorstore(embeddings, name)
+        retriever = db.as_retriever()
+        # tools = create_db_tools(llm, db.as_retriever(), name, description)
+
+        tool_name = "research_study_material"
+        tool_description =  """Generates question and answer pairs regarding the content of the study material.
+        Helps Human study for job interviews. Use this tool more than any other tool when asked to study, review, practice interview material."""
+        study_tools = [create_retriever_tool(
+        retriever,
+            tool_name,
+            tool_description
+            )]
+        print(f"Succesfully created tool: {study_tools}")
+        # add soft skill material to tool
+        self.study_companion = create_conversational_retrieval_agent(llm, study_tools, verbose=True)
+
+
+
+
+
     def askAI(self, userid:str, user_input:str, callbacks=None) -> str:
 
         try:            
             # BELOW IS USED WITH CHAT_CONVERSATIONAL_REACT_DESCRIPTION 
             response = self.chat_agent({"input": user_input, "chat_history":[], "entities": self.entities , "questions": self.questions, "instructions":self.instructions}, callbacks = [callbacks])
-
+            # update chat history for instruct agent
             self.update_chat_history()
             instructagent_q = Queue()
             instructagent_p = Process(target = self.askInstructAgent, args=(instructagent_q, ))
@@ -434,6 +479,19 @@ class ChatController():
             evaluation_result = ""
         queue.put(evaluation_result)
 
+    def askStudyCompanion(self, level):
+
+        query = f"""Generate a question and answer pair with {level} difficulty level. 
+
+                Output in the following format:
+
+                Question: <the questions you generated>
+
+                Answer: <answer to the question you generated>"""
+        response = self.study_companion({"input": query})
+        print(response)
+     
+
 
 
     def update_chat_history(self) -> None:
@@ -455,8 +513,20 @@ class ChatController():
             raise e
         
     def update_entities(self,  text:str) -> None:
+        # if "resume" in text:
+        #     self.delete_entities("resume")
+        # if "cover letter" in text:
+        #     self.delete_entities("cover letter")
+        # if "resume evaluation" in text:
+        #     self.delete_entities("resume evaluation")
         self.entities += f"\n{text}\n"
         print(f"Successfully added entities {self.entities}.")
+
+    def delete_entities(self, type: str) -> None:
+        starting_idices = [m.start() for m in re.finditer(type, self.entities)]
+        for idx in starting_idices:
+            self.entities = self.entities.replace(self.entities[idx: idx+68], "")
+
 
     def update_questions(self, questions:str) -> None:
         self.questions+=questions
@@ -472,154 +542,35 @@ class ChatController():
         with open(log_path+f"{self.userid}.log", "a") as f:
             f.write(str(data))
             print(f"Successfully updated meta data: {data}")
-
-
-    def create_cover_letter_generator_tool(self) -> List[Tool]:
-      
-      name = "cover_letter_generator"
-      parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link": "<job post link>"}}'
-      description = f"""Helps to generate a cover letter. Use this tool more than any other tool when user asks to write a cover letter. 
-      Do not use this tool if "faiss_cover_letter" tool exists. 
-      Input should be JSON in the following format: {parameters} \n
-      (remember to respond with a markdown code snippet of a json blob with a single action, and NOTHING else) 
-      """
-      tools = [
-          Tool(
-          name = name,
-          func = self.preprocessing_cover_letter,
-          description = description, 
-          verbose = False,
-          )
-      ]
-      print("Sucessfully created cover letter generator tool. ")
-      return tools
     
-    def create_resume_evaluator_tool(self) -> List[Tool]:
-    
-        name = "resume_evaluator"
-        parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link": "<job post link>"}}'
-        description = f"""Helps to evaluate a resume. Use this tool more than any other tool when user asks to evaluate, review, help with a resume. 
-        Do not use this tool if "faiss_resume_advice" tool exists. Use "faiss_resume_advice" instead. 
-        Input should be JSON in the following format: {parameters} \n
-        (remember to respond with a markdown code snippet of a json blob with a single action, and NOTHING else) 
-        """
+
+    def create_study_helper_tool(self) -> List[Tool]:
+        
+        name = "study_helper"
+        parameters = '{{"interview material": <interview material>}}'
+        description = f"""Use this to process interview material files. Use only for processing files only.
+            Input should be JSON in the following format: {parameters}
+            Output should be  """
         tools = [
             Tool(
             name = name,
-            func = self.preprocessing_resume,
+            func = self.initialize_study_companion,
             description = description, 
             verbose = False,
             )
         ]
-        print("Succesfully created resume evaluator tool.")
+        print("Succesfully created study helper tool.")
         return tools
+        
     
-    def create_file_loader_tool(self) -> List[Tool]:
 
-        name = "file"
-        parameters = '{{"file": "<file>"}}'
-        description = f"""Outputs a file. Use this whenever you need to load a file referred by user. 
-                    Do not use this for evaluation or generation purposes.
-                    Input should be JSON in the following format: {parameters}.
-                    (remember to respond with a markdown code snippet of a json blob with a single action, and NOTHING else)  """
-        tools = [
-            Tool(
-            name = name,
-            func = self.loader_file,
-            description = description,
-            verbose = False,
-            )
-        ]
-        print("Successfully created file loader tool")
-        return tools
     
-    def loader_file(self, json_request) -> str:
 
-        print(json_request)
-        try:
-            args = json.loads(json_request)
-        except JSONDecodeError:
-            return "Format in JSON and try again." 
-
-        try:
-            file_content = read_txt(args["file"])
-            return file_content
-        except Exception as e:
-            raise(e)
 
 
     
 
-    def preprocessing_cover_letter(self, json_request: str) -> str:
-
-        print(json_request)
-        try:
-            args = json.loads(json_request)
-        except JSONDecodeError:
-            return "Format in JSON and try again." 
-        # if resume doesn't exist, ask for resume
-        if ("resume file" not in args or args["resume file"]=="" or args["resume file"]=="<resume file>"):
-            return "Can you provide your resume so I can further assist you? "
-        else:
-            # may need to clean up the path first
-            resume_file = args["resume file"]
-        if ("job" not in args or args["job"] == "" or args["job"]=="<job>"):
-            job = ""
-        else:
-            job = args["job"]
-        if ("company" not in args or args["company"] == "" or args["company"]=="<company>"):
-            company = ""
-        else:
-            company = args["company"]
-        if ("job post link" not in args or args["job post link"]=="" or args["job post link"]=="<job post link>"):
-            posting_path = ""
-        else:
-            posting_path = args["job post link"]
-
-        res_path = generate_basic_cover_letter(my_job_title=job, company=company, resume_file=resume_file, posting_path=posting_path)
-        self.update_entities(f"""cover letter file: {res_path}""")
-        #TODO: improve postproecessing
-        # self.postprocessing(res_path)
-        return read_txt(res_path)
     
-    def preprocessing_resume(self, json_request: str) -> str:
-    
-        print(json_request)
-        try:
-            args = json.loads(json_request)
-        except JSONDecodeError:
-            return "Format in JSON and try again." 
-        args = json.loads(json_request)
-        # if resume doesn't exist, ask for resume
-        if ("resume file" not in args or args["resume file"]=="" or args["resume file"]=="<resume file>"):
-            return "Can you provide your resume so I can further assist you? "
-        else:
-            # may need to clean up the path first
-            resume_file = args["resume file"]
-        if ("job" not in args or args["job"] == "" or args["job"]=="<job>"):
-            job = ""
-        else:
-            job = args["job"]
-        if ("company" not in args or args["company"] == "" or args["company"]=="<company>"):
-            company = ""
-        else:
-            company = args["company"]
-        if ("job post link" not in args or args["job post link"]=="" or args["job post link"]=="<job post link>"):
-            posting_path = ""
-        else:
-            posting_path = args["job post link"]
-        res_path = evaluate_resume(my_job_title=job, company=company, resume_file=resume_file, posting_path=posting_path)
-        self.update_entities(f"""resume evaluation file: {res_path}""")
-        #TODO: improve postproecessing
-        # self.postprocessing(res_path)
-        return read_txt(res_path)
-
-    def postprocessing(self, res_path: str) -> None:
-        # create tool that contains the cover letter
-        # self.add_cover_letter_doc_tool(self.userid, res_path)
-        # convert missing stuff to questions
-        questions = expand_qa(res_path)
-        self.update_questions(questions)
 
 
 

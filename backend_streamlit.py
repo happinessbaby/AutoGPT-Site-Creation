@@ -14,7 +14,6 @@ from callbacks.capturing_callback_handler import playback_callbacks
 from basic_utils import convert_to_txt, read_txt, retrieve_web_content
 from openai_api import check_content_safety
 from dotenv import load_dotenv, find_dotenv
-from langchain_utils import split_doc,merge_faiss_vectorstore, retrieve_faiss_vectorstore, create_vectorstore
 from common_utils import categorize_content
 import asyncio
 import concurrent.futures
@@ -98,9 +97,10 @@ class Chat(ChatController):
             SAMPLE_QUESTIONS = {
                 # "What are some general advices for writing an outstanding resume?": "general_advices.pickle",
                 # "What are some things I could be doing terribly wrong with my resume?": "bad_resume.pickle",
+                "":"",
                 "help me write a cover letter": "coverletter",
                 "help  evaluate my my resume": "resume",
-                "help me do a mock interview": "interview"
+                "help me prepare for a job interview": "interview"
             }
 
 
@@ -116,6 +116,7 @@ class Chat(ChatController):
             question_container = st.container()
             results_container = st.container()
 
+
             # hack to clear text after user input
             if 'questionInput' not in st.session_state:
                 st.session_state.questionInput = ''
@@ -130,11 +131,13 @@ class Chat(ChatController):
             ## Applying the user input box
             with question_container:
                 user_input = get_text()
+                question_container = st.empty()
+                st.session_state.questionInput=''
 
 
             #Sidebar section
             with st.sidebar:
-                st.title('Career Chat 🧸')
+                st.title('Career Help 🧸')
                 # st.markdown('''
                 # Hi, my name is Tebi, your AI career advisor. I can help you: 
                             
@@ -170,13 +173,14 @@ class Chat(ChatController):
                     #     st.text('or')
                     
                     # with col3:
-                    link = st.text_input(
-                        "input your link",
-                        "",
-                        key = "link"
-                    )
 
-                    uploaded_file = st.file_uploader(label="Upload your file", type=["pdf","odt", "docx","txt"])
+                    uploaded_files = st.file_uploader(label="Upload your file",
+                                                       type=["pdf","odt", "docx","txt", "zip"], 
+                                                       accept_multiple_files=True)
+                    add_vertical_space(3)
+                    link = st.text_input("Upload a link", "", key = "link")
+                    add_vertical_space(3)
+                    prefilled = st.selectbox("General questions", sorted(SAMPLE_QUESTIONS.keys()), format_func=lambda x: '' if x == '' else x)
                     # if uploaded_file is not None:
                     #     # To convert to a string based IO:
                     #     stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))
@@ -190,14 +194,16 @@ class Chat(ChatController):
                         # if "company" not in st.session_state:
                         #     st.session_state['company'] = company
                     if submit_button:
-                        if uploaded_file:
+                        if uploaded_files:
                             file_q = Queue()
-                            file_p = Process(target=self.process_file, args=(uploaded_file, file_q, ))
+                            file_p = Process(target=self.process_file, args=(uploaded_files, file_q, ))
                             file_p.start()
                             file_p.join()
-                            file_entity = file_q.get()
-                            if file_entity !="":
-                                self.new_chat.update_entities(file_entity)
+                            file_entities_list= file_q.get()
+                            print(file_entities_list)
+                            if file_entities_list:
+                                for file_entity in file_entities_list:
+                                    self.new_chat.update_entities(file_entity)
                             
                         if link:
                             link_q = Queue()
@@ -208,26 +214,38 @@ class Chat(ChatController):
                             if link_entity != "":
                                 self.new_chat.update_entities(link_entity)
 
+                        if prefilled:
+                            res = results_container.container()
+                            streamlit_handler = StreamlitCallbackHandler(
+                                parent_container=res,
+                            )
+                            question = prefilled
+                            # answer = chat_agent.run(mrkl_input, callbacks=[streamlit_handler])
+                            response = self.new_chat.askAI(st.session_state.userid, question, callbacks=streamlit_handler)
+                            st.session_state.questions.append(question)
+                            st.session_state.responses.append(response)
+
+
                 add_vertical_space(3)
 
-                with st.form(key="question_selector"):
-                    prefilled = st.selectbox("Quick navigation", sorted(SAMPLE_QUESTIONS.keys())) or ""
-                    # question = st.text_input("Or, ask your own question", key=shadow_key)
-                    # st.session_state[key] = question
-                    # if not question:
-                        # question = prefilled
-                    submit_clicked = st.form_submit_button("Submit Question")
+                # with st.form(key="question_selector"):
+                #     prefilled = st.selectbox("Quick navigation", sorted(SAMPLE_QUESTIONS.keys())) or ""
+                #     # question = st.text_input("Or, ask your own question", key=shadow_key)
+                #     # st.session_state[key] = question
+                #     # if not question:
+                #         # question = prefilled
+                #     submit_clicked = st.form_submit_button("Submit Question")
 
-                    if submit_clicked:
-                        res = results_container.container()
-                        streamlit_handler = StreamlitCallbackHandler(
-                            parent_container=res,
-                        )
-                        question = prefilled
-                        # answer = chat_agent.run(mrkl_input, callbacks=[streamlit_handler])
-                        response = self.new_chat.askAI(st.session_state.userid, question, callbacks=streamlit_handler)
-                        st.session_state.questions.append(question)
-                        st.session_state.responses.append(response)
+                #     if submit_clicked:
+                #         res = results_container.container()
+                #         streamlit_handler = StreamlitCallbackHandler(
+                #             parent_container=res,
+                #         )
+                #         question = prefilled
+                #         # answer = chat_agent.run(mrkl_input, callbacks=[streamlit_handler])
+                #         response = self.new_chat.askAI(st.session_state.userid, question, callbacks=streamlit_handler)
+                #         st.session_state.questions.append(question)
+                #         st.session_state.responses.append(response)
                         # session_name = SAMPLE_QUESTIONS[question]
 
 
@@ -246,42 +264,44 @@ class Chat(ChatController):
                 response = self.new_chat.askAI(st.session_state.userid, question, callbacks = streamlit_handler)
                 st.session_state.questions.append(question)
                 st.session_state.responses.append(response)
-                user_input = ""
             if st.session_state['responses']:
-                # user_input = ""
                 for i in range(len(st.session_state['responses'])):
                     message(st.session_state['questions'][i], is_user=True, key=str(i) + '_user',  avatar_style="initials", seed="Yueqi")
                     message(st.session_state['responses'][i], key=str(i), avatar_style="initials", seed="AI")
 
 
-    def process_file(self, uploaded_file, queue):
-        file_ext = Path(uploaded_file.name).suffix
-        tmp_filename = str(uuid.uuid4())+file_ext
-        tmp_save_path = os.path.join(upload_file_path, tmp_filename)
-        with open(tmp_save_path, 'wb') as f:
-            f.write(uploaded_file.getvalue())
-        read_path =  os.path.join(upload_file_path, Path(tmp_filename).stem+'.txt')
-        # Convert file to txt and save it to uploads
-        convert_to_txt(tmp_save_path, read_path)
-        if (check_content_safety(file=read_path)):
-            content_type = categorize_content(read_txt(read_path))
-            if (content_type in categories):
-                print(f"file content type: {content_type}")
-                    #TODO: for logged in users, user_path will not be session state variable anymore,
-                    #  and all their original uploaded files and links should be saved 
-                if content_type=="resume":
-                    new_entity = f"""resume file: {read_path}"""
-                elif content_type == "cover letter":
-                    new_entity = f"""cover letter file: {read_path}"""
-                elif content_type == "resume evaluation":
-                    new_entity = f"""resume evaluation file: {read_path}"""
-                queue.put(new_entity)
+    def process_file(self, uploaded_files, queue):
+        entity_list = []
+        resume_entity=""
+        cover_letter_entity =""
+        for uploaded_file in uploaded_files:
+            file_ext = Path(uploaded_file.name).suffix
+            tmp_filename = str(uuid.uuid4())+file_ext
+            tmp_save_path = os.path.join(upload_file_path, tmp_filename)
+            with open(tmp_save_path, 'wb') as f:
+                f.write(uploaded_file.getvalue())
+            read_path =  os.path.join(upload_file_path, Path(tmp_filename).stem+'.txt')
+            # Convert file to txt and save it to uploads
+            convert_to_txt(tmp_save_path, read_path)
+            if (check_content_safety(file=read_path)):
+                content_type = categorize_content(read_txt(read_path))
+                if (content_type in categories):
+                    print(f"file content type: {content_type}")
+                    if content_type=="resume":
+                        resume_entity = f"""resume file: {read_path}"""
+                    elif content_type == "cover letter":
+                        cover_letter_entity = f"""cover letter file: {read_path}"""
+                else:
+                    study_material_entity = f"""interview material file: {read_path}"""
+                    entity_list.append(study_material_entity)
             else:
-                print("file content rejected")
-                queue.put("")
-        else:
-            print("file content unsafe")
-            queue.put("")
+                print("file content unsafe")
+        if resume_entity:
+            entity_list.append(resume_entity)
+        if cover_letter_entity:
+            entity_list.append(cover_letter_entity)
+        queue.put(entity_list)
+        
 
     def process_link(self, posting,  queue):
         tmp_save_path = os.path.join(upload_link_path, str(uuid.uuid4())+".txt")

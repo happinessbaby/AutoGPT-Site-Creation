@@ -42,6 +42,7 @@ import re
 import string
 import random
 import json
+from json import JSONDecodeError
 import faiss
 
 
@@ -401,7 +402,45 @@ def categorize_content(content):
     response = get_completion_from_messages(messages, max_tokens=10)
 
     return response
+
+
+
+
+def create_file_loader_tool() -> List[Tool]:
+
+    name = "file_loader"
+    parameters = '{{"file": "<file>"}}'
+    description = f"""Outputs a file. Use this whenever you need to load a file. 
+                Do not use this for evaluation or generation purposes.
+                Input should be JSON in the following format: {parameters}.
+                (remember to respond with a markdown code snippet of a json blob with a single action, and NOTHING else)  """
+    tools = [
+        Tool(
+        name = name,
+        func = loading_file,
+        description = description,
+        verbose = False,
+        )
+    ]
+    print("Successfully created file loader tool")
+    return tools
+    
 	
+def loading_file(json_request) -> str:
+
+    print(json_request)
+    try:
+        args = json.loads(json_request)
+    except JSONDecodeError:
+        return "Format in JSON and try again." 
+
+    try:
+        file_content = read_txt(args["file"])
+        return file_content
+    except Exception as e:
+        raise(e)
+    
+        
 
 
 

@@ -8,8 +8,7 @@ from langchain import PromptTemplate
 from langchain.agents import AgentType, Tool, initialize_agent, create_json_agent
 from basic_utils import read_txt
 from common_utils import (get_web_resources, retrieve_from_db, extract_posting_information, get_summary, generate_multifunction_response, create_n_docs_tool,
-                           extract_fields, get_field_content, extract_job_title, expand_qa, search_related_samples, create_sample_tools)
-from langchain_utils import retrieve_faiss_vectorstore, create_vectorstore, merge_faiss_vectorstore, split_doc, create_compression_retriever
+                           extract_fields, get_field_content, extract_job_title,  search_related_samples, create_sample_tools)
 from pathlib import Path
 import json
 from json import JSONDecodeError
@@ -98,7 +97,7 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
        p.join()
    
     # return result to chat agent
-    return res_path
+    return f"""resume evaluation file": {res_path}"""
 
 
 def rewrite_resume_fields(generated_response: Dict[str, str], field:str, read_path:str, res_path:str, relevancy_tools:List[Tool], sample_tools:List[Tool]) -> None:
@@ -219,23 +218,13 @@ def rewrite_resume_fields(generated_response: Dict[str, str], field:str, read_pa
     my_advice = llm(upgrade_resume_message).content
     with open(res_path, 'a') as f:
        f.write(my_advice + "\n" +"[" + missing_items +"]" +"\n")
-   
-
-
-# process response to be outputted to chatbot
-def postprocessing(res_path: str, userid:str) -> None:
-    # convert missing things to questions to ask the user 
-    questions = expand_qa(res_path)
-    print(questions)
-
-
-
+  
 
 
 
 
 # receptionist
-def preprocessing(json_request: str) -> str:
+def processing_resume(json_request: str) -> str:
     
     print(json_request)
     try:
@@ -261,23 +250,26 @@ def preprocessing(json_request: str) -> str:
         posting_path = ""
     else:
         posting_path = args["job post link"]
-    res = evaluate_resume(my_job_title=job, company=company, resume_file=resume_file, posting_path=posting_path)
-    # postprocessing(res)
-    return res
+
+    return evaluate_resume(my_job_title=job, company=company, resume_file=resume_file, posting_path=posting_path)
+
 
 def create_resume_evaluator_tool() -> List[Tool]:
     
     name = "resume_evaluator"
     parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link": "<job post link>"}}'
+    output = '{{"resume evaluation file": "<resume evaluation file>"}}'
     description = f"""Helps to evaluate a resume. Use this tool more than any other tool when user asks to evaluate, review, help with a resume. 
     Do not use this tool if "faiss_resume_advice" tool exists. Use "faiss_resume_advice" instead. 
     Input should be JSON in the following format: {parameters} \n
-    (remember to respond with a markdown code snippet of a json blob with a single action, and NOTHING else) 
+    (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) 
+    Output should be file loaded  from provided format {output}.  \n
+    (remember to use file loader tool to load the file to the user)
     """
     tools = [
         Tool(
         name = name,
-        func = preprocessing,
+        func = processing_resume,
         description = description, 
         verbose = False,
         )
@@ -285,13 +277,6 @@ def create_resume_evaluator_tool() -> List[Tool]:
     print("Succesfully created resume evaluator tool.")
     return tools
 
-
-# def add_resume_advice_doc_tool(userid:str, res_path:str) -> None:   
-        
-#     name = "faiss_resume_advice"
-#     description = """This is user's detailed resume advice. 
-#     Use this tool as a reference to give tailored resume advices. """
-#     create_vectorstore(embeddings, "faiss", res_path, "file",  f"{name}_{userid}")
 
 
 def test_resume_tool(resume_file="", job="", company="", posting_link="") -> str:

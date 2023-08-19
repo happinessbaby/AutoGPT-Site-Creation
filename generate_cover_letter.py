@@ -7,14 +7,13 @@ from langchain import PromptTemplate
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
 from basic_utils import read_txt
-from common_utils import (extract_personal_information, get_web_resources,  retrieve_from_db, create_n_docs_tool, expand_qa,
+from common_utils import (extract_personal_information, get_web_resources,  retrieve_from_db, create_n_docs_tool, 
                           get_summary, extract_posting_information, create_sample_tools, extract_job_title, search_related_samples, generate_multifunction_response)
 from datetime import date
 from pathlib import Path
 import json
 from json import JSONDecodeError
 from langchain.agents import AgentType, Tool, initialize_agent
-from langchain_utils import create_vectorstore
 from multiprocessing import Process, Queue, Value
 from langchain.agents.agent_toolkits import create_python_agent
 from langchain.tools.python.tool import PythonREPLTool
@@ -195,17 +194,11 @@ def generate_basic_cover_letter(my_job_title="", company="", resume_file="",  po
     with open(res_path, 'w') as f:
         f.write(cover_letter)
         print("Sucessfully written cover letter to file")
-    return res_path
-
-
-def postprocessing(res_path: str) -> None:
-      # convert missing stuff to questions
-      questions = expand_qa(res_path)
-      print(questions)
+    return f"""cover letter file": {res_path}"""
 
 
 
-def preprocessing(json_request: str) -> str:
+def processing_cover_letter(json_request: str) -> None:
     print(json_request)
     try:
         args = json.loads(json_request)
@@ -231,20 +224,7 @@ def preprocessing(json_request: str) -> str:
         posting_path = args["job post link"]
 
 
-    res_path = generate_basic_cover_letter(my_job_title=job, company=company, resume_file=resume_file, posting_path=posting_path)
-    postprocessing(res_path)
-    return read_txt(res_path)
-
-
-# def add_cover_letter_doc_tool(self, userid: str, res_path: str) -> None:   
-  
-#     name = "faiss_cover_letter"
-#     description = """This is user's cover letter. 
-#     Use it as a reference and context when user asks for any questions concerning the preexisting cover letter. """
-#     create_vectorstore(self.embeddings, "faiss", res_path, "file",  f"{name}_{userid}")
-#     # if testing without ui, the below will not run
-#     print(f"Succesfully created tool: {name}")
-
+    return generate_basic_cover_letter(my_job_title=job, company=company, resume_file=resume_file, posting_path=posting_path)
 
 
     
@@ -252,15 +232,18 @@ def create_cover_letter_generator_tool() -> List[Tool]:
     
     name = "cover_letter_generator"
     parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link": "<job post link>"}}'
+    output = '{{"cover letter file": "<cover letter file>"}}'
     description = f"""Helps to generate a cover letter. Use this tool more than any other tool when user asks to write a cover letter. 
     Do not use this tool if "faiss_cover_letter" tool exists. 
     Input should be JSON in the following format: {parameters} \n
-    (remember to respond with a markdown code snippet of a json blob with a single action, and NOTHING else) 
+    (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) 
+    Output should be file loaded  from provided format {output}.  \n
+    (remember to use file loader tool to load the file to the user)
     """
     tools = [
         Tool(
         name = name,
-        func =preprocessing,
+        func =processing_cover_letter,
         description = description, 
         verbose = False,
         )
@@ -272,7 +255,7 @@ def create_cover_letter_generator_tool() -> List[Tool]:
 # END TO END testing w/o UI
 def test_coverletter_tool(resume_file="", job="", company="", posting_link="") -> str:
 
-    tools = create_cover_letter_generator_tool()
+    tools = create_cover_letter_generator_tool() 
     agent= initialize_agent(
         tools, 
         llm=ChatOpenAI(cache=False), 
