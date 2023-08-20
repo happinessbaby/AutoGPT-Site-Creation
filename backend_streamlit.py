@@ -175,12 +175,15 @@ class Chat(ChatController):
                     # with col3:
 
                     uploaded_files = st.file_uploader(label="Upload your file",
-                                                       type=["pdf","odt", "docx","txt", "zip"], 
+                                                       type=["pdf","odt", "docx","txt", "zip", "pptx"], 
                                                        accept_multiple_files=True)
                     add_vertical_space(3)
-                    link = st.text_input("Upload a link", "", key = "link")
-                    add_vertical_space(3)
-                    prefilled = st.selectbox("General questions", sorted(SAMPLE_QUESTIONS.keys()), format_func=lambda x: '' if x == '' else x)
+                    link = st.text_input("Share your link", "", key = "link")
+                    add_vertical_space(1)
+                    prefilled = st.selectbox(label="Quick navigation",
+                                              options=sorted(SAMPLE_QUESTIONS.keys()), 
+                                              label_visibility="hidden", 
+                                              format_func=lambda x: '---General questions---' if x == '' else x)
                     # if uploaded_file is not None:
                     #     # To convert to a string based IO:
                     #     stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))

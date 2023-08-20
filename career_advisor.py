@@ -28,11 +28,16 @@ from langchain.schema import messages_from_dict, messages_to_dict, AgentAction
 from langchain.utilities import GoogleSearchAPIWrapper
 from langchain.retrievers.web_research import WebResearchRetriever
 from langchain.docstore import InMemoryDocstore
+from langchain.agents import AgentExecutor
 from langchain.tools.human.tool import HumanInputRun
-from langchain.callbacks.base import BaseCallbackManager
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain.callbacks import get_openai_callback, StdOutCallbackHandler, FileCallbackHandler
-from langchain.callbacks.base import BaseCallbackHandler
+from langchain.agents.openai_functions_agent.agent_token_buffer_memory import AgentTokenBufferMemory
+from langchain.agents.openai_functions_agent.base import OpenAIFunctionsAgent
+from langchain.schema.messages import SystemMessage
+from langchain.prompts import MessagesPlaceholder
+from langchain.prompts import ChatPromptTemplate
+
 # from langchain.agents.agent_toolkits import create_conversational_retrieval_agent
 # from langchain.agents.openai_functions_agent.agent_token_buffer_memory import AgentTokenBufferMemory
 # from langchain.agents.openai_functions_agent.base import OpenAIFunctionsAgent
@@ -55,6 +60,7 @@ import faiss
 from loguru import logger
 from langchain.evaluation import load_evaluator
 from basic_utils import convert_to_txt, read_txt
+from openai_api import get_completion
 from langchain.schema import OutputParserException
 from multiprocessing import Process, Queue, Value
 from generate_cover_letter import  create_cover_letter_generator_tool
@@ -102,15 +108,16 @@ class ChatController():
 
         # initialize tools
 
-        # Specific purpose 
+        # Specific purpose tools
         cover_letter_tool = create_cover_letter_generator_tool()
 
         resume_advice_tool = create_resume_evaluator_tool()
-
+ 
         file_loader_tool = create_file_loader_tool()
 
-        study_helper_tool = self.create_study_helper_tool()
-        
+        study_helper_tool = self.create_interview_prep_helper_tool()
+
+        # General purpose tools
         redis_store = retrieve_redis_vectorstore(self.embeddings, "index_web_advice")
         redis_retriever = redis_store.as_retriever()
         general_tool_description = """This is a general purpose database. Use it to answer general job related questions. 
@@ -158,16 +165,13 @@ class ChatController():
           
         If the AI does not know the answer to a question, it truthfully says it does not know. 
 
-        You are provided with information about entities the Human mentions, if relevant.
+        You are provided with information about entities the Human mentions. If available, they are very important.
 
-        #%#$
+        Always check the relevant entity information before answering a question.
 
         Relevant entity information: {entities}
 
-        #%#$
-
         You are also provided with specific questions that would help the Human. If relevant, ask them.
-
 
         Relevant questions for Human: {questions}
 
@@ -376,23 +380,28 @@ class ChatController():
 
 
     def initialize_study_companion(self, json_request, level="easy", embeddings=OpenAIEmbeddings(), llm = ChatOpenAI(temperature=0.0, cache=False)):
+    
+        print(json_request)
         try:
             args = json.loads(json_request)
         except JSONDecodeError:
-            return "Format in JSON and try again." 
-        args = json.loads(json_request)
-        read_path = args["study material"]
+            new_request = get_completion(f"""Format the following into JSON: {json_request}. 
+                                         The key should be named "interview material file". 
+                                         Output the JSON only.""")
+            print(new_request)
+            self.initialize_study_companion(new_request)
+
+        read_path = args["interview material file"]
 
         name = f"faiss_study_material_{self.userid}"
-        # description = """This is user's study material for interview. 
-        # Use it when creating question and answer pairs."""
-        create_vectorstore(embeddings, "faiss", read_path, "file", name)
+        if retrieve_faiss_vectorstore(embeddings, name)==None:
+            create_vectorstore(embeddings, "faiss", read_path, "file", name)
         db = retrieve_faiss_vectorstore(embeddings, name)
         retriever = db.as_retriever()
         # tools = create_db_tools(llm, db.as_retriever(), name, description)
 
-        tool_name = "research_study_material"
-        tool_description =  """Generates question and answer pairs regarding the content of the study material.
+        tool_name = "question_answer_interview"
+        tool_description =  """Useful for question and answer regarding the content of the interview material.
         Helps Human study for job interviews. Use this tool more than any other tool when asked to study, review, practice interview material."""
         study_tools = [create_retriever_tool(
         retriever,
@@ -400,14 +409,61 @@ class ChatController():
             tool_description
             )]
         print(f"Succesfully created tool: {study_tools}")
-        # add soft skill material to tool
-        self.study_companion = create_conversational_retrieval_agent(llm, study_tools, verbose=True)
+
+        # initialize new memory
+        self.memory = AgentTokenBufferMemory(memory_key="chat_history", llm=llm)
+
+        # initialize new instructions
+        self.instructions = ""
+
+        # initialize questions
+        self.questions = ""
+
+        # initialize prompt
+        template =   """You are a quiz master AI. Your role is to generate question and answer pairs for the Human and provide feedbacks to the Human's answers.
+
+            The main content you are provided with, which you're to research for making quizes, is contained in the tool "question_answer_study_material".
+
+            You are provided with a pair of entities which contains first the AI answer to the previous quiz questions then the Human answer.
+
+            Before moving on to the next question, always provide feedback on how the human performed, if the pair entity is available.
+
+            Pair entity: {entities}
+
+            You are also provided with specific questions that would help the Human. These questions are outside the scope of the quiz. Ask them only if relevant.
+
+            Relevant questions for Human: {questions}
+
+            Instructions: {instructions}"""
+
+        chat_prompt = ChatPromptTemplate.from_template(template)
+        messages = chat_prompt.format_prompt(entities = self.entities,
+                                  questions = self.questions,
+                                  instructions = self.instructions).to_messages()
+        prompt = OpenAIFunctionsAgent.create_prompt(
+                # system_message=system_message,
+                extra_prompt_messages=messages,
+            )
+        
+        #initialize study companion
+        # Conversational Retrieval Agent: https://python.langchain.com/docs/use_cases/question_answering/how_to/conversational_retrieval_agents
+        agent = OpenAIFunctionsAgent(llm=llm, tools=study_tools, prompt=prompt)
+        self.study_companion = AgentExecutor(agent=agent, tools=study_tools, memory=self.memory, verbose=True,
+                                   return_intermediate_steps=True)
+
+        # Switch from chat agent to study companion
+        self.chat_agent = self.study_companion
+        print("Succesfully switched to study companion agent")
+
+        
+        # self.study_companion = create_conversational_retrieval_agent(llm, study_tools, verbose=True)
+        
 
 
 
 
 
-    def askAI(self, userid:str, user_input:str, callbacks=None) -> str:
+    def askAI(self, userid:str, user_input:str, callbacks=None,) -> str:
 
         try:            
             # BELOW IS USED WITH CHAT_CONVERSATIONAL_REACT_DESCRIPTION 
@@ -544,13 +600,14 @@ class ChatController():
             print(f"Successfully updated meta data: {data}")
     
 
-    def create_study_helper_tool(self) -> List[Tool]:
+    def create_interview_prep_helper_tool(self) -> List[Tool]:
         
-        name = "study_helper"
-        parameters = '{{"interview material": <interview material>}}'
-        description = f"""Use this to process interview material files. Use only for processing files only.
-            Input should be JSON in the following format: {parameters}
-            Output should be  """
+        name = "interview_preparation_helper"
+        parameters = '{{"interview material file":"<interview material file>"}}'
+        description = f"""Use this to process interview material files whenever Human wants to study for an interview. 
+            Input should be JSON in the following format: {parameters} 
+            (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) 
+            Output should be telling the Human that you have successfully created a study companion who will generate interview questions based on the study material provided. """
         tools = [
             Tool(
             name = name,
@@ -562,7 +619,8 @@ class ChatController():
         print("Succesfully created study helper tool.")
         return tools
         
-    
+        
+
 
     
 

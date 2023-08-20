@@ -403,6 +403,39 @@ def categorize_content(content):
 
     return response
 
+# def create_func_caller_tool() -> List(Tool):
+
+#     name = "function_caller"
+#     parameters = '{{"function name": "<function name>"}}'
+#     description = f"""Executes a functions whenever you use this tool. Use this tool only to call a function when needed.
+#                  Input should be JSON in the following format: {parameters}.
+#                 (remember to respond with a markdown code snippet of a json blob with a single action, and NOTHING else)
+#                 """
+#     tools = [
+#         Tool(
+#         name = name,
+#         func = calling_func,
+#         description = description,
+#         verbose = False,
+#         )
+#     ]
+#     print("Successfully created function loader tool")
+#     return tools
+
+# def calling_func(json_request: str):
+
+#     print(json_request)
+#     try:
+#         args = json.loads(json_request)
+#     except JSONDecodeError:
+#         return "Format in JSON and try again." 
+#     func_name = args["function name"]
+#     #TODO: need to import function from other places
+#     function = locals()[func_name]
+#     function()
+    
+
+
 
 
 
@@ -439,6 +472,9 @@ def loading_file(json_request) -> str:
         return file_content
     except Exception as e:
         raise(e)
+    
+
+
     
         
 

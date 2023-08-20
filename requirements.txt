@@ -25,3 +25,4 @@ faiss-cpu
 tiktoken
 rank_bm25
 html2text
+python-pptx
