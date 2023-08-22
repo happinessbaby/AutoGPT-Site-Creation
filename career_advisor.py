@@ -36,7 +36,7 @@ from langchain.agents.openai_functions_agent.agent_token_buffer_memory import Ag
 from langchain.agents.openai_functions_agent.base import OpenAIFunctionsAgent
 from langchain.schema.messages import SystemMessage
 from langchain.prompts import MessagesPlaceholder
-from langchain.prompts import ChatPromptTemplate
+from langchain.prompts import ChatPromptTemplate, HumanMessagePromptTemplate
 
 # from langchain.agents.agent_toolkits import create_conversational_retrieval_agent
 # from langchain.agents.openai_functions_agent.agent_token_buffer_memory import AgentTokenBufferMemory
@@ -70,6 +70,7 @@ from langchain.agents.agent_toolkits import create_retriever_tool
 from typing import List
 from json import JSONDecodeError
 from common_utils import create_file_loader_tool
+from langchain.tools import tool
 import re
 
 
@@ -79,8 +80,10 @@ _ = load_dotenv(find_dotenv()) # read local .env file
 log_path = os.environ["LOG_PATH"]
 # debugging langchain: very useful
 langchain.debug=True
-# This process slows down chat by a lot, unless necessary, set to false
+# The result evaluation process slows down chat by a lot, unless necessary, set to false
 evaluate_result = False
+# The instruction update process is still being tested for effectiveness
+update_instruction = False
 delimiter = "####"
 
 
@@ -99,8 +102,11 @@ class ChatController():
         self.embeddings = OpenAIEmbeddings()
         self.handler = None
         self._initialize_chat_agent()
-        self._initialize_meta_agent()
+        if update_instruction:
+            self._initialize_instruct_agent()
         self._initialize_log()
+        self._initialize_study_companion()
+        self._initialize_grader()
 
 
     def _initialize_chat_agent(self):
@@ -151,9 +157,6 @@ class ChatController():
         # initialize dynamic args for tools
         self.entities = ""
 
-        # initialize questions to ask user
-        self.questions = ""
-
         # initialize feedbacks
         self.instructions = ""
 
@@ -172,8 +175,6 @@ class ChatController():
         Relevant entity information: {entities}
 
         You are also provided with specific questions that would help the Human. If relevant, ask them.
-
-        Relevant questions for Human: {questions}
 
         Instructions: {instructions}
 
@@ -211,7 +212,7 @@ class ChatController():
                                             handle_parsing_errors=True,
                                             callbacks = [self.handler])
         # modify default agent prompt
-        prompt = self.chat_agent.agent.create_prompt(system_message=template, input_variables=['chat_history', 'input', 'entities', 'agent_scratchpad', 'instructions', 'questions'], tools=self.tools)
+        prompt = self.chat_agent.agent.create_prompt(system_message=template, input_variables=['chat_history', 'input', 'entities', 'agent_scratchpad', 'instructions'], tools=self.tools)
         self.chat_agent.agent.llm_chain.prompt = prompt
 
 
@@ -326,13 +327,13 @@ class ChatController():
 
     #     return agent
 
-    def _initialize_meta_agent(self):
+    def _initialize_instruct_agent(self):
 
         db = create_vectorstore(self.embeddings, "faiss", "./log/", "dir", "chat_debug")
         # TODO: need to test the effective of this debugging tool
-        description = """This is used for debugging chat errors when you encounter one. 
-        This stores all the chat history in the past. """
-        tools = create_db_tools(self.llm, db.as_retriever(), "chat_debug", description)
+        name = "search_all_chat_history"
+        description = """Useful when you want to revise instructions based on historical chat conversations. Use it especially when debugging chat error messages. """
+        tools = create_db_tools(self.llm, db.as_retriever(), name, description)
         meta_template = """
         Assistant has just had the below interactions with a User. Assistant followed their "Instructions" closely. Your job is to revise the Instructions so that Assistant would quickly and correctly respond in the future.
 
@@ -378,101 +379,168 @@ class ChatController():
 
 
 
+    def _initialize_grader(self, embeddings=OpenAIEmbeddings(), llm = ChatOpenAI(temperature=0.0, cache=False)):
 
-    def initialize_study_companion(self, json_request, level="easy", embeddings=OpenAIEmbeddings(), llm = ChatOpenAI(temperature=0.0, cache=False)):
-    
-        print(json_request)
-        try:
-            args = json.loads(json_request)
-        except JSONDecodeError:
-            new_request = get_completion(f"""Format the following into JSON: {json_request}. 
-                                         The key should be named "interview material file". 
-                                         Output the JSON only.""")
-            print(new_request)
-            self.initialize_study_companion(new_request)
-
-        read_path = args["interview material file"]
-
-        name = f"faiss_study_material_{self.userid}"
-        if retrieve_faiss_vectorstore(embeddings, name)==None:
-            create_vectorstore(embeddings, "faiss", read_path, "file", name)
-        db = retrieve_faiss_vectorstore(embeddings, name)
-        retriever = db.as_retriever()
-        # tools = create_db_tools(llm, db.as_retriever(), name, description)
-
-        tool_name = "question_answer_interview"
-        tool_description =  """Useful for question and answer regarding the content of the interview material.
-        Helps Human study for job interviews. Use this tool more than any other tool when asked to study, review, practice interview material."""
-        study_tools = [create_retriever_tool(
-        retriever,
-            tool_name,
-            tool_description
-            )]
-        print(f"Succesfully created tool: {study_tools}")
-
-        # initialize new memory
-        self.memory = AgentTokenBufferMemory(memory_key="chat_history", llm=llm)
-
-        # initialize new instructions
-        self.instructions = ""
-
-        # initialize questions
-        self.questions = ""
-
-        # initialize prompt
-        template =   """You are a quiz master AI. Your role is to generate question and answer pairs for the Human and provide feedbacks to the Human's answers.
-
-            The main content you are provided with, which you're to research for making quizes, is contained in the tool "question_answer_study_material".
-
-            You are provided with a pair of entities which contains first the AI answer to the previous quiz questions then the Human answer.
-
-            Before moving on to the next question, always provide feedback on how the human performed, if the pair entity is available.
-
-            Pair entity: {entities}
-
-            You are also provided with specific questions that would help the Human. These questions are outside the scope of the quiz. Ask them only if relevant.
-
-            Relevant questions for Human: {questions}
-
-            Instructions: {instructions}"""
-
-        chat_prompt = ChatPromptTemplate.from_template(template)
-        messages = chat_prompt.format_prompt(entities = self.entities,
-                                  questions = self.questions,
-                                  instructions = self.instructions).to_messages()
-        prompt = OpenAIFunctionsAgent.create_prompt(
-                # system_message=system_message,
-                extra_prompt_messages=messages,
-            )
-        
-        #initialize study companion
+        # initialize grader agent
         # Conversational Retrieval Agent: https://python.langchain.com/docs/use_cases/question_answering/how_to/conversational_retrieval_agents
-        agent = OpenAIFunctionsAgent(llm=llm, tools=study_tools, prompt=prompt)
-        self.study_companion = AgentExecutor(agent=agent, tools=study_tools, memory=self.memory, verbose=True,
-                                   return_intermediate_steps=True)
+        system_message = SystemMessage(
+        content=(
+          """Access your memory and retrieve the very last piece of the conversation, if available.
 
-        # Switch from chat agent to study companion
-        self.chat_agent = self.study_companion
-        print("Succesfully switched to study companion agent")
+          Determine if the AI has asked an interview question. If it has, you are to grade the Human input based on how well it answers the interview question.
 
+          You will need to use your tool "quiz_interview_material", if relevant, to generate the correct answer to the interview question.
+
+          The Human may not know the answer or answered the question incorrectly.
+
+          Therefore it is important that you provide an informative feedback to the Human in the format:
+
+          Feedback: <your feedback>
+
+          If to your best knowledge there was no interview question, or the Human is not answering in any way, you should not provide any feedback.
+            """
+        )
+        )
+        prompt = OpenAIFunctionsAgent.create_prompt(
+        system_message=system_message,
+        extra_prompt_messages=[MessagesPlaceholder(variable_name="chat_history")]
+        )
+
+        agent = OpenAIFunctionsAgent(llm=llm, tools=self.study_tools, prompt=prompt)
+        self.grader_agent = AgentExecutor(agent=agent, 
+                                        tools=self.study_tools, 
+                                        memory=self.qa_memory, 
+                                        # verbose=True,
+                                        return_intermediate_steps=True, 
+                                        handle_parsing_errors=True,
+                                        callbacks = [self.handler])
         
-        # self.study_companion = create_conversational_retrieval_agent(llm, study_tools, verbose=True)
-        
 
+
+
+    def _initialize_study_companion(self, embeddings=OpenAIEmbeddings(), llm = ChatOpenAI(temperature=0.0, cache=False)):
+    
+        self.study_mode = True
+        self.study_tools = []
+        # print(json_request)
+        # try:
+        #     args = json.loads(json_request)
+        # except JSONDecodeError:
+        #     new_request = get_completion(f"""Format the following into JSON: {json_request}. 
+        #                                  The key should be named "interview material file". 
+        #                                  Output the JSON only.""")
+        #     print(new_request)
+        #     self.initialize_study_companion(new_request)
+
+        # read_path = args["interview material file"]
+
+        # create study material vector store and turn it into retriever
+        # name = f"faiss_study_material_{self.userid}"
+        # if retrieve_faiss_vectorstore(embeddings, name)==None:
+        #     create_vectorstore(embeddings, "faiss", read_path, "file", name)
+        # db = retrieve_faiss_vectorstore(embeddings, name)
+        # retriever = db.as_retriever()
+        # tools = create_db_tools(llm, db.as_retriever(), name, description)
+        
+        # initialize tools
+        # tool_name ="quiz_interview_material"
+        # tool_description =  """Useful for generating interview questions 
+        # Use this tool more than any other tool when asked to study, review, practice interview material for the given content."""
+        # study_tools = [create_retriever_tool(
+        #     retriever,
+        #     tool_name,
+        #     tool_description
+        #     )]
+        # print(f"Succesfully created study companion tool: {study_tools}")
+
+        # initialize new memory (shared betweeen qa_agent and grader_agent)
+        self.qa_memory = AgentTokenBufferMemory(memory_key="chat_history", llm=llm, input_key="input")
+        #initialize grader agent
+        self.initialize_grader(self.study_tools)
+        #initialize qa agent
+        # Conversational Retrieval Agent: https://python.langchain.com/docs/use_cases/question_answering/how_to/conversational_retrieval_agents
+
+        template =   """
+            You are an AI job interviewer. Your role is to ask Human interview questions and help them understand their interview material better. 
+
+            The main interview content which you're to research for making the interview question  is contained in the tool "quiz_interview_material".
+
+            If the Human is asking a specific question instead, always answer the Human's specific question, then ask if they want to continue with the interview process.
+
+            During  the interview process, if the Human is not asking a specific question, then the Human is answering an interview question.
+
+            You can ignore the answer as it will be sent to a professional grader. 
+
+            Sometimes you will be provided with the grader's feedback. You need to relay the grader's feedback to the Human.
+
+            To do this, access your memory and retrieve the last piece of conversation. If there is Feedback in it, please always pass this on to the Human. 
+
+            Remember, unless you're told to stop, you should not stop asking interview questions in the format: 
+
+            Question: <new interview question>
+
+            Also remember, do not ask the same question twice!
+
+           """
+        
+        system_message = SystemMessage(
+        content=(
+          template
+        )
+        )
+        prompt = OpenAIFunctionsAgent.create_prompt(
+            system_message=system_message,
+            extra_prompt_messages=[MessagesPlaceholder(variable_name="chat_history")]
+            )
+
+        agent = OpenAIFunctionsAgent(llm=llm, tools=self.study_tools, prompt=prompt)
+
+        # messages = chat_prompt.format_messages(
+        #           grader_feedback = self.grader_feedback,
+        #         instructions = self.instructions
+        # )
+
+        # prompt = OpenAIFunctionsAgent.create_prompt(
+        #         # system_message=system_msg,
+        #         extra_prompt_messages=messages,
+        #     )
+        # agent = OpenAIFunctionsAgent(llm=llm, tools=study_tools, prompt=prompt)
+
+        self.qa_agent = AgentExecutor(agent=agent,
+                                    tools=self.study_tools, 
+                                    memory=self.qa_memory, 
+                                    # verbose=True,
+                                    return_intermediate_steps=True,
+                                    handle_parsing_errors=True,
+                                    callbacks = [self.handler])
+        
 
 
 
 
     def askAI(self, userid:str, user_input:str, callbacks=None,) -> str:
 
-        try:            
-            # BELOW IS USED WITH CHAT_CONVERSATIONAL_REACT_DESCRIPTION 
-            response = self.chat_agent({"input": user_input, "chat_history":[], "entities": self.entities , "questions": self.questions, "instructions":self.instructions}, callbacks = [callbacks])
-            # update chat history for instruct agent
-            self.update_chat_history()
-            instructagent_q = Queue()
-            instructagent_p = Process(target = self.askInstructAgent, args=(instructagent_q, ))
-            instructagent_p.start()
+        try:    
+            # BELOW IS USED WITH CONVERSATIONAL RETRIEVAL AGENT 
+            if self.study_mode:             
+                grader_feedback = self.grader_agent({"input":user_input}).get("output", "")
+                print(f"GGGG{grader_feedback}")
+                response = self.qa_agent({"input":user_input})
+                self.update_chat_history(self.qa_memory)
+
+            else:     
+            # BELOW IS USED WITH CHAT_CONVERSATIONAL_REACT_DESCRIPTION (neews chat_history as an input variable)
+                response = self.chat_agent({"input": user_input, "chat_history":[], "entities": self.entities , "instructions":self.instructions}, callbacks = [callbacks])
+                # update chat history for instruct agent
+                self.update_chat_history(self.memory)
+            if (update_instruction):
+                instructagent_q = Queue()
+                instructagent_p = Process(target = self.askInstructAgent, args=(instructagent_q, ))
+                instructagent_p.start()   
+                instructagent_p.join() 
+                feedback = instructagent_q.get()
+                # update instruction from feedback 
+                self.update_instructions(feedback)       
             if (evaluate_result):
                 evalagent_q = Queue()
                 evalagent_p = Process(target = self.askEvalAgent, args=(response, evalagent_q, ))
@@ -481,26 +549,26 @@ class ChatController():
                 evaluation_result = evalagent_q.get()
                 # add evaluation and instruction to log
                 self.update_meta_data(evaluation_result)
-            instructagent_p.join() 
-            feedback = instructagent_q.get()
-             # update instruction from feedback 
-            self.update_instructions(feedback)        
+            
             # convert dict to string for chat output
             response = response.get("output", "sorry, something happened, try again.")
         # let meta agent handle all exceptions with feedback loop
         except Exception as e:
+            print(e)
             # needs to get action and action input before error and add it to error message
-            error_msg = str(e)
-            query = f""""Debug the error message and provide instruction for Assistent for the next step: {error_msg}
-                """
-            instructagent_q = Queue()
-            instructagent_p = Process(target = self.askInstructAgent, args=(instructagent_q, query, ))
-            instructagent_p.start()
+            if (update_instruction):
+                error_msg = str(e)
+                query = f""""Debug the error message and provide instruction for Assistent for the next step: {error_msg}
+                    """
+                instructagent_q = Queue()
+                instructagent_p = Process(target = self.askInstructAgent, args=(instructagent_q, query, ))
+                instructagent_p.start()
+                instructagent_p.join()
+                feedback = instructagent_q.get()
+                self.update_instructions(feedback)
             if evaluate_result:
                 self.update_meta_data(error_msg)
-            instructagent_p.join()
-            feedback = instructagent_q.get()
-            self.update_instructions(feedback)
+           
             self.askAI(userid, user_input, callbacks)        
 
 
@@ -535,38 +603,33 @@ class ChatController():
             evaluation_result = ""
         queue.put(evaluation_result)
 
-    def askStudyCompanion(self, level):
-
-        query = f"""Generate a question and answer pair with {level} difficulty level. 
-
-                Output in the following format:
-
-                Question: <the questions you generated>
-
-                Answer: <answer to the question you generated>"""
-        response = self.study_companion({"input": query})
-        print(response)
-     
 
 
-
-    def update_chat_history(self) -> None:
+    def update_chat_history(self, memory) -> None:
         # memory_key = chain_memory.memory_key
         # chat_history = chain_memory.load_memory_variables(memory_key)[memory_key]
-        extracted_messages = self.memory.chat_memory.messages
+        extracted_messages = memory.chat_memory.messages
         self.chat_history = messages_to_dict(extracted_messages)
 
 
     
-    def update_tools(self, userid: str, tool_name: str, tool_description:str) -> None:      
-        try:
-            faiss_store = retrieve_faiss_vectorstore(self.embeddings, f"{tool_name}_{userid}")
-            faiss_retriever = faiss_store.as_retriever()
-            specific_tool = create_db_tools(self.llm, faiss_retriever, tool_name, tool_description)
-            self.tools += specific_tool
-            print(f"Successfully added tool {tool_name}")
-        except Exception as e:
-            raise e
+    def update_study_tools(self) -> None:      
+
+        name = f"faiss_study_material_{self.userid}"
+        db = retrieve_faiss_vectorstore(self.embeddings, name)
+        if db is not None:
+            retriever = db.as_retriever()
+            tool_name ="quiz_interview_material"
+            tool_description =  """Useful for generating interview questions and answers.
+            Use this tool more than any other tool when asked to study, review, practice interview material for the given content."""
+            study_tools = [create_retriever_tool(
+                retriever,
+                tool_name,
+                tool_description
+                )]
+            self.study_tools += study_tools
+            print(f"Succesfully created study companion tool: {study_tools}")
+
         
     def update_entities(self,  text:str) -> None:
         # if "resume" in text:
@@ -583,11 +646,6 @@ class ChatController():
         for idx in starting_idices:
             self.entities = self.entities.replace(self.entities[idx: idx+68], "")
 
-
-    def update_questions(self, questions:str) -> None:
-        self.questions+=questions
-        print(f"Successfull added questions {self.questions}")
-
     def update_instructions(self, meta_output:str) -> None:
         delimiter = "Instructions: "
         new_instructions = meta_output[meta_output.find(delimiter) + len(delimiter) :]
@@ -600,24 +658,30 @@ class ChatController():
             print(f"Successfully updated meta data: {data}")
     
 
-    def create_interview_prep_helper_tool(self) -> List[Tool]:
+    # def create_interview_prep_helper_tool(self) -> List[Tool]:
         
-        name = "interview_preparation_helper"
-        parameters = '{{"interview material file":"<interview material file>"}}'
-        description = f"""Use this to process interview material files whenever Human wants to study for an interview. 
-            Input should be JSON in the following format: {parameters} 
-            (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) 
-            Output should be telling the Human that you have successfully created a study companion who will generate interview questions based on the study material provided. """
-        tools = [
-            Tool(
-            name = name,
-            func = self.initialize_study_companion,
-            description = description, 
-            verbose = False,
-            )
-        ]
-        print("Succesfully created study helper tool.")
-        return tools
+    #     name = "interview_preparation_helper"
+    #     parameters = '{{"interview material file":"<interview material file>"}}'
+    #     description = f"""Use this to process interview material files whenever Human wants to study for an interview. 
+    #         Input should be JSON in the following format: {parameters} 
+    #         (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) 
+    #         Output should be telling the Human that you have successfully created a study companion who will generate interview questions based on the study material provided. """
+    #     tools = [
+    #         Tool(
+    #         name = name,
+    #         func = self.initialize_study_companion,
+    #         description = description, 
+    #         verbose = False,
+    #         )
+    #     ]
+    #     print("Succesfully created study helper tool.")
+    #     return tools
+    
+    @tool 
+    def switch_to_study_mode(self) -> List[Tool]:
+        self_study_mode = True
+
+
         
         
 

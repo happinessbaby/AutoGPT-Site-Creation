@@ -25,7 +25,7 @@ import requests
 from functools import lru_cache
 import multiprocessing as mp
 from langchain.embeddings import OpenAIEmbeddings
-
+from langchain_utils import retrieve_faiss_vectorstore, create_vectorstore
 
 
 
@@ -277,6 +277,7 @@ class Chat(ChatController):
         entity_list = []
         resume_entity=""
         cover_letter_entity =""
+        study_material_name = f"faiss_study_material_{self.userid}"
         for uploaded_file in uploaded_files:
             file_ext = Path(uploaded_file.name).suffix
             tmp_filename = str(uuid.uuid4())+file_ext
@@ -286,6 +287,7 @@ class Chat(ChatController):
             read_path =  os.path.join(upload_file_path, Path(tmp_filename).stem+'.txt')
             # Convert file to txt and save it to uploads
             convert_to_txt(tmp_save_path, read_path)
+            #TODO: right now check_content safety has a token limit since texts are not chunked
             if (check_content_safety(file=read_path)):
                 content_type = categorize_content(read_txt(read_path))
                 if (content_type in categories):
@@ -294,15 +296,24 @@ class Chat(ChatController):
                         resume_entity = f"""resume file: {read_path}"""
                     elif content_type == "cover letter":
                         cover_letter_entity = f"""cover letter file: {read_path}"""
-                else:
-                    study_material_entity = f"""interview material file: {read_path}"""
-                    entity_list.append(study_material_entity)
             else:
-                print("file content unsafe")
+                # TODO: if user adds a study material in the middle of the interview session, the agent tool needs to be updated too
+                # thnk about how to do this!
+                main_db = retrieve_faiss_vectorstore(self.embeddings, study_material_name)
+                if (main_db==None):
+                    create_vectorstore(self.embeddings, "faiss", read_path, "file", study_material_name)
+                else:
+                    db = create_vectorstore(self.embeddings, "faiss", read_path, "file", "temp")
+                    main_db.merge_from(db)
+                # study_material_entity = f"""interview material file: {read_path}"""
+                # entity_list.append(study_material_entity)
+        # else:
+            #     print("file content unsafe")
         if resume_entity:
             entity_list.append(resume_entity)
         if cover_letter_entity:
             entity_list.append(cover_letter_entity)
+        self.update_study_tools()
         queue.put(entity_list)
         
 
