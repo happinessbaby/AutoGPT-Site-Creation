@@ -70,7 +70,7 @@ from langchain.agents.agent_toolkits import create_retriever_tool
 from typing import List
 from json import JSONDecodeError
 from common_utils import create_file_loader_tool
-from langchain.tools import tool
+from langchain.tools import tool, format_tool_to_openai_function
 import re
 
 
@@ -105,31 +105,23 @@ class ChatController():
         if update_instruction:
             self._initialize_instruct_agent()
         self._initialize_log()
-        self._initialize_study_companion()
-        self._initialize_grader()
+        # self._initialize_study_companion()
 
 
     def _initialize_chat_agent(self):
     
-
         # initialize tools
-
         # Specific purpose tools
         cover_letter_tool = create_cover_letter_generator_tool()
-
         resume_advice_tool = create_resume_evaluator_tool()
- 
         file_loader_tool = create_file_loader_tool()
-
-        study_helper_tool = self.create_interview_prep_helper_tool()
-
+        study_companion_tool = self.initiate_study_companion_tool()
         # General purpose tools
         redis_store = retrieve_redis_vectorstore(self.embeddings, "index_web_advice")
         redis_retriever = redis_store.as_retriever()
         general_tool_description = """This is a general purpose database. Use it to answer general job related questions. 
         Prioritize other tools over this tool. """
         general_tool= create_db_tools(self.llm, redis_retriever, "redis_general", general_tool_description)
-
         search = GoogleSearchAPIWrapper()
         embedding_size = 1536  
         index = faiss.IndexFlatL2(embedding_size)  
@@ -140,9 +132,9 @@ class ChatController():
             search=search, 
         )
         web_tool_description="""This is a web research tool. Use it only when you cannot find answers elsewhere. Always add source information."""
-        web_tool = create_db_tools(self.llm, web_research_retriever, "faiss_web", web_tool_description)
-
-        self.tools = general_tool + cover_letter_tool + resume_advice_tool + web_tool + file_loader_tool + study_helper_tool
+        self.web_tool = create_db_tools(self.llm, web_research_retriever, "faiss_web", web_tool_description)
+        # gather all the tools together
+        self.tools = general_tool + cover_letter_tool + resume_advice_tool + self.web_tool + file_loader_tool + study_companion_tool
 
         # initialize file callback logging
         logfile = log_path + f"{self.userid}.log"
@@ -153,16 +145,13 @@ class ChatController():
         if (evaluate_result):
             self.evaluator = load_evaluator("trajectory", agent_tools=self.tools)
 
-
-        # initialize dynamic args for tools
+        # initialize dynamic args for prompt
         self.entities = ""
-
         # initialize feedbacks
         self.instructions = ""
-
         # initialize chat history
         self.chat_history=[]
-
+        # initiate prompt template
         template = """The following is a friendly conversation between a human and an AI. 
         The AI is talkative and provides lots of specific details from its context.
           
@@ -187,34 +176,26 @@ class ChatController():
         # # Human: {input}
         # # AI:
 
-        # prompt = CustomPromptTemplate(
-        #     template=self.template,
-        #     tools=self.tools,
-        #     # This omits the `agent_scratchpad`, `tools`, and `tool_names` variables because those are generated dynamically
-        #     # This includes the `intermediate_steps` variable because that is needed
-        #     input_variables=["chat_history", "input", "intermediate_steps", "entities"],
-        # )
-
         # OPTION 1: agent = CHAT_CONVERSATIONAL_REACT_DESCRIPTION
         # initialize memory
         # self.memory = ConversationBufferMemory(llm=self.llm, memory_key="chat_history",return_messages=True, input_key="input")
         # self.memory = AgentTokenBufferMemory(memory_key="chat_history", llm=self.llm, return_messages=True, input_key="input")
-        self.memory = ConversationBufferMemory(llm=self.llm, memory_key="chat_history", return_messages=True, input_key="input")
-        self.memory.output_key = "output"
-        
-        # initialize agent
+        self.chat_memory = ConversationBufferMemory(llm=self.llm, memory_key="chat_history", return_messages=True, input_key="input")
+        self.chat_memory.output_key = "output"  
+        # initialize CHAT_CONVERSATIONAL_REACT_DESCRIPTION agent
         self.chat_agent  = initialize_agent(self.tools, 
                                             self.llm, 
                                             agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION, 
                                             # verbose=True, 
-                                            memory=self.memory, 
+                                            memory=self.chat_memory, 
                                             return_intermediate_steps = True,
                                             handle_parsing_errors=True,
                                             callbacks = [self.handler])
         # modify default agent prompt
         prompt = self.chat_agent.agent.create_prompt(system_message=template, input_variables=['chat_history', 'input', 'entities', 'agent_scratchpad', 'instructions'], tools=self.tools)
         self.chat_agent.agent.llm_chain.prompt = prompt
-
+        # switch on regular chat mode
+        self.mode = "chat"
 
 
         # OPTION 2: agent = custom LLMSingleActionAgent
@@ -328,7 +309,8 @@ class ChatController():
     #     return agent
 
     def _initialize_instruct_agent(self):
-
+        # This is an instruction agent that provides main agent with improved instructions, also iused for debugging errors during chat
+        # It will all the logs as its tools for debugging new errors
         db = create_vectorstore(self.embeddings, "faiss", "./log/", "dir", "chat_debug")
         # TODO: need to test the effective of this debugging tool
         name = "search_all_chat_history"
@@ -350,8 +332,8 @@ class ChatController():
 
         You should revise the Instructions so that Assistant would quickly and correctly respond in the future. Assistant's goal is to satisfy the user in as few interactions as possible. Assistant will only see the new Instructions, not the interaction history, so anything important must be summarized in the Instructions. Don't forget any important details in the current Instructions! Indicate the new Instructions by "Instructions: ...".
         """
-        
-        self.meta_agent = initialize_agent(
+        # initiate instruct agent: ZERO_SHOT_REACT_DESCRIPTION
+        self.instruct_agent = initialize_agent(
                 tools,
                 self.llm, 
                 agent = AgentType.ZERO_SHOT_REACT_DESCRIPTION,
@@ -368,6 +350,7 @@ class ChatController():
 
 
     def _initialize_log(self):
+        # Upon start, all the .log files will be deleted and changed to .txt files
         for path in  Path(log_path).glob('**/*.log'):
             file = str(path)
             file_name = path.stem
@@ -381,7 +364,7 @@ class ChatController():
 
     def _initialize_grader(self, embeddings=OpenAIEmbeddings(), llm = ChatOpenAI(temperature=0.0, cache=False)):
 
-        # initialize grader agent
+        # initialize grader agent. Grader shares the same memory as study companion
         # Conversational Retrieval Agent: https://python.langchain.com/docs/use_cases/question_answering/how_to/conversational_retrieval_agents
         system_message = SystemMessage(
         content=(
@@ -405,65 +388,48 @@ class ChatController():
         system_message=system_message,
         extra_prompt_messages=[MessagesPlaceholder(variable_name="chat_history")]
         )
-
         agent = OpenAIFunctionsAgent(llm=llm, tools=self.study_tools, prompt=prompt)
         self.grader_agent = AgentExecutor(agent=agent, 
                                         tools=self.study_tools, 
-                                        memory=self.qa_memory, 
+                                        memory=self.study_memory, 
                                         # verbose=True,
                                         return_intermediate_steps=True, 
                                         handle_parsing_errors=True,
                                         callbacks = [self.handler])
+        #switch on study mode after all initializaion is done
+        self.mode = "study"
         
 
 
 
-    def _initialize_study_companion(self, embeddings=OpenAIEmbeddings(), llm = ChatOpenAI(temperature=0.0, cache=False)):
-    
-        self.study_mode = True
-        self.study_tools = []
-        # print(json_request)
-        # try:
-        #     args = json.loads(json_request)
-        # except JSONDecodeError:
-        #     new_request = get_completion(f"""Format the following into JSON: {json_request}. 
-        #                                  The key should be named "interview material file". 
-        #                                  Output the JSON only.""")
-        #     print(new_request)
-        #     self.initialize_study_companion(new_request)
+    def _initialize_study_companion(self, json_request, llm = ChatOpenAI(temperature=0.0, cache=False)):
+ 
+        try: 
+            args = json.loads(json_request)
+        except JSONDecodeError:
+            args = {}       
+        if "interview topic" in args:
+            topic = args["interview topic"]
+        else:
+            topic = "none"
 
-        # read_path = args["interview material file"]
+        try:
+            self.study_tools
+        except AttributeError:
+            self.study_tools = self.web_tool
 
-        # create study material vector store and turn it into retriever
-        # name = f"faiss_study_material_{self.userid}"
-        # if retrieve_faiss_vectorstore(embeddings, name)==None:
-        #     create_vectorstore(embeddings, "faiss", read_path, "file", name)
-        # db = retrieve_faiss_vectorstore(embeddings, name)
-        # retriever = db.as_retriever()
-        # tools = create_db_tools(llm, db.as_retriever(), name, description)
-        
-        # initialize tools
-        # tool_name ="quiz_interview_material"
-        # tool_description =  """Useful for generating interview questions 
-        # Use this tool more than any other tool when asked to study, review, practice interview material for the given content."""
-        # study_tools = [create_retriever_tool(
-        #     retriever,
-        #     tool_name,
-        #     tool_description
-        #     )]
-        # print(f"Succesfully created study companion tool: {study_tools}")
+        # initialize new memory (shared betweeen study_agent and grader_agent)
+        self.study_memory = AgentTokenBufferMemory(memory_key="chat_history", llm=llm, input_key="input")
 
-        # initialize new memory (shared betweeen qa_agent and grader_agent)
-        self.qa_memory = AgentTokenBufferMemory(memory_key="chat_history", llm=llm, input_key="input")
-        #initialize grader agent
-        self.initialize_grader(self.study_tools)
         #initialize qa agent
         # Conversational Retrieval Agent: https://python.langchain.com/docs/use_cases/question_answering/how_to/conversational_retrieval_agents
 
-        template =   """
+        template =   f"""
             You are an AI job interviewer. Your role is to ask Human interview questions and help them understand their interview material better. 
 
-            The main interview content which you're to research for making the interview question  is contained in the tool "quiz_interview_material".
+            The main interview content which you're to research for making the interview question  is contained in the tool "quiz_interview_material", if available.
+
+            The main topic of the interview is: {topic} \n
 
             If the Human is asking a specific question instead, always answer the Human's specific question, then ask if they want to continue with the interview process.
 
@@ -506,13 +472,15 @@ class ChatController():
         #     )
         # agent = OpenAIFunctionsAgent(llm=llm, tools=study_tools, prompt=prompt)
 
-        self.qa_agent = AgentExecutor(agent=agent,
+        self.study_agent = AgentExecutor(agent=agent,
                                     tools=self.study_tools, 
-                                    memory=self.qa_memory, 
+                                    memory=self.study_memory, 
                                     # verbose=True,
                                     return_intermediate_steps=True,
                                     handle_parsing_errors=True,
                                     callbacks = [self.handler])
+        # call to initalize grader_agent
+        self._initialize_grader()
         
 
 
@@ -521,18 +489,18 @@ class ChatController():
     def askAI(self, userid:str, user_input:str, callbacks=None,) -> str:
 
         try:    
-            # BELOW IS USED WITH CONVERSATIONAL RETRIEVAL AGENT 
-            if self.study_mode:             
+            # BELOW IS USED WITH CONVERSATIONAL RETRIEVAL AGENT (grader_agent and study_agent)
+            if self.mode == "study":             
                 grader_feedback = self.grader_agent({"input":user_input}).get("output", "")
-                print(f"GGGG{grader_feedback}")
-                response = self.qa_agent({"input":user_input})
-                self.update_chat_history(self.qa_memory)
-
-            else:     
-            # BELOW IS USED WITH CHAT_CONVERSATIONAL_REACT_DESCRIPTION (neews chat_history as an input variable)
+                print(f"GRADER FEEDBACK: {grader_feedback}")
+                response = self.study_agent({"input":user_input})
+                # update chat history for instruct agent
+                self.update_chat_history(self.study_memory)
+            # BELOW IS USED WITH CHAT_CONVERSATIONAL_REACT_DESCRIPTION (chat_agent)
+            elif self.mode =="chat":     
                 response = self.chat_agent({"input": user_input, "chat_history":[], "entities": self.entities , "instructions":self.instructions}, callbacks = [callbacks])
                 # update chat history for instruct agent
-                self.update_chat_history(self.memory)
+                self.update_chat_history(self.chat_memory)
             if (update_instruction):
                 instructagent_q = Queue()
                 instructagent_p = Process(target = self.askInstructAgent, args=(instructagent_q, ))
@@ -552,7 +520,7 @@ class ChatController():
             
             # convert dict to string for chat output
             response = response.get("output", "sorry, something happened, try again.")
-        # let meta agent handle all exceptions with feedback loop
+        # let instruct agent handle all exceptions with feedback loop
         except Exception as e:
             print(e)
             # needs to get action and action input before error and add it to error message
@@ -571,19 +539,17 @@ class ChatController():
            
             self.askAI(userid, user_input, callbacks)        
 
-
         # pickle memory (sanity check)
         with open('conv_memory/' + userid + '.pickle', 'wb') as handle:
             pickle.dump(self.chat_history, handle, protocol=pickle.HIGHEST_PROTOCOL)
             # print(f"Sucessfully pickled conversation: {chat_history}")
-
         return response
     
 
     def askInstructAgent(self, queue, query = "") -> None:    
 
         try: 
-            feedback = self.meta_agent({"input":query, "chat_history":self.chat_history}).get("output", "")
+            feedback = self.instruct_agent({"input":query, "chat_history":self.chat_history}).get("output", "")
         except Exception as e:
             if type(e) == OutputParserException:
                 feedback = str(e)
@@ -627,8 +593,15 @@ class ChatController():
                 tool_name,
                 tool_description
                 )]
-            self.study_tools += study_tools
+            try:
+                self.study_tools
+            except AttributeError:
+                self.study_tools = study_tools
+            else:
+                self.study_tools += study_tools
             print(f"Succesfully created study companion tool: {study_tools}")
+        else:
+            print(f"Failed to initalize study tool for name: {name}")
 
         
     def update_entities(self,  text:str) -> None:
@@ -658,28 +631,28 @@ class ChatController():
             print(f"Successfully updated meta data: {data}")
     
 
-    # def create_interview_prep_helper_tool(self) -> List[Tool]:
+    def initiate_study_companion_tool(self) -> List[Tool]:
         
-    #     name = "interview_preparation_helper"
-    #     parameters = '{{"interview material file":"<interview material file>"}}'
-    #     description = f"""Use this to process interview material files whenever Human wants to study for an interview. 
-    #         Input should be JSON in the following format: {parameters} 
-    #         (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) 
-    #         Output should be telling the Human that you have successfully created a study companion who will generate interview questions based on the study material provided. """
-    #     tools = [
-    #         Tool(
-    #         name = name,
-    #         func = self.initialize_study_companion,
-    #         description = description, 
-    #         verbose = False,
-    #         )
-    #     ]
-    #     print("Succesfully created study helper tool.")
-    #     return tools
+        name = "interview_preparation_helper"
+        parameters = "interview topic: <interview topic>"
+        description = f"""Initiates the interview preparation process.  
+            Use this tool whenever Human wants to practice for an interview or study interview material. 
+            Input should be JSON in the following format: {parameters}
+            Output should be informing Human that you have succesfully created a study companion for them to review interview question and ask them if they could upload any study material if they have not already done so."""
+        tools = [
+            Tool(
+            name = name,
+            func = self._initialize_study_companion,
+            description = description, 
+            verbose = False,
+            )
+        ]
+        print("Succesfully created study helper tool.")
+        return tools
+
     
-    @tool 
-    def switch_to_study_mode(self) -> List[Tool]:
-        self_study_mode = True
+        
+
 
 
         
