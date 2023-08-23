@@ -76,7 +76,7 @@ langchain.llm_cache = RedisSemanticCache(
 )
 
 
-def split_doc(path='./web_data/', path_type='dir', splitter_type = "recursive", chunk_size=100, chunk_overlap=10):
+def split_doc(path='./web_data/', path_type='dir', splitter_type = "recursive", chunk_size=1000, chunk_overlap=100):
     if (path_type=="file"):
         loader = TextLoader(path)
     elif (path_type=="dir"):
@@ -84,7 +84,7 @@ def split_doc(path='./web_data/', path_type='dir', splitter_type = "recursive", 
     documents = loader.load()
     # Option 1: tiktoken from openai
     if (splitter_type=="tiktoken"):
-        text_splitter = CharacterTextSplitter.from_tiktoken_encoder(chunk_size=100, chunk_overlap=0)
+        text_splitter = CharacterTextSplitter.from_tiktoken_encoder(chunk_size=1000, chunk_overlap=0)
     # option 2: 
     elif (splitter_type=="recursive"):
         text_splitter = RecursiveCharacterTextSplitter(

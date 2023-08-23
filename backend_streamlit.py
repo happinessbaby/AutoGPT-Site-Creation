@@ -14,7 +14,7 @@ from callbacks.capturing_callback_handler import playback_callbacks
 from basic_utils import convert_to_txt, read_txt, retrieve_web_content
 from openai_api import check_content_safety
 from dotenv import load_dotenv, find_dotenv
-from common_utils import categorize_content
+from common_utils import  check_content
 import asyncio
 import concurrent.futures
 import subprocess
@@ -207,6 +207,7 @@ class Chat(ChatController):
                             if file_entities_list:
                                 for file_entity in file_entities_list:
                                     self.new_chat.update_entities(file_entity)
+                            #TODO: find the best place to uupdate study tools
                             self.new_chat.update_study_tools()
                             
                         if link:
@@ -269,16 +270,15 @@ class Chat(ChatController):
                 st.session_state.questions.append(question)
                 st.session_state.responses.append(response)
             if st.session_state['responses']:
-                for i in range(len(st.session_state['responses'])):
+                for i in range(len(st.session_state['responses'])-1, -1, -1):
                     message(st.session_state['questions'][i], is_user=True, key=str(i) + '_user',  avatar_style="initials", seed="Yueqi")
                     message(st.session_state['responses'][i], key=str(i), avatar_style="initials", seed="AI")
 
 
+
     def process_file(self, uploaded_files, queue):
+
         entity_list = []
-        resume_entity=""
-        cover_letter_entity =""
-        study_material_name = f"faiss_study_material_{st.session_state.userid}"
         for uploaded_file in uploaded_files:
             file_ext = Path(uploaded_file.name).suffix
             tmp_filename = str(uuid.uuid4())+file_ext
@@ -288,50 +288,51 @@ class Chat(ChatController):
             read_path =  os.path.join(upload_file_path, Path(tmp_filename).stem+'.txt')
             # Convert file to txt and save it to uploads
             convert_to_txt(tmp_save_path, read_path)
-            #TODO: right now check_content safety has a token limit since texts are not chunked
-            if (check_content_safety(file=read_path)):
-                content_type = categorize_content(read_txt(read_path))
-                if (content_type in categories):
-                    print(f"file content type: {content_type}")
-                    if content_type=="resume":
-                        resume_entity = f"""resume file: {read_path}"""
-                    elif content_type == "cover letter":
-                        cover_letter_entity = f"""cover letter file: {read_path}"""
-                else:
-                    main_db = retrieve_faiss_vectorstore(OpenAIEmbeddings(), study_material_name)
-                    if main_db is None:
-                        create_vectorstore(OpenAIEmbeddings(), "faiss", read_path, "file", study_material_name)
-                        print(f"Successfully created vectorstore: {study_material_name}")
-                    else:
-                        db = create_vectorstore(OpenAIEmbeddings(), "faiss", read_path, "file", "temp")
-                        main_db.merge_from(db)
-                        print(f"Successfully merged vectorstore: {study_material_name}")
+            content_safe, content_type = check_content(read_path)
+            print(content_type, content_safe) 
+            if content_safe:
+                entity = self.process_content(content_type, read_path)
+                if entity:
+                    entity_list.append(entity)
             else:
-                    print("file content unsafe")
-        if resume_entity:
-            entity_list.append(resume_entity)
-        if cover_letter_entity:
-            entity_list.append(cover_letter_entity)
+                print("file content unsafe")
         queue.put(entity_list)
         
 
     def process_link(self, posting,  queue):
-        tmp_save_path = os.path.join(upload_link_path, str(uuid.uuid4())+".txt")
-        if (retrieve_web_content(posting, save_path = tmp_save_path)):
-            #TODO needs to check content safety too
-            content_type = categorize_content(read_txt(tmp_save_path))
-            if (content_type in categories):
-                print(f"link content type: {content_type}")
-                if content_type == "job posting":
-                    new_entity = f"""job posting link: {tmp_save_path}"""
-                    queue.put(new_entity)
+        entity = ""
+        save_path = os.path.join(upload_link_path, str(uuid.uuid4())+".txt")
+        if (retrieve_web_content(posting, save_path = save_path)):
+            content_safe, content_type = check_content(save_path)
+            if content_safe:
+                entity = self.process_content(content_type, save_path)
+                if entity:
+                    queue.put(entity)
             else:
                 print("link content rejected")
-                queue.put("")
+        queue.put(entity)
+
+
+    def process_content(self, content_type, read_path):
+        entity = ""
+        study_material_name = f"faiss_study_material_{st.session_state.userid}"
+        if content_type == "resume":
+            entity = f"""resume file: {read_path}"""
+        elif content_type == "cover letter":
+            entity = f"""cover letter file: {read_path}"""
+        elif content_type == "job posting":
+            entity = f"""job posting link: {read_path}"""
         else:
-            print("link content unsafe")
-            queue.put("")
-    
+            main_db = retrieve_faiss_vectorstore(OpenAIEmbeddings(), study_material_name)
+            if main_db is None:
+                create_vectorstore(OpenAIEmbeddings(), "faiss", read_path, "file", study_material_name)
+                print(f"Successfully created vectorstore: {study_material_name}")
+            else:
+                db = create_vectorstore(OpenAIEmbeddings(), "faiss", read_path, "file", "temp")
+                main_db.merge_from(db)
+                print(f"Successfully merged vectorstore: {study_material_name}")
+        return entity
+
 
 
 
@@ -369,11 +370,6 @@ class Chat(ChatController):
 
 
 if __name__ == '__main__':
-    # create_chatbot()
-    # with mp.Manager() as manager:
-    #     chat_agents = manager.dict()
-    #     p = mp.Process(target=initialize_chats, args=(chat_agents,))
-    #     p.start()
-    #     p.join()
+
     advisor = Chat()
     # asyncio.run(advisor.initialize())
