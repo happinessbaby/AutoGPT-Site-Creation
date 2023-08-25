@@ -77,6 +77,7 @@ langchain.llm_cache = RedisSemanticCache(
 
 
 def split_doc(path='./web_data/', path_type='dir', splitter_type = "recursive", chunk_size=1000, chunk_overlap=100):
+
     if (path_type=="file"):
         loader = TextLoader(path)
     elif (path_type=="dir"):
@@ -84,13 +85,14 @@ def split_doc(path='./web_data/', path_type='dir', splitter_type = "recursive", 
     documents = loader.load()
     # Option 1: tiktoken from openai
     if (splitter_type=="tiktoken"):
-        text_splitter = CharacterTextSplitter.from_tiktoken_encoder(chunk_size=1000, chunk_overlap=0)
+        text_splitter = CharacterTextSplitter.from_tiktoken_encoder(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     # option 2: 
     elif (splitter_type=="recursive"):
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size, 
             length_function = len,
-            chunk_overlap=chunk_overlap)
+            chunk_overlap=chunk_overlap,
+            separators=[" ", ",", "\n"])
     docs = text_splitter.split_documents(documents)
     return docs
 
@@ -267,12 +269,15 @@ def create_elastic_knn():
 
 
 def create_vectorstore(embeddings, vs_type, file, file_type, index_name, source=None):
-    docs = split_doc(file, file_type)
-    if (vs_type=="faiss"):
-        db=FAISS.from_documents(docs, embeddings)
-        db.save_local(index_name)
-    elif (vs_type=="redis"):
-        db=create_redis_index(docs, embeddings, index_name, source)
+    try: 
+        docs = split_doc(file, file_type, splitter_type="tiktoken")
+        if (vs_type=="faiss"):
+            db=FAISS.from_documents(docs, embeddings)
+            db.save_local(index_name)
+        elif (vs_type=="redis"):
+            db=create_redis_index(docs, embeddings, index_name, source)
+    except Exception as e:
+        raise e
     return db
 
 
@@ -328,7 +333,6 @@ def retrieve_faiss_vectorstore(embeddings, index_name):
         db = FAISS.load_local(index_name, embeddings)
         return db
     except Exception as e:
-        print(e)
         return None
 
 

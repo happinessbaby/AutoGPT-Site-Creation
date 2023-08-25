@@ -29,6 +29,7 @@ from langchain_utils import retrieve_faiss_vectorstore, create_vectorstore
 
 
 
+
 _ = load_dotenv(find_dotenv()) # read local .env file
 openai.api_key = os.environ['OPENAI_API_KEY']
 upload_file_path = os.environ["UPLOAD_FILE_PATH"]
@@ -57,6 +58,7 @@ class Chat(ChatController):
 
             if "userid" not in st.session_state:
                 st.session_state["userid"] = str(uuid.uuid4())
+                print(f"Session: {st.session_state.userid}")
                 # super().__init__(st.session_state.userid)
                 new_chat = ChatController(st.session_state.userid)
                 if "basechat" not in st.session_state:
@@ -175,7 +177,7 @@ class Chat(ChatController):
                     # with col3:
 
                     uploaded_files = st.file_uploader(label="Upload your file",
-                                                       type=["pdf","odt", "docx","txt", "zip", "pptx"], 
+                                                       type=["pdf","odt", "docx","txt", "zip", "pptx", "ipynb"], 
                                                        accept_multiple_files=True)
                     add_vertical_space(3)
                     link = st.text_input("Share your link", "", key = "link")
@@ -271,8 +273,8 @@ class Chat(ChatController):
                 st.session_state.responses.append(response)
             if st.session_state['responses']:
                 for i in range(len(st.session_state['responses'])-1, -1, -1):
-                    message(st.session_state['questions'][i], is_user=True, key=str(i) + '_user',  avatar_style="initials", seed="Yueqi")
                     message(st.session_state['responses'][i], key=str(i), avatar_style="initials", seed="AI")
+                    message(st.session_state['questions'][i], is_user=True, key=str(i) + '_user',  avatar_style="initials", seed="Yueqi")
 
 
 
@@ -288,10 +290,10 @@ class Chat(ChatController):
             read_path =  os.path.join(upload_file_path, Path(tmp_filename).stem+'.txt')
             # Convert file to txt and save it to uploads
             convert_to_txt(tmp_save_path, read_path)
-            content_safe, content_type = check_content(read_path)
-            print(content_type, content_safe) 
+            content_safe, content_type, content_topics = check_content(read_path)
+            print(content_type, content_safe, content_topics) 
             if content_safe:
-                entity = self.process_content(content_type, read_path)
+                entity = self.process_content(content_type, content_topics, read_path)
                 if entity:
                     entity_list.append(entity)
             else:
@@ -303,9 +305,9 @@ class Chat(ChatController):
         entity = ""
         save_path = os.path.join(upload_link_path, str(uuid.uuid4())+".txt")
         if (retrieve_web_content(posting, save_path = save_path)):
-            content_safe, content_type = check_content(save_path)
+            content_safe, content_type, content_topics = check_content(save_path)
             if content_safe:
-                entity = self.process_content(content_type, save_path)
+                entity = self.process_content(content_type, content_topics, save_path)
                 if entity:
                     queue.put(entity)
             else:
@@ -313,7 +315,7 @@ class Chat(ChatController):
         queue.put(entity)
 
 
-    def process_content(self, content_type, read_path):
+    def process_content(self, content_type, content_topics, read_path):
         entity = ""
         study_material_name = f"faiss_study_material_{st.session_state.userid}"
         if content_type == "resume":
@@ -323,6 +325,8 @@ class Chat(ChatController):
         elif content_type == "job posting":
             entity = f"""job posting link: {read_path}"""
         else:
+            if content_topics:
+                entity = f"""interview material topics: {str(content_topics)}"""
             main_db = retrieve_faiss_vectorstore(OpenAIEmbeddings(), study_material_name)
             if main_db is None:
                 create_vectorstore(OpenAIEmbeddings(), "faiss", read_path, "file", study_material_name)

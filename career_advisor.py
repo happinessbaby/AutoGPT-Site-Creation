@@ -72,6 +72,7 @@ from json import JSONDecodeError
 from common_utils import create_file_loader_tool
 from langchain.tools import tool, format_tool_to_openai_function
 import re
+from tenacity import retry, wait_exponential, stop_after_attempt
 
 
 
@@ -85,6 +86,10 @@ evaluate_result = False
 # The instruction update process is still being tested for effectiveness
 update_instruction = False
 delimiter = "####"
+word_count = 100
+memory_max_token = 500
+memory_key="chat_history"
+
 
 
 
@@ -94,13 +99,17 @@ delimiter = "####"
 
 class ChatController():
 
+    llm = ChatOpenAI(temperature=0.5, model_name="gpt-3.5-turbo-0613", streaming=True,)
+    embeddings = OpenAIEmbeddings()
+    handler = None
+    # retry_decorator = _create_retry_decorator(llm)
      
 
     def __init__(self, userid):
         self.userid = userid
-        self.llm = ChatOpenAI(temperature=0.5, model_name="gpt-4", cache=False, streaming=True,)
-        self.embeddings = OpenAIEmbeddings()
-        self.handler = None
+        # self.llm = ChatOpenAI(temperature=0.5, model_name="gpt-3.5-turbo-0613", streaming=True,)
+        # self.embeddings = OpenAIEmbeddings()
+        # self.handler = None
         self._initialize_chat_agent()
         if update_instruction:
             self._initialize_instruct_agent()
@@ -114,7 +123,8 @@ class ChatController():
         # Specific purpose tools
         cover_letter_tool = create_cover_letter_generator_tool()
         resume_advice_tool = create_resume_evaluator_tool()
-        file_loader_tool = create_file_loader_tool()
+        # load nonexisting files or used unnecssarily, tool may not be needed
+        # file_loader_tool = create_file_loader_tool()
         study_companion_tool = self.initiate_study_companion_tool()
         # General purpose tools
         redis_store = retrieve_redis_vectorstore(self.embeddings, "index_web_advice")
@@ -131,10 +141,10 @@ class ChatController():
             llm=self.llm, 
             search=search, 
         )
-        web_tool_description="""This is a web research tool. Use it only when you cannot find answers elsewhere. Always add source information."""
+        web_tool_description="""This is a web research tool. Use it only when you cannot find answers elsewhere. Always return source information."""
         self.web_tool = create_db_tools(self.llm, web_research_retriever, "faiss_web", web_tool_description)
         # gather all the tools together
-        self.tools = general_tool + cover_letter_tool + resume_advice_tool + self.web_tool + file_loader_tool + study_companion_tool
+        self.tools = general_tool + cover_letter_tool + resume_advice_tool + self.web_tool + study_companion_tool
 
         # initialize file callback logging
         logfile = log_path + f"{self.userid}.log"
@@ -157,13 +167,11 @@ class ChatController():
           
         If the AI does not know the answer to a question, it truthfully says it does not know. 
 
-        You are provided with information about entities the Human mentions. If available, they are very important.
+        You are provided with information about entities the Human mentioned. If available, they are very important.
 
         Always check the relevant entity information before answering a question.
 
         Relevant entity information: {entities}
-
-        You are also provided with specific questions that would help the Human. If relevant, ask them.
 
         Instructions: {instructions}
 
@@ -180,7 +188,7 @@ class ChatController():
         # initialize memory
         # self.memory = ConversationBufferMemory(llm=self.llm, memory_key="chat_history",return_messages=True, input_key="input")
         # self.memory = AgentTokenBufferMemory(memory_key="chat_history", llm=self.llm, return_messages=True, input_key="input")
-        self.chat_memory = ConversationBufferMemory(llm=self.llm, memory_key="chat_history", return_messages=True, input_key="input")
+        self.chat_memory = ConversationBufferMemory(llm=self.llm, memory_key=memory_key, return_messages=True, input_key="input", max_token_limit=memory_max_token)
         self.chat_memory.output_key = "output"  
         # initialize CHAT_CONVERSATIONAL_REACT_DESCRIPTION agent
         self.chat_agent  = initialize_agent(self.tools, 
@@ -368,19 +376,31 @@ class ChatController():
         # Conversational Retrieval Agent: https://python.langchain.com/docs/use_cases/question_answering/how_to/conversational_retrieval_agents
         system_message = SystemMessage(
         content=(
-          """Access your memory and retrieve the very last piece of the conversation, if available.
 
-          Determine if the AI has asked an interview question. If it has, you are to grade the Human input based on how well it answers the interview question.
+          """You are a professional interview grader who grades the quality of responses to interview questions. 
+          
+          Access your memory and retrieve the very last piece of the conversation, if available.
 
-          You will need to use your tool "quiz_interview_material", if relevant, to generate the correct answer to the interview question.
+          Determine if the AI has asked an interview question or a study material question. If it has, you are to grade the Human input based on how well it answers the question.
 
-          The Human may not know the answer or answered the question incorrectly.
+          You will need to use your tool "quiz_interview_material", if relevant, to first generate the correct answer to the interview question.
+        
+          correct answer: <answer to the interview question>
 
-          Therefore it is important that you provide an informative feedback to the Human in the format:
+          If the answer is cannot be found in the tool, use other tools or answer to your best knowledge. 
+
+          Remember, the Human may not know the answer or may have answered the question incorrectly.
+
+          Therefore it is important that you provide an informative feedback to the Human's response in the format:
 
           Feedback: <your feedback>
 
-          If to your best knowledge there was no interview question, or the Human is not answering in any way, you should not provide any feedback.
+          Your feedback should take both the correct answer and the Human's response into consideration. When the Human's response implies that they don't know the answer, provide the correct answer in your feedback.
+
+          If to your best knowledge the very last piece of conversation does not contain an interview question, do not provide any feedback since you only grades interview questions. 
+
+
+        
             """
         )
         )
@@ -419,33 +439,31 @@ class ChatController():
             self.study_tools = self.web_tool
 
         # initialize new memory (shared betweeen study_agent and grader_agent)
-        self.study_memory = AgentTokenBufferMemory(memory_key="chat_history", llm=llm, input_key="input")
+        self.study_memory = AgentTokenBufferMemory(memory_key=memory_key, llm=llm, input_key="input", max_token_limit=memory_max_token)
 
         #initialize qa agent
         # Conversational Retrieval Agent: https://python.langchain.com/docs/use_cases/question_answering/how_to/conversational_retrieval_agents
 
         template =   f"""
-            You are an AI job interviewer. Your role is to ask Human interview questions and help them understand their interview material better. 
+            You are an AI job interviewer who asks Human interview questions and helps them understand their interview material better. 
 
-            The main interview content which you're to research for making the interview question  is contained in the tool "quiz_interview_material", if available.
+            The specific interview content which you're to research for making personalized interview questions  is contained in the tool "quiz_interview_material", if available.
 
-            The main topic of the interview is: {topic} \n
+            The main topics of the interview are: {topic} \n
 
             If the Human is asking a specific question instead, always answer the Human's specific question, then ask if they want to continue with the interview process.
 
-            During  the interview process, if the Human is not asking a specific question, then the Human is answering an interview question.
+            As an interviewer, you do not need to assess Human's response to your questions. Their response will be sent to a professional, who will provide you with professional feedbacks.         
 
-            You can ignore the answer as it will be sent to a professional grader. 
+            Sometimes you will be provided with the professional grader's feedback. You need to relay the grader's feedback to the Human in a timely manner.
 
-            Sometimes you will be provided with the grader's feedback. You need to relay the grader's feedback to the Human.
+            To do this, access your memory and retrieve the very last piece of conversation. If there is professional feedback in it, please always pass this on to the Human as soon as appropriate. 
 
-            To do this, access your memory and retrieve the last piece of conversation. If there is Feedback in it, please always pass this on to the Human. 
 
-            Remember, unless you're told to stop, you should not stop asking interview questions in the format: 
+            Always remember your role as an interviewer. Unless you're told to stop interviewing, you should not stop asking interview questions in the format: 
 
             Question: <new interview question>
-
-            Also remember, do not ask the same question twice!
+   
 
            """
         
@@ -485,7 +503,10 @@ class ChatController():
 
 
 
-
+    @retry(
+        wait=wait_exponential(multiplier=1, min=4, max=10),  # Exponential backoff between retries
+        stop=stop_after_attempt(5)  # Maximum number of retry attempts
+    )
     def askAI(self, userid:str, user_input:str, callbacks=None,) -> str:
 
         try:    
@@ -586,8 +607,9 @@ class ChatController():
         if db is not None:
             retriever = db.as_retriever()
             tool_name ="quiz_interview_material"
-            tool_description =  """Useful for generating interview questions and answers.
-            Use this tool more than any other tool when asked to study, review, practice interview material for the given content."""
+            tool_description =  """Useful for generating interview questions and answers. 
+            Use this tool more than any other tool when asked to study, review, practice interview material for the topics in interview material topics. 
+            Do not use this tool to load any files or documents. This should be used only for searching and generating questions and answers of the relevant topics. """
             study_tools = [create_retriever_tool(
                 retriever,
                 tool_name,
@@ -599,9 +621,9 @@ class ChatController():
                 self.study_tools = study_tools
             else:
                 self.study_tools += study_tools
-            print(f"Succesfully created study companion tool: {study_tools}")
+            print(f"Succesfully created study companion tool: {name}")
         else:
-            print(f"Failed to initalize study tool for name: {name}")
+            print(f"Failed to initalize study tool: {name}")
 
         
     def update_entities(self,  text:str) -> None:
@@ -635,8 +657,9 @@ class ChatController():
         
         name = "interview_preparation_helper"
         parameters = "interview topic: <interview topic>"
-        description = f"""Initiates the interview preparation process.  
+        description = f"""Initiates the study session for interview preparation.
             Use this tool whenever Human wants to practice for an interview or study interview material. 
+            Also use this tool when user asks questions about a topic that's in interview material topics. This implies they want to help with the study material. 
             Input should be JSON in the following format: {parameters}
             Output should be informing Human that you have succesfully created a study companion for them to review interview question and ask them if they could upload any study material if they have not already done so."""
         tools = [
@@ -649,6 +672,8 @@ class ChatController():
         ]
         print("Succesfully created study helper tool.")
         return tools
+    
+    
 
     
         
