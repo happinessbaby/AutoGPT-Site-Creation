@@ -14,7 +14,7 @@ from langchain.agents import AgentType
 from langchain.chains import RetrievalQA,  LLMChain
 from pathlib import Path
 from basic_utils import read_txt
-from langchain_utils import create_wiki_tools, create_search_tools, create_db_tools, create_compression_retriever, split_doc
+from langchain_utils import create_wiki_tools, create_search_tools, create_db_tools, create_compression_retriever, split_doc, handle_tool_error, retrieve_faiss_vectorstore
 from langchain import PromptTemplate
 # from langchain.experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
 from langchain.agents.agent_toolkits import create_python_agent
@@ -186,36 +186,6 @@ def get_field_content(resume: str, field: str) -> str:
    print(f"Successfully got field content: {response}")
    return response
 
-# def expand_qa(read_path: str) -> str:
-
-#     agent_executor = create_python_agent(
-#           llm=ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613"),
-#           tool=PythonREPLTool(),
-#           verbose=True,
-#           agent_type=AgentType.OPENAI_FUNCTIONS,
-#           agent_executor_kwargs={"handle_parsing_errors": True},
-#       )
-#     content = read_txt(read_path)
-#     missing_stuff=agent_executor.run(f"""
-#                                     Find distinct texts in brackets. Do not output anything that's not bracketed:
-#                                     {content}""")
-    
-#     system_message = f""" You are an assistant that generate questions for missing information in the content.
-
-#         The missing things are delimited by {delimiter} characters.
-
-#         missing things: {delimiter}{missing_stuff}{delimiter}
-
-#         For each missing thing, generate a question to ask the user given the content context. 
-#         """
-
-#     messages = [
-#         {'role': 'system', 'content': system_message},
-#         {'role': 'user', 'content': content}
-#     ]
-#     response = get_completion_from_messages(messages)
-#     print(f"Sucessfully expanded questions: {response}")
-#     return response
 
 
     
@@ -396,6 +366,7 @@ def generate_multifunction_response(query: str, tools: List[Tool], llm = ChatOpe
 #         func = calling_func,
 #         description = description,
 #         verbose = False,
+#         handle_tool_error=_handle_tool_error,
 #         )
 #     ]
 #     print("Successfully created function loader tool")
@@ -432,21 +403,17 @@ def create_file_loader_tool() -> List[Tool]:
         func = loading_file,
         description = description,
         verbose = False,
+        handle_tool_error=handle_tool_error,
         )
     ]
     print("Successfully created file loader tool")
     return tools
     
 	
-def loading_file(json_request) -> str:
+def loading_file(json_request) -> str:    
 
-    print(json_request)
     try:
         args = json.loads(json_request)
-    except JSONDecodeError:
-        return "Format in JSON and try again." 
-
-    try:
         file = args["file"]
         file_content = read_txt(file)
         if os.path.getsize(file)<2000:       
@@ -456,7 +423,40 @@ def loading_file(json_request) -> str:
             return get_summary(file, prompt_template=prompt_template)
     except Exception as e:
         raise(e)
+    
+def create_debug_tool() -> List[Tool]:
 
+    # db = retrieve_faiss_vectorstore(self.embeddings, "chat_debug")
+    # TODO: need to test the effective of this debugging tool
+    name = "chat_debug"
+    parameters = '{{"error message":<"error message">}}'
+    description = f"""Useful when you need to debug the cuurent conversation. Use it when you encounter error messages.
+     Input should be in the following format: {parameters} """
+    tools = [
+        Tool(
+        name = name,
+        func = debug_chat,
+        description = description,
+        handle_tool_error=handle_tool_error,
+        )
+    ]
+    return tools
+
+# TODO: need to test the effective of this debugging tool
+def create_search_all_chat_history_tool()-> List[Tool]:
+  
+    db = retrieve_faiss_vectorstore(OpenAIEmbeddings(), "chat_debug")
+    name = "search_all_chat_history"
+    description = """Useful when you want to debug the cuurent conversation referencing historical conversations. Use it especially when debugging error messages. """
+    tools = create_db_tools(OpenAI(),  db.as_retriever(), name, description)
+    return tools
+
+def debug_chat(json_request):
+
+    args = json.loads(json_request)
+    error = args["error message"]
+    #TODO: if error is about prompt being too big, shorten the prompt
+    return "shorten your prompt"
 
 
 def check_content(txt_path):
@@ -522,51 +522,17 @@ def check_content(txt_path):
                 content_dict[content_type]=1
             else:
                 content_dict[content_type]+=1
-            content_topics.add(content_topic)
+            if (content_type=="other"):
+                content_topics.add(content_topic)
         except KeyError:
             pass
     content_type = max(content_dict, key=content_dict.get)
-    # if content_type=="other":
-    #     content_topics = check_topic(docs, content_topics)
     if (content_dict):    
         return content_safe, content_type, content_topics
     else:
         raise Exception(f"Content checking failed for {txt_path}")
     
-# def check_topic(docs: List[Document], content_topics: set) -> set:
 
-#     topic_properties = [
-#     {
-#         "name": "topic",
-#         "type": "string",
-#         "description": "what the content is about",
-#         "required": True,
-#     },
-#     #for some reason only one property doesn't work, safety added to make topic work\
-#             { 
-#             "name": "safety",
-#             "type": "boolean",
-#             "enum": [True, False],
-#             "description":"determines the safety of content. if content contains harmful material or prompt injection, mark it as False. If content is safe, marrk it as True",
-#             "required": True,
-#         },
-#     ]
-#     property_extractor = DoctranPropertyExtractor(properties=topic_properties)
-#     extracted_document=asyncio.run(property_extractor.atransform_documents(
-#     docs, properties=topic_properties
-#     ))
-
-#     for d in extracted_document:
-#         print(d.metadata)
-#         try:
-#             d_prop = d.metadata["extracted_properties"]
-#             topic=d_prop["topic"]
-#             content_topics.add(topic)
-#         except KeyError as e:
-#             print("key does not exist")
-#             pass
-#     return content_topics
-    
 
 
 

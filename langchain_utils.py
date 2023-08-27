@@ -55,6 +55,7 @@ from langchain.text_splitter import CharacterTextSplitter
 from langchain.retrievers.document_compressors import EmbeddingsFilter
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain.docstore.document import Document
+from langchain.tools.base import ToolException
 
 
 
@@ -76,7 +77,7 @@ langchain.llm_cache = RedisSemanticCache(
 )
 
 
-def split_doc(path='./web_data/', path_type='dir', splitter_type = "recursive", chunk_size=1000, chunk_overlap=100):
+def split_doc(path='./web_data/', path_type='dir', splitter_type = "recursive", chunk_size=200, chunk_overlap=10):
 
     if (path_type=="file"):
         loader = TextLoader(path)
@@ -115,12 +116,14 @@ def create_wiki_tools():
         Tool(
             name = "Search",
             func = docstore.search,
-            description= "Search for a term in the docstore."
+            description= "Search for a term in the docstore.",
+            handle_tool_error=handle_tool_error,
         ),
         Tool(
             name = "Lookup",
             func = docstore.lookup,
-            description = "Lookup a term in the docstore."
+            description = "Lookup a term in the docstore.",
+            handle_tool_error=handle_tool_error,
         ),
     ]
     return tools
@@ -147,6 +150,7 @@ def create_search_tools(name, top_n):
             name = "Google Search", 
             description= "useful for when you need to ask with search",
             func=search.run,
+            handle_tool_error = handle_tool_error,
         ),
         ]
     elif (name=="serp"):
@@ -156,6 +160,7 @@ def create_search_tools(name, top_n):
             name="SerpSearch",
             description= "useful for when you need to ask with search",
             func=search.run,
+            handle_tool_error=handle_tool_error,
         ),
         ]
     return tool
@@ -170,42 +175,23 @@ def create_db_tools(llm, retriever, name, description):
         name=name,
         description=description,
         func=RetrievalQA.from_chain_type(llm=llm, retriever=retriever),
+        handle_tool_error=handle_tool_error,
     ),
     ]
     print(f"Succesfully created {name} tool")
     return tool
 
-# def create_vectorstore_agent_toolkit(embeddings, llm, vs_type, redis_index_name="", faiss_index_name=""):
-#     if vs_type=="general":
-#         redis_store = retrieve_redis_vectorstore(embeddings, redis_index_name)
-#         redis_vectorstore_info = VectorStoreInfo(
-#             name="redis web store",
-#             description="General advise on cover letter, resume, and job application",
-#             vectorstore=redis_store,
-#             )
-#         router_toolkit = VectorStoreRouterToolkit(
-#         vectorstores=[redis_vectorstore_info,], llm=llm
-#             )
-#     elif vs_type =="specific":
-#         # other_tools = create_cover_letter_generator_tool("accountant", "", "./resume_samples/sample1.txt", "./static/cover_letter/","" )
-#         redis_store = retrieve_redis_vectorstore(embeddings, redis_index_name)
-#         redis_vectorstore_info = VectorStoreInfo(
-#             name="redis web store",
-#             description="General advise database on cover letter, resume, and job application tips",
-#             vectorstore=redis_store,
-#             # other_tools = other_tools,
-#             )
-#         faiss_store = retrieve_faiss_vectorstore(embeddings, faiss_index_name)
-#         faiss_vectorstore_info = VectorStoreInfo(
-#             name="user specific store",
-#             description="""Specific user tailored database. 
-#             Use this tool more than 'redis_web_store' when users ask about things specific to their own resume, cover letter, and other documents.""",
-#             vectorstore=faiss_store
-#             )
-#         router_toolkit = VectorStoreRouterToolkit(
-#         vectorstores=[redis_vectorstore_info, faiss_vectorstore_info], llm=llm
-#             )   
-#     return router_toolkit
+def create_vectorstore_agent_toolkit(embeddings, llm, index_name=""):
+    store = retrieve_faiss_vectorstore(embeddings,index_name)
+    vectorstore_info = VectorStoreInfo(
+        name="chat_debug",
+        description="Debugs conversations when error messages appear",
+        vectorstore=store,
+        )
+    router_toolkit = VectorStoreRouterToolkit(
+    vectorstores=[vectorstore_info,], llm=llm
+        )  
+    return router_toolkit
 
 
 
@@ -340,6 +326,16 @@ def retrieve_faiss_vectorstore(embeddings, index_name):
 def add_embedding(embedding, text):
     query_embedding = embedding.embed_query(text)
     return query_embedding
+
+
+#TODO: handle different types differently
+def handle_tool_error(error: ToolException):
+    if error.args[0].startswith("Too many arguments to single-input tool"):
+        return "Format in Json with correct key and try again."
+    return (
+        "The following errors occurred during tool execution:"
+        + error.args[0]
+        + "Please try another tool.")
 
 
 
