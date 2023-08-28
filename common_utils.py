@@ -452,7 +452,7 @@ def debug_chat(json_request):
 # TODO: need to test the effective of this debugging tool
 def create_search_all_chat_history_tool()-> List[Tool]:
   
-    db = retrieve_faiss_vectorstore(OpenAIEmbeddings(), "chat_debug")
+    db = retrieve_faiss_vectorstore("chat_debug")
     name = "search_all_chat_history"
     description = """Useful when you want to debug the cuurent conversation referencing historical conversations. Use it especially when debugging error messages. """
     tools = create_db_tools(OpenAI(),  db.as_retriever(), name, description)

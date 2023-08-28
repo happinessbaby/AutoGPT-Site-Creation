@@ -25,7 +25,7 @@ import requests
 from functools import lru_cache
 import multiprocessing as mp
 from langchain.embeddings import OpenAIEmbeddings
-from langchain_utils import retrieve_faiss_vectorstore, create_vectorstore
+from langchain_utils import retrieve_faiss_vectorstore, create_vectorstore, merge_faiss_vectorstore
 
 
 
@@ -306,6 +306,7 @@ class Chat(ChatController):
         
 
     def process_link(self, posting,  queue):
+
         entity = ""
         save_path = os.path.join(upload_link_path, str(uuid.uuid4())+".txt")
         if (retrieve_web_content(posting, save_path = save_path)):
@@ -320,27 +321,38 @@ class Chat(ChatController):
 
 
     def process_content(self, content_type, content_topics, read_path):
+
         entity = ""
-        interview_material = f"faiss_interview_material_{st.session_state.userid}"
         if content_type == "resume":
             entity = f"""resume file: {read_path}"""
+            # create a vector store for resume
+            resume = f"faiss_resume_{st.session_state.userid}"
+            create_vectorstore("faiss", read_path, "file", resume)
         elif content_type == "cover letter":
+            cover_letter = f"faiss_cover_letter_{st.session_state.userid}"
+            create_vectorstore("faiss", read_path, "file", cover_letter)
             entity = f"""cover letter file: {read_path}"""
         elif content_type == "job posting":
             entity = f"""job posting link: {read_path}"""
+            job_posting = f"faiss_job_posting_{st.session_state.userid}"
+            create_vectorstore("faiss", read_path, "file", job_posting)
         else:
             if content_topics:
                 entity = f"""interview material topics: {str(content_topics)}"""
+            interview_material = f"faiss_interview_material_{st.session_state.userid}"
+            merge_faiss_vectorstore( interview_material, read_path)
             # creates a vector store for interview materials
-            main_db = retrieve_faiss_vectorstore(OpenAIEmbeddings(), interview_material)
-            if main_db is None:
-                create_vectorstore(OpenAIEmbeddings(), "faiss", read_path, "file", interview_material)
-                print(f"Successfully created vectorstore: {interview_material}")
-            else:
-                db = create_vectorstore(OpenAIEmbeddings(), "faiss", read_path, "file", "temp")
-                main_db.merge_from(db)
-                print(f"Successfully merged vectorstore: {interview_material}")
+            # main_db = retrieve_faiss_vectorstore(OpenAIEmbeddings(), interview_material)
+            # if main_db is None:
+            #     create_vectorstore(OpenAIEmbeddings(), "faiss", read_path, "file", interview_material)
+            #     print(f"Successfully created vectorstore: {interview_material}")
+            # else:
+            #     db = create_vectorstore(OpenAIEmbeddings(), "faiss", read_path, "file", "temp")
+            #     main_db.merge_from(db)
+            #     print(f"Successfully merged vectorstore: {interview_material}")
         return entity
+    
+
 
 
 

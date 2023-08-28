@@ -1,7 +1,6 @@
 from langchain.agents.react.base import DocstoreExplorer
 from langchain.document_loaders import TextLoader, DirectoryLoader
 from langchain.docstore.wikipedia import Wikipedia
-from langchain.vectorstores import DocArrayInMemorySearch
 from langchain.indexes import VectorstoreIndexCreator
 from langchain.chat_models import ChatOpenAI
 from langchain.tools.python.tool import PythonREPLTool
@@ -15,17 +14,12 @@ from ssl import create_default_context
 from langchain.prompts import BaseChatPromptTemplate
 from langchain.agents import Tool, AgentExecutor, LLMSingleActionAgent, AgentOutputParser, initialize_agent, Tool
 from langchain.schema import AgentAction, AgentFinish, HumanMessage
-from typing import List, Union
-import re
 from langchain import LLMChain
 from langchain.chains.summarize import load_summarize_chain
-from langchain.vectorstores import Chroma
 from langchain import PromptTemplate
 from langchain.chains import RetrievalQA, RetrievalQAWithSourcesChain, TransformChain
 from langchain.memory import ConversationBufferMemory
 from langchain.chains.qa_with_sources import load_qa_with_sources_chain, stuff_prompt
-import subprocess
-import sys
 import os
 from feast import FeatureStore
 from langchain.text_splitter import CharacterTextSplitter,  RecursiveCharacterTextSplitter
@@ -36,11 +30,12 @@ import langchain
 from langchain.cache import RedisCache
 from langchain.cache import RedisSemanticCache
 import json
+from typing import List, Union
+import re
 from langchain.tools import tool
 from langchain.agents.agent_types import AgentType
 from langchain.agents.agent_toolkits import create_python_agent
-from langchain.chains import RetrievalQA
-from langchain.vectorstores import FAISS
+from langchain.vectorstores import FAISS,  DocArrayInMemorySearch
 from pydantic import BaseModel, Field
 from langchain.agents.agent_toolkits import (
     create_vectorstore_agent,
@@ -77,7 +72,29 @@ langchain.llm_cache = RedisSemanticCache(
 )
 
 
-def split_doc(path='./web_data/', path_type='dir', splitter_type = "recursive", chunk_size=200, chunk_overlap=10):
+def split_doc(path='./web_data/', path_type='dir', splitter_type = "recursive", chunk_size=200, chunk_overlap=10) -> List[Document]:
+
+    """Splits file or files in directory into different sized chunks with different text splitters.
+    
+    For the purpose of splitting text and text splitter types, reference: https://python.langchain.com/docs/modules/data_connection/document_transformers/
+    
+    Keyword Args:
+
+        path (str): file or directory path
+
+        path_type (str): "file" or "dir"
+
+        splitter_type (str): "recursive" or "tiktoken"
+
+        chunk_size (int): smaller chunks in retrieval tend to alleviate going over token limit
+
+        chunk_overlap (int): how many characters or tokens overlaps with the previous chunk
+
+    Returns:
+
+        List[Documents]
+    
+    """
 
     if (path_type=="file"):
         loader = TextLoader(path)
@@ -99,6 +116,7 @@ def split_doc(path='./web_data/', path_type='dir', splitter_type = "recursive", 
 
 
 def get_index(path = ".", path_type="file"):
+
     if (path_type=="file"):
         loader = TextLoader(path, encoding='utf8')
     elif (path_type=="dir"):
@@ -110,7 +128,16 @@ def get_index(path = ".", path_type="file"):
     return index
 
 
-def create_wiki_tools():
+def create_wiki_tools() -> List[Tool]:
+
+    """
+    Creates wikipedia tool used to lookup and search in wikipedia
+
+    Args: None
+
+    Returns: List[Tool]
+    
+    """
     docstore = DocstoreExplorer(Wikipedia())
     tools = [
         Tool(
@@ -128,21 +155,35 @@ def create_wiki_tools():
     ]
     return tools
 
-def create_qa_tools(qa_chain):
-    tools = [
-        Tool(
-            name="QA Document",
-            # func = qa_chain.run,
-            func = qa_chain.__call__,
-            coroutine=qa_chain.acall, #if you want to use async
-            description="Useful for answering general questions",
-            # return_direct=True,
-        ),
-    ]
-    return tools
+# def create_qa_tools(qa_chain):
+#     tools = [
+#         Tool(
+#             name="QA Document",
+#             # func = qa_chain.run,
+#             func = qa_chain.__call__,
+#             coroutine=qa_chain.acall, #if you want to use async
+#             description="Useful for answering general questions",
+#             # return_direct=True,
+#         ),
+#     ]
+#     return tools
 
 
-def create_search_tools(name, top_n):
+def create_search_tools(name: str, top_n: int) -> List[Tool]:
+
+    """
+    Creates google search tool
+
+    Args: 
+
+        name (str): type of google search, "google" or "serp"
+
+        top_n (int): how many top results to search
+
+    Returns: List[Tool]
+
+    """
+
     if (name=="google"):
         search = GoogleSearchAPIWrapper(k=top_n)
         tool = [
@@ -168,7 +209,24 @@ def create_search_tools(name, top_n):
 class DocumentInput(BaseModel):
     question: str = Field()
 
-def create_db_tools(llm, retriever, name, description):
+def create_db_tools(llm: BaseModel, retriever, name: str, description: str) -> List[Tool]:
+
+    """
+    Creates databse search tool where vector store is used as a retriever tool
+
+    Args: 
+
+        llm (BaseModel): 
+
+        retriever: vectorstore retriever
+
+        name (str): tool name
+
+        description (str): tool description
+
+    Returns: List[Tool]
+
+    """
     tool = [
         Tool(
         args_schema=DocumentInput,
@@ -181,32 +239,36 @@ def create_db_tools(llm, retriever, name, description):
     print(f"Succesfully created {name} tool")
     return tool
 
-def create_vectorstore_agent_toolkit(embeddings, llm, index_name=""):
-    store = retrieve_faiss_vectorstore(embeddings,index_name)
-    vectorstore_info = VectorStoreInfo(
-        name="chat_debug",
-        description="Debugs conversations when error messages appear",
-        vectorstore=store,
-        )
-    router_toolkit = VectorStoreRouterToolkit(
-    vectorstores=[vectorstore_info,], llm=llm
-        )  
-    return router_toolkit
+# def create_vectorstore_agent_toolkit(embeddings, llm, index_name=""):
+#     store = retrieve_faiss_vectorstore(embeddings,index_name)
+#     vectorstore_info = VectorStoreInfo(
+#         name="chat_debug",
+#         description="Debugs conversations when error messages appear",
+#         vectorstore=store,
+#         )
+#     router_toolkit = VectorStoreRouterToolkit(
+#     vectorstores=[vectorstore_info,], llm=llm
+#         )  
+#     return router_toolkit
 
 
 
-def create_QASource_chain(chat, vectorstore, docs=None, chain_type="stuff", index_name="redis_web_advice"):
+# def create_QASource_chain(chat, vectorstore, docs=None, chain_type="stuff", index_name="redis_web_advice"):
 
-    qa_chain= load_qa_with_sources_chain(chat, chain_type=chain_type, prompt = stuff_prompt.PROMPT, document_prompt= stuff_prompt.EXAMPLE_PROMPT) 
+#     qa_chain= load_qa_with_sources_chain(chat, chain_type=chain_type, prompt = stuff_prompt.PROMPT, document_prompt= stuff_prompt.EXAMPLE_PROMPT) 
+#     qa = RetrievalQAWithSourcesChain(combine_documents_chain=qa_chain, retriever=vectorstore.as_retriever(),
+#                                      reduce_k_below_max_tokens=True, max_tokens_limit=3375,
+#                                      return_source_documents=True)
+#     return qa
 
+def create_compression_retriever(vectorstore = "index_web_advice") -> ContextualCompressionRetriever:
 
-    qa = RetrievalQAWithSourcesChain(combine_documents_chain=qa_chain, retriever=vectorstore.as_retriever(),
-                                     reduce_k_below_max_tokens=True, max_tokens_limit=3375,
-                                     return_source_documents=True)
+    """ Creates a compression retriever given vector store index name. 
+    
+    Please reference to its purpose: https://python.langchain.com/docs/modules/data_connection/retrievers/contextual_compression/
 
-    return qa
+    """
 
-def create_compression_retriever(vectorstore = "index_web_advice"):
     embeddings = OpenAIEmbeddings()
     splitter = CharacterTextSplitter(chunk_size=300, chunk_overlap=0, separator=". ")
     redundant_filter = EmbeddingsRedundantFilter(embeddings=embeddings)
@@ -245,7 +307,6 @@ def create_elastic_knn():
         f"The 'text' field value from the top hit is: '{knn_result['hits']['hits'][0]['_source']['text']}'"
     )
 
-
     # Initialize ElasticKnnSearch
     knn_search = ElasticKnnSearch(
         es_connection=es_connection, index_name="elastic-index", embedding=embeddings
@@ -254,67 +315,99 @@ def create_elastic_knn():
     return knn_search
 
 
-def create_vectorstore(embeddings, vs_type, file, file_type, index_name, source=None):
+def create_vectorstore(vs_type: str, file: str, file_type: str, index_name: str, embeddings = OpenAIEmbeddings()) -> FAISS or Redis:
+
+    """ Main function used to create any types of vector stores.
+
+    Args:
+
+        vs_type (str): vector store type, "faiss" or "redis"
+
+        file (str): file or directory path
+
+        file_type (str): "dir" or "file"
+
+        index_name (str): name of vector store 
+
+    Returns:
+
+        Faiss or Redis vector store
+
+
+    """
+
     try: 
         docs = split_doc(file, file_type, splitter_type="tiktoken")
         if (vs_type=="faiss"):
             db=FAISS.from_documents(docs, embeddings)
             db.save_local(index_name)
         elif (vs_type=="redis"):
-            db=create_redis_index(docs, embeddings, index_name, source)
+            db = Redis.from_documents(
+                docs, embeddings, redis_url=redis_url, index_name=index_name
+            )
+                # db=create_redis_index(docs, embeddings, index_name, source)
     except Exception as e:
         raise e
     return db
 
-
-def create_redis_index(docs, embedding, index_name, source=None):
-    if (source!=None):
-        texts = [d.page_content for d in docs]
-        # metadatas = [d.metadata for d in docs]
-        metadatas=[{"source": source} for i in range(len(texts))]
-
-        rds, keys = Redis.from_texts_return_keys(
-            texts, embedding, metadatas = metadatas, redis_url=redis_url, index_name=index_name
-        ) 
-    else:
-        rds = Redis.from_documents(
-        docs, embedding, redis_url=redis_url, index_name=index_name
-        )
-    return rds
-
-
-def add_redis_index(texts, embedding, index_name, source=None):
-    rds = Redis.from_existing_index(
-            embedding, redis_url=redis_url, index_name=index_name
-        )
-    if (source!=None):
-        metadatas=[{"source": source} for i in range(len(texts))]
-        print(rds.add_texts(texts, metadatas=metadatas))    
-    else:
-        print(rds.add_texts(texts))
         
 
 
-def retrieve_redis_vectorstore(embeddings, index_name):
-    try:
+def retrieve_redis_vectorstore(index_name, embeddings=OpenAIEmbeddings()) -> Redis or None:
 
+    """ Retrieves the Redis vector store if exists, else returns None  """
+
+    try:
         rds = Redis.from_existing_index(
         embeddings, redis_url=redis_url, index_name=index_name
         )
         return rds
     except Exception as e:
         raise e
+    
 
-def drop_redis_index(index_name):
+
+def drop_redis_index(index_name: str) -> None:
+
+    """ Drops the redis vector store with index name. """
+
     print(Redis.drop_index(index_name, delete_documents=True, redis_url=redis_url))
 
 
 
-def merge_faiss_vectorstore(db1, db2):
-    db1.merge_from(db2)
-    print(f"Successfully merged {db2} into {db1}")
 
-def retrieve_faiss_vectorstore(embeddings, index_name):
+
+def merge_faiss_vectorstore(index_name_main: str, file: str, embeddings=OpenAIEmbeddings()) -> None:
+
+    """ Merges files into existing faiss vecstores if main vector store exists. Else, main vector store is created.
+
+    Args:
+
+        index_name_main (str): name of the main faiss vector store where others merge into
+
+        file (str): file path 
+
+    Returns:
+
+        None
+    
+    """
+    
+    main_db = retrieve_faiss_vectorstore( index_name_main)
+    if main_db is None:
+        create_vectorstore("faiss", file, "file", index_name_main)
+        print(f"Successfully created vectorstore: {index_name_main}")
+    else:
+        db = create_vectorstore(embeddings, "faiss", file, "file", "temp")
+        main_db.merge_from(db)
+        print(f"Successfully merged vectorestore {index_name_main}")
+    
+
+
+def retrieve_faiss_vectorstore(index_name: str, embeddings = OpenAIEmbeddings()) -> FAISS or None:
+
+    """ Retrieves the Faiss vector store if exists, else returns None  """
+    
     try:
         db = FAISS.load_local(index_name, embeddings)
         return db
@@ -323,19 +416,24 @@ def retrieve_faiss_vectorstore(embeddings, index_name):
 
 
 
-def add_embedding(embedding, text):
-    query_embedding = embedding.embed_query(text)
-    return query_embedding
+# def add_embedding(embedding, text):
+#     query_embedding = embedding.embed_query(text)
+#     return query_embedding
 
 
 #TODO: handle different types differently
-def handle_tool_error(error: ToolException):
+def handle_tool_error(error: ToolException) -> str:
+
+    """ Manual Handling of tool exceptions. """
+
     if error.args[0].startswith("Too many arguments to single-input tool"):
         return "Format in Json with correct key and try again."
     return (
         "The following errors occurred during tool execution:"
         + error.args[0]
         + "Please try another tool.")
+
+
 
 
 
@@ -391,7 +489,7 @@ class CustomOutputParser(AgentOutputParser):
 
 if __name__ == '__main__':
 
-    db =  create_vectorstore(OpenAIEmbeddings(), "redis", "./web_data/", "dir", "index_web_advice")
+    db =  create_vectorstore("redis", "./web_data/", "dir", "index_web_advice")
 
     
 
