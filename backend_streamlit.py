@@ -102,7 +102,7 @@ class Chat(ChatController):
                 "":"",
                 "help me write a cover letter": "coverletter",
                 "help  evaluate my my resume": "resume",
-                "help me prepare for a job interview": "interview"
+                "I want to do a mock interview": "interview"
             }
 
 
@@ -209,9 +209,7 @@ class Chat(ChatController):
                             if file_entities_list:
                                 for file_entity in file_entities_list:
                                     self.new_chat.update_entities(file_entity)
-                            #TODO: find the best place to uupdate study tools
-                            self.new_chat.update_study_tools()
-                            
+                  
                         if link:
                             link_q = Queue()
                             link_p = Process(target = self.process_link, args=(link, link_q, ))
@@ -231,6 +229,12 @@ class Chat(ChatController):
                             response = self.new_chat.askAI(st.session_state.userid, question, callbacks=streamlit_handler)
                             st.session_state.questions.append(question)
                             st.session_state.responses.append(response)
+
+                        #TODO: find the best place to uupdate interview tools
+                        tools = self.new_chat.create_interview_material_tools()
+                        if tools:
+                            self.new_chat.update_tools(tools, "interview")
+                            self.new_chat.update_tools(tools, "chat")
 
 
                 add_vertical_space(3)
@@ -317,7 +321,7 @@ class Chat(ChatController):
 
     def process_content(self, content_type, content_topics, read_path):
         entity = ""
-        study_material_name = f"faiss_study_material_{st.session_state.userid}"
+        interview_material = f"faiss_interview_material_{st.session_state.userid}"
         if content_type == "resume":
             entity = f"""resume file: {read_path}"""
         elif content_type == "cover letter":
@@ -327,14 +331,15 @@ class Chat(ChatController):
         else:
             if content_topics:
                 entity = f"""interview material topics: {str(content_topics)}"""
-            main_db = retrieve_faiss_vectorstore(OpenAIEmbeddings(), study_material_name)
+            # creates a vector store for interview materials
+            main_db = retrieve_faiss_vectorstore(OpenAIEmbeddings(), interview_material)
             if main_db is None:
-                create_vectorstore(OpenAIEmbeddings(), "faiss", read_path, "file", study_material_name)
-                print(f"Successfully created vectorstore: {study_material_name}")
+                create_vectorstore(OpenAIEmbeddings(), "faiss", read_path, "file", interview_material)
+                print(f"Successfully created vectorstore: {interview_material}")
             else:
                 db = create_vectorstore(OpenAIEmbeddings(), "faiss", read_path, "file", "temp")
                 main_db.merge_from(db)
-                print(f"Successfully merged vectorstore: {study_material_name}")
+                print(f"Successfully merged vectorstore: {interview_material}")
         return entity
 
 

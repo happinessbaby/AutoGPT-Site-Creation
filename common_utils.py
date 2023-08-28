@@ -383,7 +383,6 @@ def generate_multifunction_response(query: str, tools: List[Tool], llm = ChatOpe
 #     #TODO: need to import function from other places
 #     function = locals()[func_name]
 #     function()
-    
 
 
 
@@ -442,6 +441,14 @@ def create_debug_tool() -> List[Tool]:
     ]
     return tools
 
+def debug_chat(json_request):
+
+    args = json.loads(json_request)
+    error = args["error message"]
+    #TODO: if error is about prompt being too big, shorten the prompt
+    return "shorten your prompt"
+
+
 # TODO: need to test the effective of this debugging tool
 def create_search_all_chat_history_tool()-> List[Tool]:
   
@@ -450,13 +457,6 @@ def create_search_all_chat_history_tool()-> List[Tool]:
     description = """Useful when you want to debug the cuurent conversation referencing historical conversations. Use it especially when debugging error messages. """
     tools = create_db_tools(OpenAI(),  db.as_retriever(), name, description)
     return tools
-
-def debug_chat(json_request):
-
-    args = json.loads(json_request)
-    error = args["error message"]
-    #TODO: if error is about prompt being too big, shorten the prompt
-    return "shorten your prompt"
 
 
 def check_content(txt_path):

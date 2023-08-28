@@ -84,7 +84,7 @@ langchain.debug=True
 # The result evaluation process slows down chat by a lot, unless necessary, set to false
 evaluate_result = False
 # The instruction update process is still being tested for effectiveness
-update_instruction = True
+update_instruction = False
 delimiter = "####"
 word_count = 100
 memory_max_token = 500
@@ -106,8 +106,8 @@ class ChatController():
     embeddings = OpenAIEmbeddings()
     chat_memory = ConversationBufferMemory(llm=llm, memory_key=memory_key, return_messages=True, input_key="input", output_key="output", max_token_limit=memory_max_token)
     # chat_memory = ReadOnlySharedMemory(memory=chat_memory)
-    # initialize new memory (shared betweeen study_agent and grader_agent)
-    study_memory = AgentTokenBufferMemory(memory_key=memory_key, llm=llm, input_key="input", max_token_limit=memory_max_token)
+    # initialize new memory (shared betweeen interviewer and grader_agent)
+    interview_memory = AgentTokenBufferMemory(memory_key=memory_key, llm=llm, input_key="input", max_token_limit=memory_max_token)
     # retry_decorator = _create_retry_decorator(llm)
 
 
@@ -126,7 +126,7 @@ class ChatController():
         # Specific purpose tools
         cover_letter_tool = create_cover_letter_generator_tool()
         resume_advice_tool = create_resume_evaluator_tool()
-        study_companion_tool = self.initiate_study_companion_tool()
+        interview_tool = self.initiate_interview_tool()
         # General purpose tools
         file_loader_tool = create_file_loader_tool()
         redis_store = retrieve_redis_vectorstore(self.embeddings, "index_web_advice")
@@ -153,7 +153,7 @@ class ChatController():
         # debug tool
         debug_tool = create_debug_tool()
         # gather all the tools together
-        self.tools = general_tool + cover_letter_tool + resume_advice_tool + web_tool + study_companion_tool + search_tool + file_loader_tool + wiki_tool + debug_tool
+        self.tools = general_tool + cover_letter_tool + resume_advice_tool + web_tool + interview_tool + search_tool + file_loader_tool + wiki_tool + debug_tool 
 
 
         # initialize evaluator
@@ -355,8 +355,8 @@ class ChatController():
         # If there is anything that can be improved about the interactions, you should revise the Instructions so that AI Assistant would quickly and correctly respond in the future.
         if self.mode == "chat":
             memory = self.chat_memory
-        elif self.mode == "study":
-            memory = self.study_memory
+        elif self.mode == "interview":
+            memory = self.interview_memory
 
         self.meta_agent = initialize_agent(
                 tools,
@@ -392,9 +392,9 @@ class ChatController():
 
 
 
-    def _initialize_grader(self, llm = ChatOpenAI(temperature=0.0, cache=False)):
+    def _initialize_interview_grader(self, llm = ChatOpenAI(temperature=0.0, cache=False)):
 
-        # initialize grader agent. Grader shares the same memory as study companion
+        # initialize grader agent. Grader shares the same memory as interviewer
         # Conversational Retrieval Agent: https://python.langchain.com/docs/use_cases/question_answering/how_to/conversational_retrieval_agents
         system_message = SystemMessage(
         content=(
@@ -403,9 +403,9 @@ class ChatController():
           
           Access your memory and retrieve the very last piece of the conversation, if available.
 
-          Determine if the AI has asked an interview question or a study material question. If it has, you are to grade the Human input based on how well it answers the question.
+          Determine if the AI has asked an interview questio. If it has, you are to grade the Human input based on how well it answers the question.
 
-          You will need to use your tool "quiz_interview_material", if relevant, to search for the correct answer to the interview question.
+          You will need to use your tool "search_interview_material", if relevant, to search for the correct answer to the interview question.
         
           If the answer is cannot be found in the your search, use other tools or answer to your best knowledge. 
 
@@ -427,21 +427,21 @@ class ChatController():
         system_message=system_message,
         extra_prompt_messages=[MessagesPlaceholder(variable_name="chat_history")]
         )
-        agent = OpenAIFunctionsAgent(llm=llm, tools=self.study_tools, prompt=prompt)
+        agent = OpenAIFunctionsAgent(llm=llm, tools=self.interview_tools, prompt=prompt)
         self.grader_agent = AgentExecutor(agent=agent, 
-                                        tools=self.study_tools, 
-                                        memory=self.study_memory, 
+                                        tools=self.interview_tools, 
+                                        memory=self.interview_memory, 
                                         # verbose=True,
                                         return_intermediate_steps=True, 
                                         handle_parsing_errors=True,
                                         callbacks = [self.handler])
-        #switch on study mode after all initializaion is done
-        self.mode = "study"
+        #switch on interview mode after all initializaion is done
+        self.mode = "interview"
         
 
 
 
-    def _initialize_study_companion(self, json_request, llm = ChatOpenAI(temperature=0.0, cache=False)):
+    def _initialize_interview_agent(self, json_request, llm = ChatOpenAI(temperature=0.0, cache=False)):
  
         try: 
             args = json.loads(json_request)
@@ -452,15 +452,14 @@ class ChatController():
         else:
             topic = ""
 
-        switch_chat_tool = self.switch_chat_tool()
+        # switch_chat_tool = self.switch_chat_tool()
         debug_tool = create_debug_tool()
         try:
-            self.study_tools
+            self.interview_tools
         except AttributeError:
-            self.study_tools = switch_chat_tool + debug_tool
+            self.interview_tools = [self.interview_stopper] + debug_tool
         else:
-            self.study_tools += switch_chat_tool + debug_tool
-
+            self.interview_tools += [self.interview_stopper] + debug_tool
 
         #initialize qa agent
         # Conversational Retrieval Agent: https://python.langchain.com/docs/use_cases/question_answering/how_to/conversational_retrieval_agents
@@ -468,9 +467,9 @@ class ChatController():
         template =   f"""
             You are an AI job interviewer who asks Human interview questions and helps them understand their interview material better. 
 
-            The specific interview content which you're to research for making personalized interview questions  is contained in the tool "quiz_interview_material", if available.
+            The specific interview content which you're to research for making personalized interview questions  is contained in the tool "search_interview_material", if available.
 
-            Human may also have asked for a specific topic to study: {topic}
+            Human may also have asked for a specific interview topic: {topic}
 
             If the Human is asking about other things, always answer the Human's specific question, then ask if they want to continue with the interview process.
 
@@ -498,7 +497,7 @@ class ChatController():
             extra_prompt_messages=[MessagesPlaceholder(variable_name="chat_history")]
             )
 
-        agent = OpenAIFunctionsAgent(llm=llm, tools=self.study_tools, prompt=prompt)
+        agent = OpenAIFunctionsAgent(llm=llm, tools=self.interview_tools, prompt=prompt)
 
         # messages = chat_prompt.format_messages(
         #           grader_feedback = self.grader_feedback,
@@ -511,20 +510,17 @@ class ChatController():
         #     )
         # agent = OpenAIFunctionsAgent(llm=llm, tools=study_tools, prompt=prompt)
 
-        self.study_agent = AgentExecutor(agent=agent,
-                                    tools=self.study_tools, 
-                                    memory=self.study_memory, 
+        self.interview_agent = AgentExecutor(agent=agent,
+                                    tools=self.interview_tools, 
+                                    memory=self.interview_memory, 
                                     # verbose=True,
                                     return_intermediate_steps=True,
                                     handle_parsing_errors=True,
                                     callbacks = [self.handler])
         # call to initalize grader_agent
-        self._initialize_grader()
+        self._initialize_interview_grader()
 
-        
-    def switch_chat_agent(self, json_request) -> None:
 
-        self.mode = "chat"
         
 
 
@@ -539,13 +535,13 @@ class ChatController():
     def askAI(self, userid:str, user_input:str, callbacks=None,) -> str:
 
         try:    
-            # BELOW IS USED WITH CONVERSATIONAL RETRIEVAL AGENT (grader_agent and study_agent)
+            # BELOW IS USED WITH CONVERSATIONAL RETRIEVAL AGENT (grader_agent and interviewer)
             if (update_instruction):
                 instruction = self.askMetaAgent()
-            if self.mode == "study":             
+            if self.mode == "interview":             
                 grader_feedback = self.grader_agent({"input":user_input}).get("output", "")
                 print(f"GRADER FEEDBACK: {grader_feedback}")
-                response = self.study_agent({"input":user_input})
+                response = self.interview_agent({"input":user_input})
                 # self.study_memory.chat_memory.add_ai_message(self.instructions)
                 # update chat history for instruct agent
                 # self.update_chat_history(self.study_memory)
@@ -603,7 +599,10 @@ class ChatController():
                 raise(e)
         return feedback
     
+
+
     def askEvalAgent(self, response, queue) -> None:
+        
         try:
             evaluation_result = self.evaluator.evaluate_agent_trajectory(
                 prediction=response["output"],
@@ -622,32 +621,39 @@ class ChatController():
     #     extracted_messages = memory.chat_memory.messages
     #     self.chat_history = messages_to_dict(extracted_messages)
 
+    def update_tools(self, tools, agent_type) -> None:
+        if agent_type == "chat":
+            self.tools += tools
+        elif agent_type == "interview":
+            try:
+                self.interview_tools
+            except AttributeError:
+                self.interview_tools = tools
+            else:
+                self.interview_tools += tools
+        print(f"Succesfully updated tool for {agent_type}")
 
     
-    def update_study_tools(self) -> None:      
+    def create_interview_material_tools(self) -> List[Tool]:      
 
-        name = f"faiss_study_material_{self.userid}"
+        name = f"faiss_interview_material_{self.userid}"
         db = retrieve_faiss_vectorstore(self.embeddings, name)
         if db is not None:
             retriever = db.as_retriever()
-            tool_name ="quiz_interview_material"
+            tool_name ="search_interview_material"
             tool_description =  """Useful for generating interview questions and answers. 
-            Use this tool more than any other tool when asked to study, review, practice interview material for the topics in interview material topics. 
-            Do not use this tool to load any files or documents. This should be used only for searching and generating questions and answers of the relevant topics. """
-            study_tools = [create_retriever_tool(
+            Use this tool more than any other tool during a mock interview session. This tool can also be used for questions about topics in the interview material topics. 
+            Do not use this tool to load any files or documents. This should be used only for searching and generating questions and answers of the relevant materials and topics. """
+            tools = [create_retriever_tool(
                 retriever,
                 tool_name,
                 tool_description
                 )]
-            try:
-                self.study_tools
-            except AttributeError:
-                self.study_tools = study_tools
-            else:
-                self.study_tools += study_tools
-            print(f"Succesfully created study companion tool: {tool_name}")
+            print(f"Succesfully created interview material tool: {tool_name}")
+            return tools
         else:
-            print(f"No vectorstore for study material created yet")
+            print(f"No vectorstore for interivew material created yet")
+            return []
 
         
     def update_entities(self,  text:str) -> None:
@@ -662,8 +668,9 @@ class ChatController():
 
     def delete_entities(self, type: str) -> None:
         starting_idices = [m.start() for m in re.finditer(type, self.entities)]
+        file_name_len = 68
         for idx in starting_idices:
-            self.entities = self.entities.replace(self.entities[idx: idx+68], "")
+            self.entities = self.entities.replace(self.entities[idx: idx+file_name_len], "")
 
     # def update_instructions(self, meta_output:str) -> None:
     #     delimiter = "Instructions: "
@@ -677,47 +684,32 @@ class ChatController():
             print(f"Successfully updated meta data: {data}")
     
 
-    def initiate_study_companion_tool(self) -> List[Tool]:
+    def initiate_interview_tool(self) -> List[Tool]:
         
-        name = "interview_preparation_helper"
+        name = "interview_initiator"
         parameters = '{{"interview topic: <interview topic>"}}'
-        description = f"""Initiates the study session for interview preparation.
-            Use this tool whenever Human wants to practice for an interview or study interview material. 
-            Also use this tool when user asks questions about a topic that's in interview material topics. This implies they want to help for the study material. 
+        description = f"""Initiates the interview process.
+            Use this tool whenever Human wants to conduct a mock interview. Do not use this tool for study purposes or answering interview questions. 
             Input should be JSON in the following format: {parameters} 
-            Output should be informing Human that you have succesfully created a study companion for them to review interview question and ask them if they could upload any study material if they have not already done so."""
+            Output should be informing Human that you have succesfully created an AI interviewer and ask them if they could upload any interview material if they have not already done so."""
         tools = [
             Tool(
             name = name,
-            func = self._initialize_study_companion,
+            func = self._initialize_interview_agent,
             description = description, 
             verbose = False,
             handle_tool_error=handle_tool_error,
             )
         ]
-        print("Succesfully created study helper tool.")
+        print("Succesfully created interview initiator tool.")
         return tools
 
-        
-
-    def switch_chat_tool(self) -> List[Tool]:
-
-        name = "interview_stopper"
-        description = f"""Ends the interview or study session. Use this whenever Human asks to end the interview or study session.
-                    Input is empty. 
-                    Output should be asking Human to provide a brief feedback on their session experience. """
-        tools = [
-            Tool(
-            name = name,
-            func = self.switch_chat_agent,
-            description=description,
-            verbose=False,
-            handle_tool_error=handle_tool_error,
-            )
-        ]
-        print("Sucessfully created switch back to chat agent tool")
-        return tools
-    
+    @tool
+    def interview_stopper(self, query) -> str:
+        """Ends the interview session. Use this whenever Human asks to end the interview session.
+            Input is empty. """        
+        self.mode = "chat"
+        return "Please provide a brief feedback on your experience"
 
 
 
