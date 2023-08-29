@@ -3,6 +3,7 @@ from langchain.document_loaders import TextLoader, DirectoryLoader
 from langchain.docstore.wikipedia import Wikipedia
 from langchain.indexes import VectorstoreIndexCreator
 from langchain.chat_models import ChatOpenAI
+from langchain.llms import OpenAI
 from langchain.tools.python.tool import PythonREPLTool
 from langchain.utilities import SerpAPIWrapper
 from langchain.utilities import GoogleSearchAPIWrapper
@@ -30,9 +31,10 @@ import langchain
 from langchain.cache import RedisCache
 from langchain.cache import RedisSemanticCache
 import json
-from typing import List, Union
+from typing import List, Union, Any
 import re
 from langchain.tools import tool
+from langchain.agents.agent_toolkits import create_retriever_tool
 from langchain.agents.agent_types import AgentType
 from langchain.agents.agent_toolkits import create_python_agent
 from langchain.vectorstores import FAISS,  DocArrayInMemorySearch
@@ -51,7 +53,10 @@ from langchain.retrievers.document_compressors import EmbeddingsFilter
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain.docstore.document import Document
 from langchain.tools.base import ToolException
-
+from basic_utils import read_txt
+from json import JSONDecodeError
+from langchain.document_transformers import LongContextReorder
+from langchain.retrievers import BM25Retriever, EnsembleRetriever
 
 
 
@@ -114,6 +119,18 @@ def split_doc(path='./web_data/', path_type='dir', splitter_type = "recursive", 
     docs = text_splitter.split_documents(documents)
     return docs
 
+def split_doc_file_size(txt_path: str, chunk_size=2000) -> List[Document]:
+
+    bytes = os.path.getsize(txt_path)
+    # if file is small, don't split
+    if bytes<4000:
+        docs = [Document(
+            page_content = read_txt(txt_path)
+        )]
+    else:
+        docs = split_doc(txt_path, "file", chunk_size=chunk_size)
+    return docs
+
 
 def get_index(path = ".", path_type="file"):
 
@@ -126,6 +143,30 @@ def get_index(path = ".", path_type="file"):
         vectorstore_cls=DocArrayInMemorySearch
     ).from_loaders([loader])
     return index
+
+    
+def reorder_compressed_docs(retriever: Any, query: str) -> List[Document]:
+
+    """ Reorders documents so that most relevant documents are at the beginning and the end, as in long context, the middle text tend to be ignored.
+
+     See: https://python.langchain.com/docs/modules/data_connection/document_transformers/post_retrieval/long_context_reorder
+
+     Args: 
+
+        retriever (Any): in this case, the retriever is Contextual Compression Cetriever as the compressor filters out irrelevant context
+
+        query (str): content of interest
+
+    Returns:
+
+        a list of reordered Langchain Documents
+
+    """
+    reordering = LongContextReorder()
+    compressed_docs = retriever.get_relevant_documents(query)
+    reordered_docs = reordering.transform_documents(compressed_docs)
+    return reordered_docs
+
 
 
 def create_wiki_tools() -> List[Tool]:
@@ -155,18 +196,18 @@ def create_wiki_tools() -> List[Tool]:
     ]
     return tools
 
-# def create_qa_tools(qa_chain):
-#     tools = [
-#         Tool(
-#             name="QA Document",
-#             # func = qa_chain.run,
-#             func = qa_chain.__call__,
-#             coroutine=qa_chain.acall, #if you want to use async
-#             description="Useful for answering general questions",
-#             # return_direct=True,
-#         ),
-#     ]
-#     return tools
+def create_qa_tools(qa_chain):
+    tools = [
+        Tool(
+            name="QA Document",
+            # func = qa_chain.run,
+            func = qa_chain.__call__,
+            coroutine=qa_chain.acall, #if you want to use async
+            description="Useful for answering general questions",
+            # return_direct=True,
+        ),
+    ]
+    return tools
 
 
 def create_search_tools(name: str, top_n: int) -> List[Tool]:
@@ -209,20 +250,26 @@ def create_search_tools(name: str, top_n: int) -> List[Tool]:
 class DocumentInput(BaseModel):
     question: str = Field()
 
-def create_db_tools(llm: BaseModel, retriever, name: str, description: str) -> List[Tool]:
+def create_db_tools(retriever: Any, name: str, description: str, llm=OpenAI(), chain_type="stuff") -> List[Tool]:
 
     """
-    Creates databse search tool where vector store is used as a retriever tool
+    Creates databse tool where vector store is used as a retriever. 
+
+    See: https://python.langchain.com/docs/use_cases/question_answering/how_to/vector_db_qa
 
     Args: 
 
-        llm (BaseModel): 
-
-        retriever: vectorstore retriever
+        retriever (Any): vectorstore retriever
 
         name (str): tool name
 
         description (str): tool description
+
+    Key Args:
+
+        llm: OpenAI() by default
+
+        chain_type: "stuff" by default
 
     Returns: List[Tool]
 
@@ -232,40 +279,89 @@ def create_db_tools(llm: BaseModel, retriever, name: str, description: str) -> L
         args_schema=DocumentInput,
         name=name,
         description=description,
-        func=RetrievalQA.from_chain_type(llm=llm, retriever=retriever),
+        func=RetrievalQA.from_chain_type(llm=llm, retriever=retriever, chain_type=chain_type),
         handle_tool_error=handle_tool_error,
     ),
     ]
-    print(f"Succesfully created {name} tool")
+    print(f"Succesfully created database tool: {name}")
     return tool
 
-# def create_vectorstore_agent_toolkit(embeddings, llm, index_name=""):
-#     store = retrieve_faiss_vectorstore(embeddings,index_name)
-#     vectorstore_info = VectorStoreInfo(
-#         name="chat_debug",
-#         description="Debugs conversations when error messages appear",
-#         vectorstore=store,
-#         )
-#     router_toolkit = VectorStoreRouterToolkit(
-#     vectorstores=[vectorstore_info,], llm=llm
-#         )  
-#     return router_toolkit
+
+def create_retriever_tools(vectorstore: Any, tool_name: str, tool_description: str) -> List[Tool]:   
+
+    """Create retriever tools from vector store for conversational retrieval agent
+    
+    See: https://python.langchain.com/docs/use_cases/question_answering/how_to/conversational_retrieval_agents
+    
+    Args:
+
+        vectorstore (Any): vector store to be used as retriever
+
+        tool_name: name of the tool
+
+        tool_description: description of the tool's usage
+
+    Returns:
+
+        List[Tool]
+
+    """   
+
+    retriever = vectorstore.as_retriever()
+    tool = [create_retriever_tool(
+        retriever,
+        tool_name,
+        tool_description
+        )]
+    print(f"Succesfully created retriever tool: {tool_name}")
+
+    return tool
+
+def create_vectorstore_agent_toolkit(embeddings, llm, index_name, vs_name, vs_description):
+
+    """ See: https://python.langchain.com/docs/integrations/toolkits/vectorstorehttps://python.langchain.com/docs/integrations/toolkits/vectorstore """
+
+    store = retrieve_faiss_vectorstore(embeddings,index_name)
+    vectorstore_info = VectorStoreInfo(
+        name=vs_name,
+        description=vs_description,
+        vectorstore=store,
+        )
+    router_toolkit = VectorStoreRouterToolkit(
+    vectorstores=[vectorstore_info,], llm=llm
+        )  
+    return router_toolkit
+
+def create_ensemble_retriever(docs: List[Document]) -> Any:
+
+    """See purpose and usage: https://python.langchain.com/docs/modules/data_connection/retrievers/ensemble"""
+
+    bm25_retriever = BM25Retriever.from_documents(docs)
+    bm25_retriever.k = 2
+    faiss_retriever = FAISS.from_documents(docs, OpenAIEmbeddings()).as_retriever(search_kwargs={"k": 2})
+    ensemble_retriever = EnsembleRetriever(retrievers=[bm25_retriever, faiss_retriever], weights=[0.5, 0.5])
+    return ensemble_retriever
 
 
 
-# def create_QASource_chain(chat, vectorstore, docs=None, chain_type="stuff", index_name="redis_web_advice"):
+def create_QASource_chain(chat, vectorstore, docs=None, chain_type="stuff", index_name="redis_web_advice"):
 
-#     qa_chain= load_qa_with_sources_chain(chat, chain_type=chain_type, prompt = stuff_prompt.PROMPT, document_prompt= stuff_prompt.EXAMPLE_PROMPT) 
-#     qa = RetrievalQAWithSourcesChain(combine_documents_chain=qa_chain, retriever=vectorstore.as_retriever(),
-#                                      reduce_k_below_max_tokens=True, max_tokens_limit=3375,
-#                                      return_source_documents=True)
-#     return qa
+    qa_chain= load_qa_with_sources_chain(chat, chain_type=chain_type, prompt = stuff_prompt.PROMPT, document_prompt= stuff_prompt.EXAMPLE_PROMPT) 
+    qa = RetrievalQAWithSourcesChain(combine_documents_chain=qa_chain, retriever=vectorstore.as_retriever(),
+                                     reduce_k_below_max_tokens=True, max_tokens_limit=3375,
+                                     return_source_documents=True)
+    return qa
+
 
 def create_compression_retriever(vectorstore = "index_web_advice") -> ContextualCompressionRetriever:
 
     """ Creates a compression retriever given vector store index name. 
     
-    Please reference to its purpose: https://python.langchain.com/docs/modules/data_connection/retrievers/contextual_compression/
+    TO see its purpose: https://python.langchain.com/docs/modules/data_connection/retrievers/contextual_compression/
+
+    Keyword Args:
+
+        vectorstore: default is "index_web_advice", files contained in "web_data" directory
 
     """
 
@@ -282,7 +378,6 @@ def create_compression_retriever(vectorstore = "index_web_advice") -> Contextual
     compression_retriever = ContextualCompressionRetriever(base_compressor=pipeline_compressor, base_retriever=retriever)
 
     return compression_retriever
-
 
 
 
@@ -377,30 +472,31 @@ def drop_redis_index(index_name: str) -> None:
 
 
 
-def merge_faiss_vectorstore(index_name_main: str, file: str, embeddings=OpenAIEmbeddings()) -> None:
+def merge_faiss_vectorstore(index_name_main: str, file: str, embeddings=OpenAIEmbeddings()) -> FAISS:
 
-    """ Merges files into existing faiss vecstores if main vector store exists. Else, main vector store is created.
+    """ Merges files into existing Faiss vecstores if main vector store exists. Else, main vector store is created.
 
     Args:
 
-        index_name_main (str): name of the main faiss vector store where others merge into
+        index_name_main (str): name of the main Faiss vector store where others would merge into
 
         file (str): file path 
 
     Returns:
 
-        None
+        main Faiss vector store 
     
     """
     
     main_db = retrieve_faiss_vectorstore( index_name_main)
     if main_db is None:
-        create_vectorstore("faiss", file, "file", index_name_main)
+        main_db = create_vectorstore("faiss", file, "file", index_name_main)
         print(f"Successfully created vectorstore: {index_name_main}")
     else:
         db = create_vectorstore(embeddings, "faiss", file, "file", "temp")
         main_db.merge_from(db)
         print(f"Successfully merged vectorestore {index_name_main}")
+    return main_db
     
 
 
@@ -424,9 +520,9 @@ def retrieve_faiss_vectorstore(index_name: str, embeddings = OpenAIEmbeddings())
 #TODO: handle different types differently
 def handle_tool_error(error: ToolException) -> str:
 
-    """ Manual Handling of tool exceptions. """
+    """ Handles tool exceptions. """
 
-    if error.args[0].startswith("Too many arguments to single-input tool"):
+    if error==JSONDecodeError or error.args[0].startswith("Too many arguments to single-input tool"):
         return "Format in Json with correct key and try again."
     return (
         "The following errors occurred during tool execution:"

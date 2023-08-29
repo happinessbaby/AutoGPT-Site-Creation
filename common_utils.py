@@ -14,7 +14,8 @@ from langchain.agents import AgentType
 from langchain.chains import RetrievalQA,  LLMChain
 from pathlib import Path
 from basic_utils import read_txt
-from langchain_utils import create_wiki_tools, create_search_tools, create_db_tools, create_compression_retriever, split_doc, handle_tool_error, retrieve_faiss_vectorstore
+from langchain_utils import ( create_wiki_tools, create_search_tools, create_db_tools, create_compression_retriever, create_ensemble_retriever,
+                              split_doc, handle_tool_error, retrieve_faiss_vectorstore, split_doc_file_size, reorder_compressed_docs)
 from langchain import PromptTemplate
 # from langchain.experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
 from langchain.agents.agent_toolkits import create_python_agent
@@ -34,7 +35,7 @@ from langchain.document_transformers import (
     LongContextReorder,
      DoctranPropertyExtractor,
 )
-from typing import Any, List
+from typing import Any, List, Union
 from langchain.docstore.document import Document
 from langchain.tools import tool
 import os
@@ -57,6 +58,23 @@ delimiter4 = '////'
 categories = ["resume", "cover letter", "job posting", "resume evaluation"]
 
 def extract_personal_information(resume: str,  llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> Any:
+
+    """ Extracts personal information from resume, including name, email, phone, and address.
+
+    Args:
+
+        resume (str): resume in text string format
+
+    Keyword Args:
+
+        llm (BaseModel): ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False) by default
+
+    Returns:
+
+        a dictionary containing the extracted information; if a field does not exist, its dictionary value will be -1.
+
+    
+    """
 
     name_schema = ResponseSchema(name="name",
                              description="Extract the full name of the applicant. If this information is not found, output -1")
@@ -106,6 +124,22 @@ def extract_personal_information(resume: str,  llm = ChatOpenAI(temperature=0, m
 
 def extract_posting_information(posting: str, llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> Any:
 
+    """" Extracts job title and company name from job posting.
+
+    Args: 
+
+        posting (str): job posting in text string format
+
+    Keyword Args:
+
+        llm (BaseModel): ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False) by default
+
+    Returns:
+
+        a dictionary containing the extracted information; if a field does not exist, its dictionary value will be -1.
+     
+    """
+
     job_schema = ResponseSchema(name="job",
                              description="Extract the job position of the job listing. If this information is not found, output -1")
     company_schema = ResponseSchema(name="company",
@@ -141,6 +175,9 @@ def extract_posting_information(posting: str, llm = ChatOpenAI(temperature=0, mo
 
 
 def extract_job_title(resume: str) -> str:
+
+    """ Extracts job title from resume using OpenAI API calls. """
+
     response = get_completion(f"""Read the resume closely. It is delimited with {delimiter} characters. 
                               
                               Output a likely job position that this applicant is currently holding or a possible job position he or she is applying for.
@@ -154,6 +191,8 @@ def extract_job_title(resume: str) -> str:
 
 
 def extract_fields(resume: str, llm=OpenAI(temperature=0, cache=False)) -> str:
+
+    """ Extracts field names contained in the resume. """
 
     query =  """Search and extract fields of the resume delimited with {delimiter} characters.
 
@@ -176,7 +215,11 @@ def extract_fields(resume: str, llm=OpenAI(temperature=0, cache=False)) -> str:
     print(f"Successfully extracted fields: {response}")
     return response
 
+
+
 def get_field_content(resume: str, field: str) -> str:
+   
+   """ Extracts resume field content using OpenAI API calls. """
      
    query = f"""Retrieve all the content of field {field} from the resume file delimiter with {delimiter} charactres.
 
@@ -190,6 +233,20 @@ def get_field_content(resume: str, field: str) -> str:
 
     
 def search_related_samples(job_title: str, directory: str) -> List[str]:
+
+    """ Searches resume or cover letter samples in the directory with job titles similar to the given job title using OpenAI API calls.
+
+    Args:
+
+        job_title (str)
+
+        directory (str): directionry path
+
+    Returns:
+
+        a list of paths in the directionry
+    
+    """
 
     system_message = f"""
 		You are an assistant that evaluates whether the job position described in the content is similar to {job_title} or relevant to {job_title}. 
@@ -222,61 +279,79 @@ def search_related_samples(job_title: str, directory: str) -> List[str]:
 
 def get_web_resources(query: str, llm = ChatOpenAI(temperature=0.8, model="gpt-3.5-turbo-0613", cache=False)) -> str:
 
-    search = GoogleSearchAPIWrapper()
-    embedding_size = 1536  
-    index = faiss.IndexFlatL2(embedding_size)  
-    vectorstore = FAISS(OpenAIEmbeddings().embed_query, index, InMemoryDocstore({}), {})
-    web_research_retriever = WebResearchRetriever.from_llm(
-        vectorstore=vectorstore,
-        llm=llm, 
-        search=search, 
-    )
-    # qa_chain = RetrievalQAWithSourcesChain.from_chain_type(llm,retriever=web_research_retriever)
-    # result = qa_chain({"question": query})
-    # print(f"successfully got web resources: {result}")
-    # return result.get("answer")
-    qa_chain = RetrievalQA.from_chain_type(llm, retriever=web_research_retriever)
-    response = qa_chain.run(query)
-    print(f"Successfully got web resources: {response}")
+    """ Retrieves web information given a query. The default search is using WebReserachRetriever: https://python.langchain.com/docs/modules/data_connection/retrievers/web_research.
+    
+    Back up is using Zero-Shot-React-Description agent with Google search tool: https://python.langchain.com/docs/modules/agents/agent_types/react.html  """
+
+    try: 
+        search = GoogleSearchAPIWrapper()
+        embedding_size = 1536  
+        index = faiss.IndexFlatL2(embedding_size)  
+        vectorstore = FAISS(OpenAIEmbeddings().embed_query, index, InMemoryDocstore({}), {})
+        web_research_retriever = WebResearchRetriever.from_llm(
+            vectorstore=vectorstore,
+            llm=llm, 
+            search=search, 
+        )
+        qa_chain = RetrievalQA.from_chain_type(llm, retriever=web_research_retriever)
+        response = qa_chain.run(query)
+        print(f"Successfully retreived web resources using Web Research Retriever: {response}")
+    except Exception:
+        tools = create_search_tools("google", top=10)
+        agent= initialize_agent(
+            tools, 
+            llm, 
+            agent="zero-shot-react-description",
+            handle_parsing_errors=True,
+            verbose = True,
+            )
+        try:
+            response = agent.run(query)
+            return response
+        except ValueError as e:
+            response = str(e)
+            if not response.startswith("Could not parse LLM output: `"):
+                return ""
+            response = response.removeprefix("Could not parse LLM output: `").removesuffix("`")
+        print(f"Successfully retreived web resources using Zero-Shot-React agent: {response}")
     return response
 
 
     
-def reorder_docs(retriever: Any, query: str) -> List[Document]:
-    reordering = LongContextReorder()
-    compressed_docs = retriever.get_relevant_documents(query)
-    reordered_docs = reordering.transform_documents(compressed_docs)
-    return reordered_docs
+# def reorder_docs(retriever: Any, query: str) -> List[Document]:
 
-@tool
-def create_n_docs_tool(query: str) -> str:
-    """Searches for relevant documents that may contain the answer to the query."""
-    subquery_relevancy = "relevancy in resume"
-    compression_retriever = create_compression_retriever()
-    # tool_description = """This is useful when defining relevancy, use only needed. 
-    # If input has enough information to determine relevancy, you don't need to use this tool. """
-    reordered_docs = reorder_docs(compression_retriever, subquery_relevancy)
-    texts = [doc.page_content for doc in reordered_docs]
-    texts_merged = "\n\n".join(texts)
-    return texts_merged
+#     """ Reorders documents so that most relevant documents are at the beginning and the end, as in long context, the middle text tend to be ignored.
+
+#      See: https://python.langchain.com/docs/modules/data_connection/document_transformers/post_retrieval/long_context_reorder
+
+#      Args: 
+
+#         retriever (Any): in this case, the retriever is Contextual Compression Cetriever as the compressor filters out irrelevant context
+
+#         query (str): content of interest
+
+#     Returns:
+
+#         a list of reordered Langchain Documents
+
+#     """
+#     reordering = LongContextReorder()
+#     compressed_docs = retriever.get_relevant_documents(query)
+#     reordered_docs = reordering.transform_documents(compressed_docs)
+#     return reordered_docs
+
 
 def retrieve_from_db(query: str, llm=OpenAI(temperature=0.8, cache=False)) -> str:
 
-    retriever = create_compression_retriever()
-    reordered_docs = reorder_docs(retriever, query)
+    """ Retrieves query answer from database.
 
-    # Option 2: 
-    # chain = RetrievalQA.from_chain_type(
-    #     llm, 
-    #     chain_type="map_reduce", 
-    #     # verbose=True, 
-    #     retriever=retriever,
-    #     # input_key="question"
-    #     )
-    # response = chain.run(query)
-    # Option 3:
-    # We prepare and run a custom Stuff chain with reordered docs as context.
-    # Override prompts
+    For usage, see bottom of: https://python.langchain.com/docs/modules/data_connection/document_transformers/post_retrieval/long_context_reorder
+  
+    """
+
+    retriever = create_compression_retriever()
+    reordered_docs = reorder_compressed_docs(retriever, query)
+
     document_prompt = PromptTemplate(
         input_variables=["page_content"], template="{page_content}"
     )
@@ -300,16 +375,32 @@ def retrieve_from_db(query: str, llm=OpenAI(temperature=0.8, cache=False)) -> st
     )
     response = chain.run(input_documents=reordered_docs, query=query, verbose=True)
 
-    print(f"Successfully retrieved advice: {response}")
+    print(f"Successfully retrieved answer using compression retriever with Stuff Document Chain: {response}")
     return response
 
     
-def get_summary(path: str, chain_type = "stuff", prompt_template = "", llm=OpenAI()) -> str:
-    docs = split_doc(path=path, path_type="file")
-    prompt_template = """Identity the job position, company then provide a summary of the following job posting:
-        {text} \n
-        Focus on roles and skills involved for this job. Do not include information irrelevant to this specific position.
-      """
+def get_summary(path: str, prompt_template: str, chain_type = "stuff",  llm=OpenAI()) -> str:
+
+    """ See summarization chain: https://python.langchain.com/docs/use_cases/summarization
+    
+    Args:
+
+        path (str): file path
+
+        prompt_template (str): prompt with input variable "text"
+
+    Keyword Args:
+
+        chain_type (str): default is "stuff
+
+        llm (BaseModel): default is OpenAI()
+
+    Returns:
+    
+        a summary of the give file
+    
+    """
+    docs = split_doc_file_size(path)
     PROMPT = PromptTemplate(template=prompt_template, input_variables=["text"])
     chain = load_summarize_chain(llm, chain_type=chain_type, prompt=PROMPT)
     response = chain.run(docs)
@@ -317,26 +408,51 @@ def get_summary(path: str, chain_type = "stuff", prompt_template = "", llm=OpenA
     return response
 
 
-def create_sample_tools(related_samples: List[str], sample_type: str, llm=ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> str:
+def create_sample_tools(related_samples: List[str], sample_type: str,) -> List[Tool]:
+
+    """ Creates tool for querying multiple documents using ensemble retriever.
+     
+      See: https://python.langchain.com/docs/modules/data_connection/retrievers/ensemble
+
+      Args:
+
+        related_samples (List[str]): list of paths
+
+        sample_type (str): "resume" or "cover letter"
+    
+    Returns:
+
+        a list of agent tools
+          
+    """
 
     tools = []
     for file in related_samples:
-        # initialize the bm25 retriever and faiss retriever for hybrid search
-        # https://python.langchain.com/docs/modules/data_connection/retrievers/ensemble
-        docs = split_doc(file, "file")
-        bm25_retriever = BM25Retriever.from_documents(docs)
-        bm25_retriever.k = 2
-        faiss_retriever = FAISS.from_documents(docs, OpenAIEmbeddings()).as_retriever(search_kwargs={"k": 2})
-        ensemble_retriever = EnsembleRetriever(retrievers=[bm25_retriever, faiss_retriever], weights=[0.5, 0.5])
-        # name and description of the tool are really important in the agent using the tool
+        docs = split_doc_file_size(file)
         tool_description = f"This is a {sample_type} sample. Use it to compare with other {sample_type} samples"
-        tool = create_db_tools(llm, ensemble_retriever, f"{sample_type}_{random.choice(string.ascii_letters)}", tool_description)
+        ensemble_retriever = create_ensemble_retriever(docs)
+        tool = create_db_tools(ensemble_retriever, f"{sample_type}_{random.choice(string.ascii_letters)}", tool_description)
         tools.extend(tool)
     print(f"Successfully created {sample_type} tools")
     return tools
 
 
+@tool
+def create_relevancy_docs_tool(query: str) -> str:
+    """Searches for relevant documents that may contain the answer to the query."""
+    subquery_relevancy = "relevancy in resume"
+    compression_retriever = create_compression_retriever()
+    # tool_description = """This is useful when defining relevancy, use only needed. 
+    # If input has enough information to determine relevancy, you don't need to use this tool. """
+    reordered_docs = reorder_compressed_docs(compression_retriever, subquery_relevancy)
+    texts = [doc.page_content for doc in reordered_docs]
+    texts_merged = "\n\n".join(texts)
+    return texts_merged
+
+
 def generate_multifunction_response(query: str, tools: List[Tool], llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> str:
+
+    """ See: https://python.langchain.com/docs/modules/agents/agent_types/openai_multi_functions_agent """
 
     agent = initialize_agent(
         tools,
@@ -409,9 +525,10 @@ def create_file_loader_tool() -> List[Tool]:
     return tools
     
 	
-def loading_file(json_request) -> str:    
+def loading_file(json_request:str) -> str:    
 
     try:
+        json_request = json_request.strip("'<>() ").replace('\'', '\"')
         args = json.loads(json_request)
         file = args["file"]
         file_content = read_txt(file)
@@ -421,7 +538,7 @@ def loading_file(json_request) -> str:
             prompt_template = "summarize the follwing text. text: {text} \n in less than 100 words."
             return get_summary(file, prompt_template=prompt_template)
     except Exception as e:
-        raise(e)
+        return "file did not load successfully. try another tool"
     
 def create_debug_tool() -> List[Tool]:
 
@@ -441,7 +558,7 @@ def create_debug_tool() -> List[Tool]:
     ]
     return tools
 
-def debug_chat(json_request):
+def debug_chat(json_request: str) -> str:
 
     args = json.loads(json_request)
     error = args["error message"]
@@ -455,20 +572,25 @@ def create_search_all_chat_history_tool()-> List[Tool]:
     db = retrieve_faiss_vectorstore("chat_debug")
     name = "search_all_chat_history"
     description = """Useful when you want to debug the cuurent conversation referencing historical conversations. Use it especially when debugging error messages. """
-    tools = create_db_tools(OpenAI(),  db.as_retriever(), name, description)
+    tools = create_db_tools(db.as_retriever(), name, description)
     return tools
 
 
-def check_content(txt_path):
+def check_content(txt_path: str) -> Union[bool, str, set] :
 
-    bytes = os.path.getsize(txt_path)
-    # if file is small, don't split
-    if bytes<4000:
-        docs = [Document(
-            page_content = read_txt(txt_path)
-        )]
-    else:
-        docs = split_doc(txt_path, "file", chunk_size=2000)
+    """Extracts file properties using Doctrain: https://python.langchain.com/docs/integrations/document_transformers/doctran_extract_properties
+
+    Args:
+
+        txt_path: file path
+    
+    Returns:
+
+        whether file is safe (bool), what category it belongs (str), and what topics it contains (set)
+    
+    """
+
+    docs = split_doc_file_size(txt_path)
     # if file is too large, will randomly select n chunks to check
     docs_len = len(docs)
     print(f"File splitted into {docs_len} documents")

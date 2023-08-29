@@ -67,7 +67,7 @@ from generate_cover_letter import  create_cover_letter_generator_tool
 from upgrade_resume import create_resume_evaluator_tool
 from langchain.agents.agent_toolkits import create_conversational_retrieval_agent
 from langchain.agents.agent_toolkits import create_retriever_tool
-from typing import List
+from typing import List, Dict
 from json import JSONDecodeError
 from common_utils import create_file_loader_tool, create_debug_tool, create_search_all_chat_history_tool
 from langchain.tools import tool, format_tool_to_openai_function
@@ -137,7 +137,7 @@ class ChatController():
         redis_retriever = redis_store.as_retriever()
         general_tool_description = """This is a general purpose database. Use it to answer general job related questions. 
         Prioritize other tools over this tool. """
-        general_tool= create_db_tools(self.llm, redis_retriever, "redis_general", general_tool_description)
+        general_tool= create_db_tools(redis_retriever, "redis_general", general_tool_description)
         # web reserach: https://python.langchain.com/docs/modules/data_connection/retrievers/web_research
         search = GoogleSearchAPIWrapper()
         embedding_size = 1536  
@@ -149,7 +149,7 @@ class ChatController():
             search=search, 
         )
         web_tool_description="""This is a web research tool. Use it only when you cannot find answers elsewhere. Always return source information."""
-        web_tool = create_db_tools(self.llm, web_research_retriever, "faiss_web", web_tool_description)
+        web_tool = create_db_tools(web_research_retriever, "faiss_web", web_tool_description)
         # basic search tool 
         search_tool = create_search_tools("google", 5)
         # wiki tool
@@ -249,21 +249,7 @@ class ChatController():
         # self.chat_agent = AgentExecutor(agent=agent, tools=self.tools, memory=self.memory, verbose=True,
         #                            return_intermediate_steps=True)
 
-        # Option 4 vectorstore agent
-    
-        # if (self.user_specific):
-        #     router_toolkit = create_vectorstore_agent_toolkit(self.embeddings, self.llm, "specific", redis_index_name = "redis_web_advice", faiss_index_name=f"faiss_user_{self.userid}")
-        #     print(f"Successfully created redis and faiss vector store toolkit")
-        #     self.chat_agent = create_vectorstore_router_agent(
-        #             llm=self.llm, toolkit=router_toolkit, verbose=True
-        #         )
-       
-        # else:
-        #     router_toolkit = create_vectorstore_agent_toolkit(self.embeddings, self.llm, "general", redis_index_name="redis_web_advice")
-        #     print(f"Successfully created redis vector store toolkit")
-        #     vs_agent = create_vectorstore_router_agent(
-        #         llm=self.llm, toolkit=router_toolkit ,  verbose=True
-        #     )
+
          
             
         
@@ -442,27 +428,28 @@ class ChatController():
 
 
 
-    def _initialize_interview_agent(self, json_request) -> None:
+    def _initialize_interview_agent(self, json_request: str) -> None:
 
 
         """ Initialize interviewer agent, a Conversational Retrieval Agent: https://python.langchain.com/docs/use_cases/question_answering/how_to/conversational_retrieval_agents
 
         Args: 
 
-            json_request (str): input argument from human's question, in this case the interview topic that may be contained in the question
+            json_request (str): input argument from human's question, in this case the interview topic that may be contained in the Human input.
 
         """
  
         try: 
+            json_request = json_request.strip("'<>() ").replace('\'', '\"')
             args = json.loads(json_request)
         except JSONDecodeError:
             args = {}       
         if "interview topic" in args:
             topic = args["interview topic"]
         else:
+            #TODO extract interview topics from entities list, if available
             topic = ""
-
-
+            
         debug_tool = create_debug_tool()
         try:
             self.interview_tools
@@ -543,6 +530,24 @@ class ChatController():
     )
     def askAI(self, userid:str, user_input:str, callbacks=None,) -> str:
 
+        """ Main function that processes all agents' conversation with user.
+         
+        Args:
+
+            userid (str): session id of user
+
+            user_input (str): user question or response
+
+        Keyword Args:
+
+            callbacks: default is None
+
+        Returns:
+
+            Answer or response by AI (str)  
+            
+         """
+
         try:    
             # BELOW IS USED WITH CONVERSATIONAL RETRIEVAL AGENT (grader_agent and interviewer)
             if (update_instruction):
@@ -598,6 +603,14 @@ class ChatController():
 
     def askMetaAgent(self, query="") -> None:    
 
+        """ Evaluates conversation's effectiveness between AI and Human. Outputs instructions for AI to follow. 
+        
+        Keyword Args:
+        
+            query (str): default is empty string
+        
+        """
+
         try: 
             feedback = self.meta_agent({"input":query}).get("output", "")
         except Exception as e:
@@ -610,7 +623,20 @@ class ChatController():
     
 
 
-    def askEvalAgent(self, response, queue) -> None:
+    def askEvalAgent(self, response: Dict, queue: Queue) -> None:
+
+        """ Evaluates trajectory, the full sequence of actions taken by an agent. 
+
+        See: https://python.langchain.com/docs/guides/evaluation/trajectory/
+
+
+        Args:
+
+            response (str): response from agent chain that includes both "input" and "output" parameters
+
+            queue (Queue): queue used in multiprocessing
+             
+        """
         
         try:
             evaluation_result = self.evaluator.evaluate_agent_trajectory(
@@ -630,7 +656,10 @@ class ChatController():
     #     extracted_messages = memory.chat_memory.messages
     #     self.chat_history = messages_to_dict(extracted_messages)
 
-    def update_tools(self, tools, agent_type) -> None:
+    def update_tools(self, tools: List[Tool], agent_type: str) -> None:
+
+        """ Updates agent tools. """
+
         if agent_type == "chat":
             self.tools += tools
         elif agent_type == "interview":
@@ -643,37 +672,33 @@ class ChatController():
         print(f"Succesfully updated tool for {agent_type}")
 
     
-    def create_interview_material_tools(self) -> List[Tool]:      
+    # def create_retriever_tools(self, vectorstore: Any, vs_name: str) -> List[Tool]:   
 
-        interview_material = f"faiss_interview_material_{self.userid}"
-        resume = f"faiss_resume_{self.userid}"
-        cover_letter = f"faiss_cover_letter_{self.userid}"
-        job_posting = f"faiss_job_posting_{self.userid}"
-        vecstores = [interview_material, resume, cover_letter, job_posting]
-        tools = []
-        for vs in vecstores:
-            db = retrieve_faiss_vectorstore(self.embeddings, vs)
-            if db is not None:
-                retriever = db.as_retriever()
-                name = vs.removeprefix("faiss_").removesuffix(f"_{self.userid}")
-                tool_name =f"search_{name}"
-                tool_description =  """Useful for generating interview questions and answers. 
-                Use this tool more than any other tool during a mock interview session. This tool can also be used for questions about topics in the interview material topics. 
-                Do not use this tool to load any files or documents. This should be used only for searching and generating questions and answers of the relevant materials and topics. """
-                tool = [create_retriever_tool(
-                    retriever,
-                    tool_name,
-                    tool_description
-                    )]
-                print(f"Succesfully created interview material tool: {tool_name}")
-                tools+= tool
-            else:
-                print(f"No vectorstore for {vs} created yet")
-        return tools
+    #     """Create retriever tools from vectorstore for conversational retrieval agent
+        
+    #     Args: 
+    #         vecstorstore: """   
+
+    #     retriever = vectorstore.as_retriever()
+    #     name = vs_name.removeprefix("faiss_").removesuffix(f"_{self.userid}")
+    #     tool_name =f"search_{name}"
+    #     tool_description =  """Useful for generating interview questions and answers. 
+    #     Use this tool more than any other tool during a mock interview session. This tool can also be used for questions about topics in the interview material topics. 
+    #     Do not use this tool to load any files or documents. This should be used only for searching and generating questions and answers of the relevant materials and topics. """
+    #     tool = [create_retriever_tool(
+    #         retriever,
+    #         tool_name,
+    #         tool_description
+    #         )]
+    #     print(f"Succesfully created interview material tool: {tool_name}")
+
+    #     return tool
 
 
         
     def update_entities(self,  text:str) -> None:
+
+        """ Updates entities list for main chat agent. """
         # if "resume" in text:
         #     self.delete_entities("resume")
         # if "cover letter" in text:
@@ -684,6 +709,9 @@ class ChatController():
         print(f"Successfully added entities {self.entities}.")
 
     def delete_entities(self, type: str) -> None:
+
+        """ Deletes entities of specific type. """
+
         starting_idices = [m.start() for m in re.finditer(type, self.entities)]
         file_name_len = 68
         for idx in starting_idices:
@@ -696,12 +724,17 @@ class ChatController():
     #     print(f"Successfully updated instruction to: {new_instructions}")
 
     def update_meta_data(self, data: str) -> None:
+        
+        """ Adds custom data to log. """
+
         with open(log_path+f"{self.userid}.log", "a") as f:
             f.write(str(data))
             print(f"Successfully updated meta data: {data}")
     
 
     def initiate_interview_tool(self) -> List[Tool]:
+
+        """ Agent tool used to initialized the interview session."""
         
         name = "interview_initiator"
         parameters = '{{"interview topic: <interview topic>"}}'
@@ -722,9 +755,11 @@ class ChatController():
         return tools
 
     @tool
-    def interview_stopper(self, query) -> str:
+    def interview_stopper(self, query: str) -> str:
+
         """Ends the interview session. Use this whenever Human asks to end the interview session.
-            Input is empty. """        
+            Input is empty. """     
+           
         self.mode = "chat"
         return "Please provide a brief feedback on your experience"
 

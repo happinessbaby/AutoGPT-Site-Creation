@@ -7,7 +7,7 @@ from langchain.output_parsers import CommaSeparatedListOutputParser
 from langchain import PromptTemplate
 from langchain.agents import AgentType, Tool, initialize_agent, create_json_agent
 from basic_utils import read_txt
-from common_utils import (get_web_resources, retrieve_from_db, extract_posting_information, get_summary, generate_multifunction_response, create_n_docs_tool,
+from common_utils import (get_web_resources, retrieve_from_db, extract_posting_information, get_summary, generate_multifunction_response, create_relevancy_docs_tool,
                            extract_fields, get_field_content, extract_job_title,  search_related_samples, create_sample_tools)
 from pathlib import Path
 import json
@@ -18,6 +18,7 @@ from langchain.agents.agent_toolkits import JsonToolkit
 from langchain.agents.agent_toolkits import create_python_agent
 from langchain.tools.python.tool import PythonREPLTool
 from typing import Dict, List
+from langchain.document_loaders import BSHTMLLoader
 import uuid
 
 
@@ -26,7 +27,7 @@ _ = load_dotenv(find_dotenv()) # read local .env file
 resume_evaluation_path = os.environ["RESUME_EVALUATION_PATH"]
 resume_samples_path = os.environ["RESUME_SAMPLES_PATH"]
 # TODO: caching and serialization of llm
-llm = ChatOpenAI(temperature=0.0, cache=False)
+llm = ChatOpenAI(temperature=0.0)
 # llm = OpenAI(temperature=0, top_p=0.2, presence_penalty=0.4, frequency_penalty=0.2)
 embeddings = OpenAIEmbeddings()
 # TODO: save these delimiters in json file to be loaded from .env
@@ -56,7 +57,11 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
     job_specification = ""
     # get job specification and company name from job posting link, if provided
     if (Path(posting_path).is_file()):
-      job_specification = get_summary(posting_path)
+      prompt_template = """Identity the job position, company then provide a summary of the following job posting:
+        {text} \n
+        Focus on roles and skills involved for this job. Do not include information irrelevant to this specific position.
+      """
+      job_specification = get_summary(posting_path, prompt_template)
       posting = read_txt(posting_path)
       posting_info_dict=extract_posting_information(posting)
       my_job_title = posting_info_dict["job"]
@@ -84,7 +89,7 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
 
     related_samples = search_related_samples(my_job_title, resume_samples_path)
     sample_tools = create_sample_tools(related_samples, "resume")
-    relevancy_tools = [create_n_docs_tool]
+    relevancy_tools = [create_relevancy_docs_tool]
 
     # process all fields in parallel
     processes = [Process(target = rewrite_resume_fields, args = (generated_responses, field, resume_file, res_path, relevancy_tools, sample_tools)) for field in resume_fields]
@@ -228,10 +233,11 @@ def processing_resume(json_request: str) -> str:
     
     print(json_request)
     try:
+      json_request = json_request.strip("'<>() ").replace('\'', '\"')
       args = json.loads(json_request)
     except JSONDecodeError:
       return "Format in JSON and try again." 
-    args = json.loads(json_request)
+
     # if resume doesn't exist, ask for resume
     if ("resume file" not in args or args["resume file"]=="" or args["resume file"]=="<resume file>"):
       return "Can you provide your resume so I can further assist you? "

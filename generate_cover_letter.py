@@ -7,7 +7,7 @@ from langchain import PromptTemplate
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
 from basic_utils import read_txt
-from common_utils import (extract_personal_information, get_web_resources,  retrieve_from_db, create_n_docs_tool, 
+from common_utils import (extract_personal_information, get_web_resources,  retrieve_from_db, create_relevancy_docs_tool, 
                           get_summary, extract_posting_information, create_sample_tools, extract_job_title, search_related_samples, generate_multifunction_response)
 from datetime import date
 from pathlib import Path
@@ -53,7 +53,11 @@ def generate_basic_cover_letter(my_job_title="", company="", resume_file="",  po
     # Get job information from posting link
     job_specification = ""
     if (Path(posting_path).is_file()):
-      job_specification = get_summary(posting_path)
+      prompt_template = """Identity the job position, company then provide a summary of the following job posting:
+        {text} \n
+        Focus on roles and skills involved for this job. Do not include information irrelevant to this specific position.
+      """
+      job_specification = get_summary(posting_path, prompt_template)
       posting = read_txt(posting_path)
       posting_info_dict=extract_posting_information(posting)
       my_job_title = posting_info_dict["job"]
@@ -103,7 +107,7 @@ def generate_basic_cover_letter(my_job_title="", company="", resume_file="",  po
       Generate a list of irrelevant information that should not be included in the cover letter and a list of relevant information that should be included in the cover letter. 
 
         """
-    relevancy = generate_multifunction_response(query_relevancy, [create_n_docs_tool])
+    relevancy = generate_multifunction_response(query_relevancy, [create_relevancy_docs_tool])
     
 
     # Get expert advices 

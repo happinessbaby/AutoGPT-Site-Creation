@@ -23,9 +23,10 @@ from multiprocessing import Process, Queue, Value
 import pickle
 import requests
 from functools import lru_cache
+from typing import Any
 import multiprocessing as mp
 from langchain.embeddings import OpenAIEmbeddings
-from langchain_utils import retrieve_faiss_vectorstore, create_vectorstore, merge_faiss_vectorstore
+from langchain_utils import retrieve_faiss_vectorstore, create_vectorstore, merge_faiss_vectorstore, create_retriever_tools
 
 
 
@@ -97,8 +98,6 @@ class Chat(ChatController):
         
 
             SAMPLE_QUESTIONS = {
-                # "What are some general advices for writing an outstanding resume?": "general_advices.pickle",
-                # "What are some things I could be doing terribly wrong with my resume?": "bad_resume.pickle",
                 "":"",
                 "help me write a cover letter": "coverletter",
                 "help  evaluate my my resume": "resume",
@@ -186,10 +185,7 @@ class Chat(ChatController):
                                               options=sorted(SAMPLE_QUESTIONS.keys()), 
                                               label_visibility="hidden", 
                                               format_func=lambda x: '---General questions---' if x == '' else x)
-                    # if uploaded_file is not None:
-                    #     # To convert to a string based IO:
-                    #     stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))
-                        # st.write(stringio)
+
 
                     submit_button = st.form_submit_button(label='Submit')
 
@@ -200,24 +196,22 @@ class Chat(ChatController):
                         #     st.session_state['company'] = company
                     if submit_button:
                         if uploaded_files:
-                            file_q = Queue()
-                            file_p = Process(target=self.process_file, args=(uploaded_files, file_q, ))
-                            file_p.start()
-                            file_p.join()
-                            file_entities_list= file_q.get()
-                            print(file_entities_list)
-                            if file_entities_list:
-                                for file_entity in file_entities_list:
-                                    self.new_chat.update_entities(file_entity)
+                            self.process_file(uploaded_files)
+                            # file_entities_list= self.process_file(uploaded_files)
+                            # print(file_entities_list)
+                            # if file_entities_list:
+                            #     for file_entity in file_entities_list:
+                            #         self.new_chat.update_entities(file_entity)
                   
                         if link:
-                            link_q = Queue()
-                            link_p = Process(target = self.process_link, args=(link, link_q, ))
-                            link_p.start()
-                            link_p.join()
-                            link_entity = link_q.get()
-                            if link_entity != "":
-                                self.new_chat.update_entities(link_entity)
+                            self.process_link(link)
+                            # link_q = Queue()
+                            # link_p = Process(target = self.process_link, args=(link, link_q, ))
+                            # link_p.start()
+                            # link_p.join()
+                            # link_entity = link_q.get()
+                            # if link_entity != "":
+                            #     self.new_chat.update_entities(link_entity)
 
                         if prefilled:
                             res = results_container.container()
@@ -229,12 +223,6 @@ class Chat(ChatController):
                             response = self.new_chat.askAI(st.session_state.userid, question, callbacks=streamlit_handler)
                             st.session_state.questions.append(question)
                             st.session_state.responses.append(response)
-
-                        #TODO: find the best place to uupdate interview tools
-                        tools = self.new_chat.create_interview_material_tools()
-                        if tools:
-                            self.new_chat.update_tools(tools, "interview")
-                            self.new_chat.update_tools(tools, "chat")
 
 
                 add_vertical_space(3)
@@ -282,9 +270,10 @@ class Chat(ChatController):
 
 
 
-    def process_file(self, uploaded_files, queue):
+    def process_file(self, uploaded_files: Any) -> None:
 
-        entity_list = []
+        """ Processes user uploaded files including converting all format to txt, checking content safety, and categorizing content type  """
+
         for uploaded_file in uploaded_files:
             file_ext = Path(uploaded_file.name).suffix
             tmp_filename = str(uuid.uuid4())+file_ext
@@ -297,93 +286,63 @@ class Chat(ChatController):
             content_safe, content_type, content_topics = check_content(read_path)
             print(content_type, content_safe, content_topics) 
             if content_safe:
-                entity = self.process_content(content_type, content_topics, read_path)
-                if entity:
-                    entity_list.append(entity)
+                self.add_to_chat(content_type, content_topics, read_path)
             else:
                 print("file content unsafe")
-        queue.put(entity_list)
         
 
-    def process_link(self, posting,  queue):
+    def process_link(self, posting: Any) -> None:
 
-        entity = ""
+        """ Processes user shared links including converting all format to txt, checking content safety, and categorizing content type """
+
         save_path = os.path.join(upload_link_path, str(uuid.uuid4())+".txt")
         if (retrieve_web_content(posting, save_path = save_path)):
             content_safe, content_type, content_topics = check_content(save_path)
             if content_safe:
-                entity = self.process_content(content_type, content_topics, save_path)
-                if entity:
-                    queue.put(entity)
+                self.add_to_chat(content_type, content_topics, save_path)
             else:
-                print("link content rejected")
-        queue.put(entity)
+                print("link content unsafe")
 
 
-    def process_content(self, content_type, content_topics, read_path):
+    def add_to_chat(self, content_type: str, content_topics: set, read_path: str) -> None:
 
-        entity = ""
-        if content_type == "resume":
-            entity = f"""resume file: {read_path}"""
-            # create a vector store for resume
-            resume = f"faiss_resume_{st.session_state.userid}"
-            create_vectorstore("faiss", read_path, "file", resume)
-        elif content_type == "cover letter":
-            cover_letter = f"faiss_cover_letter_{st.session_state.userid}"
-            create_vectorstore("faiss", read_path, "file", cover_letter)
-            entity = f"""cover letter file: {read_path}"""
-        elif content_type == "job posting":
-            entity = f"""job posting link: {read_path}"""
-            job_posting = f"faiss_job_posting_{st.session_state.userid}"
-            create_vectorstore("faiss", read_path, "file", job_posting)
+        """ Updates entities, vector stores, and tools for different chat agents. The main chat agent will have file paths saved as entities. The interview agent will have files as tools.
+        
+        Args: 
+
+            content_type (str): content category, such as resume, cover letter, job posting, other
+
+            content_topics (str): if content_type is other, content will be treated as interview material. So in this case, content_topics is interview topics. 
+
+            read_path (str): content file path
+             
+         """
+
+        if content_type != "other":
+            entity = f"""{content_type} file: {read_path}"""
+            self.new_chat.update_entities(entity)
+            name = content_type.strip().replace(" ", "_")
+            vs_name = f"faiss_{name}_{st.session_state.userid}"
+            vs = create_vectorstore("faiss", read_path, "file", vs_name)
+            tool_name = vs_name.removeprefix("faiss_").removesuffix(f"_{self.userid}")
+            tool_description =  """Useful for generating personalized interview questions and answers. 
+                Use this tool more than any other tool during a mock interview session when there's a need to reference special content.
+                Do not use this tool to load any files or documents.  """ 
+            tools = create_retriever_tools(vs, tool_name, tool_description)
+            self.new_chat.update_tools(tools, "interview")
         else:
             if content_topics:
                 entity = f"""interview material topics: {str(content_topics)}"""
+                self.new_chat.update_entities(entity)
             interview_material = f"faiss_interview_material_{st.session_state.userid}"
-            merge_faiss_vectorstore( interview_material, read_path)
-            # creates a vector store for interview materials
-            # main_db = retrieve_faiss_vectorstore(OpenAIEmbeddings(), interview_material)
-            # if main_db is None:
-            #     create_vectorstore(OpenAIEmbeddings(), "faiss", read_path, "file", interview_material)
-            #     print(f"Successfully created vectorstore: {interview_material}")
-            # else:
-            #     db = create_vectorstore(OpenAIEmbeddings(), "faiss", read_path, "file", "temp")
-            #     main_db.merge_from(db)
-            #     print(f"Successfully merged vectorstore: {interview_material}")
-        return entity
-    
+            vs = merge_faiss_vectorstore( interview_material, read_path)
+            tool_name = vs_name.removeprefix("faiss_").removesuffix(f"_{self.userid}")
+            tool_description =  """Useful for generating interview questions and answers. 
+                Use this tool more than any other tool during a mock interview session. This tool can also be used for questions about topics in the interview material topics. 
+                Do not use this tool to load any files or documents. This should be used only for searching and generating questions and answers of the relevant materials and topics. """
+            tools = create_retriever_tools(vs, tool_name, tool_description)
+            self.new_chat.update_tools(tools, "interview")
 
-
-
-
-
-
-
-
-    
-
-
-
-    # def show_progress(self):
-
-    #     with placeholder.container():
-
-    #         progress_text = "Your career advisor is on its way."
-    #         my_bar = st.progress(0, text=progress_text)
-    #         # to do replaced with real background progress
-    #         for percent_complete in range(100):
-    #             time.sleep(1)
-    #             my_bar.progress(percent_complete + 1, text=progress_text)
-    #             if Path(os.path.join(advice_path, self.id+".txt")).is_file():
-    #                 self.create_chatbot()
-
-            # st.spinner('Your assistant is on its way...')
-            # timer=60
-            # while timer>0:
-            #     if Path(self.advice_file).is_file():
-            #         st.success('Done!')
-            #         self.create_chatbot()
-            #     timer-=1
 
 
     
