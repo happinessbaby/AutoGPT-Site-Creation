@@ -145,7 +145,7 @@ def get_index(path = ".", path_type="file"):
     return index
 
     
-def reorder_compressed_docs(retriever: Any, query: str) -> List[Document]:
+def reorder_docs(docs: List[Document]) -> List[Document]:
 
     """ Reorders documents so that most relevant documents are at the beginning and the end, as in long context, the middle text tend to be ignored.
 
@@ -153,9 +153,7 @@ def reorder_compressed_docs(retriever: Any, query: str) -> List[Document]:
 
      Args: 
 
-        retriever (Any): in this case, the retriever is Contextual Compression Cetriever as the compressor filters out irrelevant context
-
-        query (str): content of interest
+        docs (List[Document]): a list of Langchain Documents
 
     Returns:
 
@@ -163,8 +161,7 @@ def reorder_compressed_docs(retriever: Any, query: str) -> List[Document]:
 
     """
     reordering = LongContextReorder()
-    compressed_docs = retriever.get_relevant_documents(query)
-    reordered_docs = reordering.transform_documents(compressed_docs)
+    reordered_docs = reordering.transform_documents(docs)
     return reordered_docs
 
 
@@ -317,9 +314,9 @@ def create_retriever_tools(vectorstore: Any, tool_name: str, tool_description: s
 
     return tool
 
-def create_vectorstore_agent_toolkit(embeddings, llm, index_name, vs_name, vs_description):
+def create_vectorstore_agent_toolkit(embeddings, index_name, vs_name, vs_description, llm=OpenAI()):
 
-    """ See: https://python.langchain.com/docs/integrations/toolkits/vectorstorehttps://python.langchain.com/docs/integrations/toolkits/vectorstore """
+    """ See: https://python.langchain.com/docs/integrations/toolkits/vectorstore"""
 
     store = retrieve_faiss_vectorstore(embeddings,index_name)
     vectorstore_info = VectorStoreInfo(
@@ -372,7 +369,7 @@ def create_compression_retriever(vectorstore = "index_web_advice") -> Contextual
     pipeline_compressor = DocumentCompressorPipeline(
         transformers=[splitter, redundant_filter, relevant_filter]
     )
-    redis_store = retrieve_redis_vectorstore(embeddings, vectorstore)
+    redis_store = retrieve_redis_vectorstore(vectorstore)
     retriever = redis_store.as_retriever(search_type="similarity", search_kwargs={"k":1000, "score_threshold":"0.2"})
 
     compression_retriever = ContextualCompressionRetriever(base_compressor=pipeline_compressor, base_retriever=retriever)
@@ -436,10 +433,12 @@ def create_vectorstore(vs_type: str, file: str, file_type: str, index_name: str,
         if (vs_type=="faiss"):
             db=FAISS.from_documents(docs, embeddings)
             db.save_local(index_name)
+            print("Succesfully created Faiss vector store.")
         elif (vs_type=="redis"):
             db = Redis.from_documents(
                 docs, embeddings, redis_url=redis_url, index_name=index_name
             )
+            print("Successfully created Redis vector store.")
                 # db=create_redis_index(docs, embeddings, index_name, source)
     except Exception as e:
         raise e
@@ -586,6 +585,7 @@ class CustomOutputParser(AgentOutputParser):
 if __name__ == '__main__':
 
     db =  create_vectorstore("redis", "./web_data/", "dir", "index_web_advice")
+ 
 
     
 

@@ -7,8 +7,9 @@ from langchain.output_parsers import CommaSeparatedListOutputParser
 from langchain import PromptTemplate
 from langchain.agents import AgentType, Tool, initialize_agent, create_json_agent
 from basic_utils import read_txt
-from common_utils import (get_web_resources, retrieve_from_db, extract_posting_information, get_summary, generate_multifunction_response, create_relevancy_docs_tool,
-                           extract_fields, get_field_content, extract_job_title,  search_related_samples, create_sample_tools)
+from common_utils import (get_web_resources, retrieve_from_db, extract_posting_information, get_summary, generate_multifunction_response,
+                           extract_fields, get_field_content, extract_job_title,  search_related_samples, create_sample_tools, extract_personal_information)
+from langchain_utils import create_search_tools
 from pathlib import Path
 import json
 from json import JSONDecodeError
@@ -48,11 +49,13 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
 
     # get resume
     resume = read_txt(resume_file)
+    personal_info_dict = extract_personal_information(resume)
+    generated_responses.update(personal_info_dict)
 
     # get resume field names
     resume_fields = extract_fields(resume)
     resume_fields = resume_fields.split(",")
-    generated_responses.update({"resume fields": resume_fields})
+    # generated_responses.update( {"resume_fields)
 
     job_specification = ""
     # get job specification and company name from job posting link, if provided
@@ -89,32 +92,35 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
 
     related_samples = search_related_samples(my_job_title, resume_samples_path)
     sample_tools = create_sample_tools(related_samples, "resume")
-    relevancy_tools = [create_relevancy_docs_tool]
+    relevancy_tools = create_search_tools("google", 3)
+    # relevancy_tools = [search_relevancy_advice]
+
+    for field in resume_fields:
+      improve_resume_fields(generated_responses, field, resume, res_path, relevancy_tools, sample_tools)
 
     # process all fields in parallel
-    processes = [Process(target = rewrite_resume_fields, args = (generated_responses, field, resume_file, res_path, relevancy_tools, sample_tools)) for field in resume_fields]
+    # processes = [Process(target = improve_resume_fields, args = (generated_responses, field, resume, res_path, relevancy_tools, sample_tools)) for field in resume_fields]
 
     # start all processes
-    for p in processes:
-       p.start()
+    # for p in processes:
+    #    p.start()
 
-    for p in processes:
-       p.join()
+    # for p in processes:
+    #    p.join()
    
     # return result to chat agent
     return f"""resume evaluation file": {res_path}"""
 
 
-def rewrite_resume_fields(generated_response: Dict[str, str], field:str, read_path:str, res_path:str, relevancy_tools:List[Tool], sample_tools:List[Tool]) -> None:
-    # field_dict = { }
+def improve_resume_fields(generated_response: Dict[str, str], field:str, resume:str, res_path:str, relevancy_tools:List[Tool], sample_tools:List[Tool]) -> None:
+    
     print(f"CURRENT FIELD IS: {field}")
-    # field_dict[field]= {}
-    resume = read_txt(read_path)
     resume_field_content = get_field_content(resume, field)
     my_job_title = generated_response.get("job title", "")
     company_description = generated_response.get("company description", "")
     job_specification = generated_response.get("job specification", "")
     job_description = generated_response.get("job description", "")
+    education_level = generated_response.get("education", "")
 
     query_missing = f""" 
 
@@ -126,23 +132,18 @@ def rewrite_resume_fields(generated_response: Dict[str, str], field:str, read_pa
 
         Generalize a list of missing items in the applicant's field content that should be included. 
 
-        If the {field} does not exist in the resume samples, please output -1. 
-
+        If the {field} does not exist in any of the resume samples, please output -1. 
 
         """
     missing_items = generate_multifunction_response(query_missing, sample_tools)
+
+    # Get resume's relevant and irrelevant info for resume field: few-shot learning works great here
             
     query_relevancy = f"""Determine the relevant and irrelevant information contained in the field content. 
 
-      You are provided with job specification for an opening position. 
-      
-      Use it as a primarily guidelines when generating your answer. 
-
-      You are also provided with a general job decription of the requirement of {my_job_title}. 
-      
-      Use it as a secondary guideline when forming your answer.
-
-      If job specification is not provided, use general job description as your primarily guideline. 
+     Generate a list of irrelevant information that should not be included in the cover letter and a list of relevant information that should be included in the resume field.
+       
+      Remember to use either job specification or general job description as your guideline. Don't forget to use your tool "search_relevancy_advice".
 
       field name: {field}
 
@@ -152,86 +153,69 @@ def rewrite_resume_fields(generated_response: Dict[str, str], field:str, read_pa
 
       general job description: {job_description} \n
 
-      Generate a list of irrelevant information that should not be included in the field content and a list of relevant information that should be included. 
+      Your answer should be detailed and only from the resume. Please also provide your reasoning too. 
+        
+      For example, your answer may look like this:
 
-        """
+      Relevant information in the Experience field:
+
+      1. Experience as a Big Data Engineer: skills and responsibilities of a Big Data Engineer are transferable to those of a data analyst
+
+      Irrelevant information  in the Experience Field:
+
+      1. Experience as a front desk receptionist is not directly related to the role of a data analyst
+
+      Please do not do anything and output -1 if field name is personal informaion or contains personal information such as name and links. These do not need any evaluation on relevancy
+
+      """
 
     relevancy = generate_multifunction_response(query_relevancy, relevancy_tools)
 
     # Get expert advices 
-    advice_query = f"""What are some best practices when writing {field} field for a resume to  make it ATS-friendly?  """
+    advice_query = f"""ATS-friendly way of writing {field} for {education_level}"""
     advices = retrieve_from_db(advice_query)
-                                
 
-    template_string = """" Your task is to analyze and help improve the content of resume field {field}. 
+    template_string = """ You are a professional resume writer. Your task is to polish some poorly written resume fields according to another professional's report on what should be improved. 
 
-    The content of the field is delimiter with {delimiter} characters. Always use this as contenxt and do not make things up. 
+    The content of the field is delimited with {delimiter} characters.
 
-    field content: {delimiter}{field_content}{delimiter} \n
+    field content: {delimiter}{field_content}{delimiter}
     
-    Step 1: You're given some expert advices on how to write {field} . Keep these advices in mind for the next steps.
+    Here is the report on what should be improved: {missing_items} + {relevancy} \n
 
-        expert advices: {advices} \n
+    Here are some advices on how to improve them: {advices} \n
+     
+    Please rewrite the resume field. Output only the rewritten content.  """
 
-    Step 2: You're provided with some company informtion, job specification, and job description.
+    template_string = """ Please report the following information to the user in a detailed and well-formatted manner. 
 
-      Try to make resume field cater to the compnay and job position, if possible. 
-
-      company information: {company_description}.  \n
-
-      job specification: {job_specification}.    \n
-
-      job description: {job_description}
-
-    Step 3: You are given two lists of information delimited with {delimiter2} characters. One is content to be included in the {field} and the other is content to be rewritten. 
-
-        information list: {delimiter2}{relevancy}{delimiter2} \n
-
-    Step 4: Rewrite the list of irrelevant content in Step 3 to make them appear more relevant to job position. 
-
-    Step 5: Polish the list of relevant content in Step 3 to make them more ATS-friendly.
-
-
-    Use the following format:
-        Step 1:{delimiter4} <step 1 reasoning>
-        Step 2:{delimiter4} <step 2 reasoning>
-        Step 3:{delimiter4} <step 3 reasoning>
-        Step 4:{delimiter4} <rewrite the irrelevant content>
-        Step 5:{delimiter4} <polish the relevant content>
-
-
-      Make sure to include {delimiter4} to separate every step.
-    
+    {missing_items} + {relevancy} 
     """
+
 
     prompt_template = ChatPromptTemplate.from_template(template_string)
     upgrade_resume_message = prompt_template.format_messages(
-        field = field,
         field_content = resume_field_content,
-        job = my_job_title,
         advices=advices,
         relevancy = relevancy,
-        company_description = company_description,
-        job_specification = job_specification, 
-        job_description = job_description,
-        delimiter = delimiter,
-        delimiter2 = delimiter2,
-        delimiter4 = delimiter4, 
-        
+        missing_items = missing_items,
+        delimiter = delimiter,     
     )
 
     my_advice = llm(upgrade_resume_message).content
+
+    print(my_advice)
     with open(res_path, 'a') as f:
-       f.write(my_advice + "\n" +"[" + missing_items +"]" +"\n")
+       f.write(my_advice)
   
 
 
 
-
 # receptionist
-def processing_resume(json_request: str) -> str:
-    
-    print(json_request)
+def processing_resume(json_request: str) -> str:   
+       
+    """ Input parser: input is LLM's action_input in JSON format. This function then processes the JSON data and feeds them to the resume evaluator. """
+
     try:
       json_request = json_request.strip("'<>() ").replace('\'', '\"')
       args = json.loads(json_request)
@@ -262,6 +246,10 @@ def processing_resume(json_request: str) -> str:
 
 def create_resume_evaluator_tool() -> List[Tool]:
     
+    """ Input parser: input is user's input as a string of text. This function takes in text and parses it into JSON format. 
+    
+    Then it calls the processing_resume function to process the JSON data. """
+    
     name = "resume_evaluator"
     parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link": "<job post link>"}}'
     output = '{{"resume evaluation file": "<resume evaluation file>"}}'
@@ -284,25 +272,6 @@ def create_resume_evaluator_tool() -> List[Tool]:
     return tools
 
 
-
-def test_resume_tool(resume_file="", job="", company="", posting_link="") -> str:
-    
-    tools = create_resume_evaluator_tool()
-    agent= initialize_agent(
-        tools, 
-        llm=ChatOpenAI(cache=False), 
-        agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-        handle_parsing_errors=True,
-        verbose = True,
-        )
-    response = agent.run(f"""evaluate a resume with following information:
-                              job: {job} \n
-                              company: {company} \n
-                              resume file: {resume_file} \n
-                              job post links: {posting_link}\n            
-                              """)
-    return response
-   
    
 
 
@@ -310,5 +279,5 @@ if __name__ == '__main__':
     my_job_title = 'accountant'
     my_resume_file = 'resume_samples/sample1.txt'
     # evaluate_resume()
-    test_resume_tool(resume_file=my_resume_file, job=my_job_title)
+
  

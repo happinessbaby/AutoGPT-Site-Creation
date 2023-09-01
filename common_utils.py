@@ -14,8 +14,8 @@ from langchain.agents import AgentType
 from langchain.chains import RetrievalQA,  LLMChain
 from pathlib import Path
 from basic_utils import read_txt
-from langchain_utils import ( create_wiki_tools, create_search_tools, create_db_tools, create_compression_retriever, create_ensemble_retriever,
-                              split_doc, handle_tool_error, retrieve_faiss_vectorstore, split_doc_file_size, reorder_compressed_docs)
+from langchain_utils import ( create_wiki_tools, create_search_tools, create_db_tools, create_compression_retriever, create_ensemble_retriever, retrieve_redis_vectorstore,
+                              split_doc, handle_tool_error, retrieve_faiss_vectorstore, split_doc_file_size, reorder_docs)
 from langchain import PromptTemplate
 # from langchain.experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
 from langchain.agents.agent_toolkits import create_python_agent
@@ -29,12 +29,14 @@ from langchain.schema import HumanMessage
 from langchain.utilities import GoogleSearchAPIWrapper
 from langchain.retrievers.web_research import WebResearchRetriever
 from langchain.chains import RetrievalQAWithSourcesChain, StuffDocumentsChain
+# from langchain_experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
 from langchain.docstore import InMemoryDocstore
 from langchain.retrievers.multi_query import MultiQueryRetriever
 from langchain.document_transformers import (
     LongContextReorder,
      DoctranPropertyExtractor,
 )
+from langchain import LLMMathChain
 from typing import Any, List, Union
 from langchain.docstore.document import Document
 from langchain.tools import tool
@@ -48,6 +50,7 @@ from json import JSONDecodeError
 import faiss
 import asyncio
 import random
+from datetime import date
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
 
@@ -59,11 +62,13 @@ categories = ["resume", "cover letter", "job posting", "resume evaluation"]
 
 def extract_personal_information(resume: str,  llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> Any:
 
-    """ Extracts personal information from resume, including name, email, phone, and address.
+    """ Extracts personal information from resume, including name, email, phone, address, highest education. 
+
+    See structured output parser: https://python.langchain.com/docs/modules/model_io/output_parsers/structured
 
     Args:
 
-        resume (str): resume in text string format
+        resume (str)
 
     Keyword Args:
 
@@ -71,8 +76,7 @@ def extract_personal_information(resume: str,  llm = ChatOpenAI(temperature=0, m
 
     Returns:
 
-        a dictionary containing the extracted information; if a field does not exist, its dictionary value will be -1.
-
+        a dictionary containing the extracted information; if a field does not exist, its dictionary value will be -1
     
     """
 
@@ -84,12 +88,15 @@ def extract_personal_information(resume: str,  llm = ChatOpenAI(temperature=0, m
                                         description="Extract the phone number of the applicant. If this information is not found, output -1")
     address_schema = ResponseSchema(name="address",
                                         description="Extract the home address of the applicant. If this information is not found, output -1")
+    education_schema = ResponseSchema(name="education",
+                                      description = "Extract the highest level of education of the applicant. If this information is not found, output-1.")
 
 
     response_schemas = [name_schema, 
                         email_schema,
                         phone_schema, 
                         address_schema, 
+                        education_schema,
                         ]
 
     output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
@@ -103,6 +110,8 @@ def extract_personal_information(resume: str,  llm = ChatOpenAI(temperature=0, m
     phone number: Extract the phone number of the applicant. If this information is not found, output -1\
     
     address: Extract the home address of the applicant. If this information is not found, output -1\
+    
+    education: Extract the highest level of education the applicant. If this information is not found, output -1\
 
     text: {delimiter}{text}{delimiter}
 
@@ -124,7 +133,9 @@ def extract_personal_information(resume: str,  llm = ChatOpenAI(temperature=0, m
 
 def extract_posting_information(posting: str, llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> Any:
 
-    """" Extracts job title and company name from job posting.
+    """" Extracts job title and company name from job posting. 
+
+    See: https://python.langchain.com/docs/modules/model_io/output_parsers/structured
 
     Args: 
 
@@ -190,13 +201,18 @@ def extract_job_title(resume: str) -> str:
 
 
 
+
+
+
 def extract_fields(resume: str, llm=OpenAI(temperature=0, cache=False)) -> str:
 
     """ Extracts field names contained in the resume. """
 
-    query =  """Search and extract fields of the resume delimited with {delimiter} characters.
+    query =  """Search and extract fields of the resume delimited with {delimiter} characters. A resume field must has content contained in it along with a field name or title. 
 
-         Some common resume fields include but not limited to personal information, objective, education, work experience, awards and honors, and skills.
+         Some common resume fields include but not limited to personal information, objective, education, work experience, awards and honors, area of expertise, professional highlights, skills, etc. 
+
+         If there are no obvious field name but some information belong together, like name, phone number, address, please generate a field name for this group of information, such as Personal Information.    
          
          resume: {delimiter}{resume}{delimiter} \n
          
@@ -231,7 +247,7 @@ def get_field_content(resume: str, field: str) -> str:
 
 
 
-    
+#TODO: once there's enough samples, education level and work experience level could also be included in searching criteria
 def search_related_samples(job_title: str, directory: str) -> List[str]:
 
     """ Searches resume or cover letter samples in the directory with job titles similar to the given job title using OpenAI API calls.
@@ -270,11 +286,64 @@ def search_related_samples(job_title: str, directory: str) -> List[str]:
         response = get_completion_from_messages(messages, max_tokens=1)
         if (response=="Y"):
             related_files.append(file)
+    #TODO: if no match, a general template will be used
     if len(related_files)==0:
         related_files.append(directory + "software_developer.txt")
     return related_files
 
+# This is actually a hard one for LLM to get
+#TODO: not there yet
+def extract_work_experience(resume: str, job_title:str, llm=OpenAI()) -> str:
 
+    """ Extracts work experience level of the given job_title in the resume using OpenAI API calls.
+     
+    """
+    llm_math_chain = LLMMathChain.from_llm(llm=llm, verbose=True)
+    content = get_field_content(resume, "Experience")
+    tools = [
+    Tool(
+        name="Calculator",
+        func=llm_math_chain.run,
+        description="useful for when you need to answer questions that needs simple math"
+    ),
+    ]
+
+    query = f"""
+		You are an assistant that evaluates and categorizes work experience content with respect with to {job_title} into the follow categories:
+
+        ["entry level", "junior level", "mid-level", "senior or executive level", "technical level or other"] \n
+
+        work experience content: {content}
+
+        If content contains work experience related to {job_title}, incorporate these experiences into evalution. 
+
+        Step 1: Calculate the number of years working as {job_title} or other related jobs if content provides date information. 
+
+        Step 2: Categorize based on the number fo years: 
+
+        If content does not contain any experiences relatable to {job_title}, mark as entry level.
+
+        For under 2 years of work experience, mark as junionr level.
+
+        For 2-5 years of work experience, mark as mid-level.
+
+        For 5-10 years of work experience, mark as senior or executive level.
+
+        Please use today's date {date.today()} in your evaluation. 
+
+		Output the category only.
+		"""
+    
+
+    
+    # planner = load_chat_planner(llm)
+    # executor = load_agent_executor(llm, tools, verbose=True)
+    # agent = PlanAndExecute(planner=planner, executor=executor, verbose=True)
+    agent = initialize_agent(tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=True)
+    response = agent.run(query)
+
+
+    return response
 
 
 def get_web_resources(query: str, llm = ChatOpenAI(temperature=0.8, model="gpt-3.5-turbo-0613", cache=False)) -> str:
@@ -317,29 +386,6 @@ def get_web_resources(query: str, llm = ChatOpenAI(temperature=0.8, model="gpt-3
     return response
 
 
-    
-# def reorder_docs(retriever: Any, query: str) -> List[Document]:
-
-#     """ Reorders documents so that most relevant documents are at the beginning and the end, as in long context, the middle text tend to be ignored.
-
-#      See: https://python.langchain.com/docs/modules/data_connection/document_transformers/post_retrieval/long_context_reorder
-
-#      Args: 
-
-#         retriever (Any): in this case, the retriever is Contextual Compression Cetriever as the compressor filters out irrelevant context
-
-#         query (str): content of interest
-
-#     Returns:
-
-#         a list of reordered Langchain Documents
-
-#     """
-#     reordering = LongContextReorder()
-#     compressed_docs = retriever.get_relevant_documents(query)
-#     reordered_docs = reordering.transform_documents(compressed_docs)
-#     return reordered_docs
-
 
 def retrieve_from_db(query: str, llm=OpenAI(temperature=0.8, cache=False)) -> str:
 
@@ -349,8 +395,9 @@ def retrieve_from_db(query: str, llm=OpenAI(temperature=0.8, cache=False)) -> st
   
     """
 
-    retriever = create_compression_retriever()
-    reordered_docs = reorder_compressed_docs(retriever, query)
+    compression_retriever = create_compression_retriever()
+    docs = compression_retriever.get_relevant_documents(query)
+    reordered_docs = reorder_docs(docs)
 
     document_prompt = PromptTemplate(
         input_variables=["page_content"], template="{page_content}"
@@ -437,17 +484,24 @@ def create_sample_tools(related_samples: List[str], sample_type: str,) -> List[T
     return tools
 
 
-@tool
-def create_relevancy_docs_tool(query: str) -> str:
-    """Searches for relevant documents that may contain the answer to the query."""
-    subquery_relevancy = "relevancy in resume"
-    compression_retriever = create_compression_retriever()
-    # tool_description = """This is useful when defining relevancy, use only needed. 
-    # If input has enough information to determine relevancy, you don't need to use this tool. """
-    reordered_docs = reorder_compressed_docs(compression_retriever, subquery_relevancy)
-    texts = [doc.page_content for doc in reordered_docs]
-    texts_merged = "\n\n".join(texts)
-    return texts_merged
+# @tool
+# def search_relevancy_advice(query: str) -> str:
+#     """Searches for general advice on relevant and irrelevant information in resume"""
+#     subquery_relevancy = ""
+#     # option 1: compression retriever
+#     # retriever = create_compression_retriever()
+#     # option 2: ensemble retriever
+#     # retriever = create_ensemble_retriever(split_doc())
+#     # option 3: vector store retriever
+#     # db = retrieve_redis_vectorstore("index_web_advice")
+#     db = retrieve_faiss_vectorstore("faiss_web_data")
+#     retriever = db.as_retriever(search_type="similarity_score_threshold", search_kwargs={"score_threshold": .5, "k":1})
+#     docs = retriever.get_relevant_documents(subquery_relevancy)
+#     # reordered_docs = reorder_docs(retriever.get_relevant_documents(subquery_relevancy))
+#     texts = [doc.page_content for doc in docs]
+#     texts_merged = "\n\n".join(texts)
+#     print(f"Successfully used relevancy tool to generate answer: {texts_merged}")
+#     return texts_merged
 
 
 def generate_multifunction_response(query: str, tools: List[Tool], llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> str:
@@ -578,7 +632,7 @@ def create_search_all_chat_history_tool()-> List[Tool]:
 
 def check_content(txt_path: str) -> Union[bool, str, set] :
 
-    """Extracts file properties using Doctrain: https://python.langchain.com/docs/integrations/document_transformers/doctran_extract_properties
+    """Extracts file properties using Doctran: https://python.langchain.com/docs/integrations/document_transformers/doctran_extract_properties
 
     Args:
 
