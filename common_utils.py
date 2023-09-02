@@ -37,6 +37,7 @@ from langchain.document_transformers import (
      DoctranPropertyExtractor,
 )
 from langchain import LLMMathChain
+from langchain.chains import SequentialChain
 from typing import Any, List, Union
 from langchain.docstore.document import Document
 from langchain.tools import tool
@@ -200,22 +201,72 @@ def extract_job_title(resume: str) -> str:
     return response
 
 
+def extract_resume_fields(resume: str,  llm=OpenAI(temperature=0)) -> str:
+
+
+    field_name_query =  """Search and extract names of fields contained in the resume delimited with {delimiter} characters. A field name must has content contained in it for it to be considered a field name. 
+
+        Some common resume field names include but not limited to personal information, objective, education, work experience, awards and honors, area of expertise, professional highlights, skills, etc. 
+         
+         
+        If there are no obvious field name but some information belong together, like name, phone number, address, please generate a field name for this group of information, such as Personal Information.    
+
+         resume: {delimiter}{resume}{delimiter} \n
+         
+         {format_instructions}"""
+    output_parser = CommaSeparatedListOutputParser()
+    format_instructions = output_parser.get_format_instructions()
+    field_name_prompt = PromptTemplate(
+        template=field_name_query,
+        input_variables=["delimiter", "resume"],
+        partial_variables={"format_instructions": format_instructions}
+    )
+    field_name_chain = LLMChain(llm=llm, prompt=field_name_prompt, output_key="field_names")
+
+    query = """For each field name in {field_names}, check if there is valid content within it in the resume. 
+
+    If the field name is valid, output the content of the field. Otherwise, output -1.
+
+      resume: {delimiter}{resume}{delimiter} \n
+
+      {format_instructions} """
+    
+    output_parser = CommaSeparatedListOutputParser()
+    format_instructions = output_parser.get_format_instructions()
+    prompt = PromptTemplate(
+        template=query,
+        input_variables=["delimiter", "resume", "field_names"],
+        partial_variables={"format_instructions": format_instructions}
+    )
+    chain = LLMChain(llm=llm, prompt=prompt, output_key="field_content")
+    overall_chain = SequentialChain(
+    chains=[field_name_chain, chain],
+    input_variables=["delimiter", "resume"],
+    # Here we return multiple variables
+    output_variables=["field_names",  "field_content"],
+    verbose=True)
+    field_names = overall_chain({"delimiter":"####", "resume":resume}).get("field_names", "")
+    field_content = overall_chain({"delimiter":"####", "resume":resume}).get("field_content", "")
+    print(field_names)
+    print(field_content)
 
 
 
 
-def extract_fields(resume: str, llm=OpenAI(temperature=0, cache=False)) -> str:
+
+def extract_fields(resume: str, llm=OpenAI(temperature=0, frequency_penalty=1)) -> str:
 
     """ Extracts field names contained in the resume. """
 
-    query =  """Search and extract fields of the resume delimited with {delimiter} characters. A resume field must has content contained in it along with a field name or title. 
+    query =  """Search and extract names of fields contained in the resume delimited with {delimiter} characters. A field name must has content contained in it for it to be considered a field name. 
 
-         Some common resume fields include but not limited to personal information, objective, education, work experience, awards and honors, area of expertise, professional highlights, skills, etc. 
-
-         If there are no obvious field name but some information belong together, like name, phone number, address, please generate a field name for this group of information, such as Personal Information.    
+        Some common resume field names include but not limited to personal information, objective, education, work experience, awards and honors, area of expertise, professional highlights, skills, etc. 
          
+         
+        If there are no obvious field name but some information belong together, like name, phone number, address, please generate a field name for this group of information, such as Personal Information.    
+
          resume: {delimiter}{resume}{delimiter} \n
-         
+         ]
          {format_instructions}"""
     
     output_parser = CommaSeparatedListOutputParser()
@@ -553,9 +604,6 @@ def generate_multifunction_response(query: str, tools: List[Tool], llm = ChatOpe
 #     #TODO: need to import function from other places
 #     function = locals()[func_name]
 #     function()
-
-
-
 
 
 def create_file_loader_tool() -> List[Tool]:

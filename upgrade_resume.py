@@ -92,11 +92,12 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
 
     related_samples = search_related_samples(my_job_title, resume_samples_path)
     sample_tools = create_sample_tools(related_samples, "resume")
-    relevancy_tools = create_search_tools("google", 3)
+    #TODO: this can be a general putpose tool with all web data  
+    general_tools = create_search_tools("google", 3)
     # relevancy_tools = [search_relevancy_advice]
 
     for field in resume_fields:
-      improve_resume_fields(generated_responses, field, resume, res_path, relevancy_tools, sample_tools)
+      improve_resume_fields(generated_responses, field, resume, res_path, general_tools, sample_tools)
 
     # process all fields in parallel
     # processes = [Process(target = improve_resume_fields, args = (generated_responses, field, resume, res_path, relevancy_tools, sample_tools)) for field in resume_fields]
@@ -112,7 +113,7 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
     return f"""resume evaluation file": {res_path}"""
 
 
-def improve_resume_fields(generated_response: Dict[str, str], field:str, resume:str, res_path:str, relevancy_tools:List[Tool], sample_tools:List[Tool]) -> None:
+def improve_resume_fields(generated_response: Dict[str, str], field:str, resume:str, res_path:str, general_tools:List[Tool], sample_tools:List[Tool]) -> None:
     
     print(f"CURRENT FIELD IS: {field}")
     resume_field_content = get_field_content(resume, field)
@@ -122,6 +123,18 @@ def improve_resume_fields(generated_response: Dict[str, str], field:str, resume:
     job_description = generated_response.get("job description", "")
     education_level = generated_response.get("education", "")
 
+    # The purpose of getting expert advices is to evaluate weaknesses in the current resume field content
+    advice_query = f"""ATS-friendly way of writing {field}"""
+    advices = retrieve_from_db(advice_query)
+    query_evaluation = f"""You are given some expert advices on writing {field} section of the resume.
+
+    Use there advices to identity the strenghts and weaknesses of the resume content delimited with {delimiter} characters.
+    
+    field content: {delimiter}{resume_field_content}{delimiter}
+    """
+    strengh_weakness = generate_multifunction_response(query_evaluation, general_tools)
+
+    # The purpose of this missing query is to identity any missing details that otherwise should be included in the resume field
     query_missing = f""" 
 
         Use your tool, compare the {field} in the resume sample documents with the applicant's field content.
@@ -138,7 +151,7 @@ def improve_resume_fields(generated_response: Dict[str, str], field:str, resume:
     missing_items = generate_multifunction_response(query_missing, sample_tools)
 
     # Get resume's relevant and irrelevant info for resume field: few-shot learning works great here
-            
+    # The purpose of identitying irrelevant and relevant information is so that irrelevant information can be deleted or reworded   
     query_relevancy = f"""Determine the relevant and irrelevant information contained in the field content. 
 
      Generate a list of irrelevant information that should not be included in the cover letter and a list of relevant information that should be included in the resume field.
@@ -169,11 +182,8 @@ def improve_resume_fields(generated_response: Dict[str, str], field:str, resume:
 
       """
 
-    relevancy = generate_multifunction_response(query_relevancy, relevancy_tools)
+    relevancy = generate_multifunction_response(query_relevancy, general_tools)
 
-    # Get expert advices 
-    advice_query = f"""ATS-friendly way of writing {field} for {education_level}"""
-    advices = retrieve_from_db(advice_query)
 
     template_string = """ You are a professional resume writer. Your task is to polish some poorly written resume fields according to another professional's report on what should be improved. 
 
