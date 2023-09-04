@@ -7,8 +7,8 @@ from langchain.output_parsers import CommaSeparatedListOutputParser
 from langchain import PromptTemplate
 from langchain.agents import AgentType, Tool, initialize_agent, create_json_agent
 from basic_utils import read_txt
-from common_utils import (get_web_resources, retrieve_from_db, extract_posting_information, get_summary, generate_multifunction_response,
-                           extract_fields, get_field_content, extract_job_title,  search_related_samples, create_sample_tools, extract_personal_information)
+from common_utils import (get_web_resources, retrieve_from_db, extract_posting_information, get_summary, generate_multifunction_response,find_samples_commonality,extract_education_level, extract_work_experience_level,
+                           extract_resume_fields, extract_job_title,  search_related_samples, create_sample_tools, extract_personal_information)
 from langchain_utils import create_search_tools
 from pathlib import Path
 import json
@@ -45,6 +45,7 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
     
     filename = Path(resume_file).stem
     res_path = os.path.join(resume_evaluation_path, filename+".txt")
+    res_dir = os.mkdir(resume_evaluation_path, filename)
     generated_responses = {}
 
     # get resume
@@ -53,8 +54,7 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
     generated_responses.update(personal_info_dict)
 
     # get resume field names
-    resume_fields = extract_fields(resume)
-    resume_fields = resume_fields.split(",")
+    field_names, field_content = extract_resume_fields(resume)
     # generated_responses.update( {"resume_fields)
 
     job_specification = ""
@@ -90,14 +90,57 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
       company_description = get_web_resources(company_query)
     generated_responses.update({"company description": company_description})
 
+    education_level = extract_education_level(resume)
+    work_experience = extract_work_experience_level(resume, my_job_title)
+
     related_samples = search_related_samples(my_job_title, resume_samples_path)
     sample_tools = create_sample_tools(related_samples, "resume")
+    query_sample = f""" 
+
+    Sample resume are provided in your tools. Research each one and answer the following question:
+
+      1. What common features these resume share?
+
+      """
+    commonality = generate_multifunction_response(query_sample, sample_tools)
+    advice_query = f"""what to include for resume with someone with {education_level} and {work_experience}"""
+    advices = retrieve_from_db(advice_query)
+
+    query_missing = f"""Based on the commonality shared among exemplary resume and expert advices, please generate a list of content that may be missing from the resume delimiter with {delimiter} characters.
+
+            commonality shared among exemplary resume: {commonality}
+            expert advices: {advices}
+            resume: {delimiter}{resume}{delimiter}"""
+    
+    missing_items = generate_multifunction_response(query_missing, sample_tools)
+
+
+    # sample_tools = create_sample_tools(related_samples, "resume")
+    # query_missing = f""" 
+
+    #     Sample resume are provided in your tools. Your task is to research each one and compare them with the following resume delimited with {delimiter} characters.
+
+    #     resume: {delimiter}{resume}{delimiter}
+ 
+    #     After you've done your research and comparison, please answer the following question:
+
+    #     What are some things missing from the resume delimited with {delimiter} characters compared to the sample resume?
+
+    # """ 
+    # missing_items = generate_multifunction_response(query_missing, sample_tools)
     #TODO: this can be a general putpose tool with all web data  
     general_tools = create_search_tools("google", 3)
     # relevancy_tools = [search_relevancy_advice]
 
-    for field in resume_fields:
-      improve_resume_fields(generated_responses, field, resume, res_path, general_tools, sample_tools)
+    field_improvs = ""
+    for field in field_names:
+      field_improvs += improve_resume_fields(generated_responses, field, field_content.get(field, ""), res_path, general_tools, os.path.join(res_dir, f"{field}.txt"))
+
+    #TODO generate a reporter agent that can summarize everything without losing any details
+
+
+
+    
 
     # process all fields in parallel
     # processes = [Process(target = improve_resume_fields, args = (generated_responses, field, resume, res_path, relevancy_tools, sample_tools)) for field in resume_fields]
@@ -113,10 +156,9 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
     return f"""resume evaluation file": {res_path}"""
 
 
-def improve_resume_fields(generated_response: Dict[str, str], field:str, resume:str, res_path:str, general_tools:List[Tool], sample_tools:List[Tool]) -> None:
+def improve_resume_fields(generated_response: Dict[str, str], field:str, field_content:str, res_path:str, general_tools:List[Tool], ) -> None:
     
     print(f"CURRENT FIELD IS: {field}")
-    resume_field_content = get_field_content(resume, field)
     my_job_title = generated_response.get("job title", "")
     company_description = generated_response.get("company description", "")
     job_specification = generated_response.get("job specification", "")
@@ -127,28 +169,17 @@ def improve_resume_fields(generated_response: Dict[str, str], field:str, resume:
     advice_query = f"""ATS-friendly way of writing {field}"""
     advices = retrieve_from_db(advice_query)
     query_evaluation = f"""You are given some expert advices on writing {field} section of the resume.
-
-    Use there advices to identity the strenghts and weaknesses of the resume content delimited with {delimiter} characters.
     
-    field content: {delimiter}{resume_field_content}{delimiter}
+    advices: {advices}
+
+    Use these advices to identity the strenghts and weaknesses of the resume content delimited with {delimiter} characters. 
+    
+    field content: {delimiter}{field_content}{delimiter}. \n
+    
+    Please provide proof of your reasoning. For example, if there is gap in work history, mark it as a weakness unless there is evidence it should not be considered so.
+
     """
-    strengh_weakness = generate_multifunction_response(query_evaluation, general_tools)
-
-    # The purpose of this missing query is to identity any missing details that otherwise should be included in the resume field
-    query_missing = f""" 
-
-        Use your tool, compare the {field} in the resume sample documents with the applicant's field content.
-
-        The applicant's field content is delimited with {delimiter} characters.
-      
-        applicant's field content: {delimiter}{resume_field_content}{delimiter}
-
-        Generalize a list of missing items in the applicant's field content that should be included. 
-
-        If the {field} does not exist in any of the resume samples, please output -1. 
-
-        """
-    missing_items = generate_multifunction_response(query_missing, sample_tools)
+    strength_weakness = generate_multifunction_response(query_evaluation, general_tools)
 
     # Get resume's relevant and irrelevant info for resume field: few-shot learning works great here
     # The purpose of identitying irrelevant and relevant information is so that irrelevant information can be deleted or reworded   
@@ -160,7 +191,7 @@ def improve_resume_fields(generated_response: Dict[str, str], field:str, resume:
 
       field name: {field}
 
-      field content: {resume_field_content}\n
+      field content: {field_content}\n
 
       job specification: {job_specification}\n
 
@@ -185,38 +216,25 @@ def improve_resume_fields(generated_response: Dict[str, str], field:str, resume:
     relevancy = generate_multifunction_response(query_relevancy, general_tools)
 
 
-    template_string = """ You are a professional resume writer. Your task is to polish some poorly written resume fields according to another professional's report on what should be improved. 
-
-    The content of the field is delimited with {delimiter} characters.
-
-    field content: {delimiter}{field_content}{delimiter}
+    # template_string = """ You are a professional report writer. Your task is to polish a professional's report and present it to the Human in a clear and Human-readable manner. 
     
-    Here is the report on what should be improved: {missing_items} + {relevancy} \n
-
-    Here are some advices on how to improve them: {advices} \n
+    # Here is the professional report: {strength_weakness} + \n + {relevancy} \n
      
-    Please rewrite the resume field. Output only the rewritten content.  """
-
-    template_string = """ Please report the following information to the user in a detailed and well-formatted manner. 
-
-    {missing_items} + {relevancy} 
-    """
+    # Please don't leave out any details in your report.  """
 
 
-    prompt_template = ChatPromptTemplate.from_template(template_string)
-    upgrade_resume_message = prompt_template.format_messages(
-        field_content = resume_field_content,
-        advices=advices,
-        relevancy = relevancy,
-        missing_items = missing_items,
-        delimiter = delimiter,     
-    )
+    # prompt_template = ChatPromptTemplate.from_template(template_string)
+    # upgrade_resume_message = prompt_template.format_messages(
+    #     relevancy = relevancy,
+    #     strength_weakness = strength_weakness,   
+    # )
 
-    my_advice = llm(upgrade_resume_message).content
+    # my_advice = llm(upgrade_resume_message).content
 
-    print(my_advice)
-    with open(res_path, 'a') as f:
-       f.write(my_advice)
+    with open(res_path, "w") as f:
+       f.write(strength_weakness + '\n' + relevancy + '\n')
+
+    return strength_weakness + '\n' + relevancy + '\n'
   
 
 

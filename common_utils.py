@@ -21,6 +21,9 @@ from langchain import PromptTemplate
 from langchain.agents.agent_toolkits import create_python_agent
 from langchain.output_parsers import CommaSeparatedListOutputParser
 from langchain.chains.summarize import load_summarize_chain
+from langchain.chains.mapreduce import MapReduceChain
+from langchain.text_splitter import CharacterTextSplitter
+from langchain.chains import ReduceDocumentsChain, MapReduceDocumentsChain
 from langchain.llms import OpenAI
 from langchain.vectorstores import FAISS
 from langchain.retrievers import BM25Retriever, EnsembleRetriever
@@ -37,10 +40,13 @@ from langchain.document_transformers import (
      DoctranPropertyExtractor,
 )
 from langchain import LLMMathChain
+from langchain.memory import SimpleMemory
 from langchain.chains import SequentialChain
-from typing import Any, List, Union
+from typing import Any, List, Union, Dict
 from langchain.docstore.document import Document
 from langchain.tools import tool
+from langchain.output_parsers import PydanticOutputParser
+from pydantic import BaseModel, Field, validator
 import os
 import sys
 import re
@@ -89,15 +95,15 @@ def extract_personal_information(resume: str,  llm = ChatOpenAI(temperature=0, m
                                         description="Extract the phone number of the applicant. If this information is not found, output -1")
     address_schema = ResponseSchema(name="address",
                                         description="Extract the home address of the applicant. If this information is not found, output -1")
-    education_schema = ResponseSchema(name="education",
-                                      description = "Extract the highest level of education of the applicant. If this information is not found, output-1.")
+    # education_schema = ResponseSchema(name="education",
+    #                                   description = "Extract the highest level of education of the applicant. If this information is not found, output-1.")
 
 
     response_schemas = [name_schema, 
                         email_schema,
                         phone_schema, 
                         address_schema, 
-                        education_schema,
+                        # education_schema,
                         ]
 
     output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
@@ -110,14 +116,13 @@ def extract_personal_information(resume: str,  llm = ChatOpenAI(temperature=0, m
 
     phone number: Extract the phone number of the applicant. If this information is not found, output -1\
     
-    address: Extract the home address of the applicant. If this information is not found, output -1\
-    
-    education: Extract the highest level of education the applicant. If this information is not found, output -1\
+    address: Extract the home address of the applicant. If this information is not found, output -1\  
 
     text: {delimiter}{text}{delimiter}
 
     {format_instructions}
     """
+    # education: Extract the highest level of education the applicant. If this information is not found, output -1\
 
     prompt = ChatPromptTemplate.from_template(template=template_string)
     messages = prompt.format_messages(text=resume, 
@@ -129,6 +134,7 @@ def extract_personal_information(resume: str,  llm = ChatOpenAI(temperature=0, m
     personal_info_dict = output_parser.parse(response.content)
     print(f"Successfully extracted personal info: {personal_info_dict}")
     return personal_info_dict
+
 
 
 
@@ -184,11 +190,33 @@ def extract_posting_information(posting: str, llm = ChatOpenAI(temperature=0, mo
     print(f"Successfully extracted posting info: {posting_info_dict}")
     return posting_info_dict
 
+def extract_education_level(resume: str) -> str:
+
+    """ Extracts the highest degree including area of study if available from resume. """
+
+    response = get_completion(f""" Read the resume closely. It is delimited with {delimiter} characters.
+                              
+                              Ouput the highest level of education the applicant holds, including any major, minor, area of study that's part of the degree.
+
+                              If any part of the information is unavaible, do not make it up. 
+
+                              Also, do not count any certifications.
+                              
+                              resume: {delimiter}{resume}{delimiter}
+                                
+                                Respond following these sample formats:
+                                
+                                1. MBA in Management Information System 
+                                2. Bachelors of Science with major in Computer Information Systems in Business, minor in Mathematics
+                                3. Bachelors of Arts """)
+    
+    print(f"Sucessfully extracted highest education: {response}")
+    return response
 
 
 def extract_job_title(resume: str) -> str:
 
-    """ Extracts job title from resume using OpenAI API calls. """
+    """ Extracts job title from resume. """
 
     response = get_completion(f"""Read the resume closely. It is delimited with {delimiter} characters. 
                               
@@ -200,8 +228,10 @@ def extract_job_title(resume: str) -> str:
     print(f"Successfull extracted job title: {response}")
     return response
 
-
-def extract_resume_fields(resume: str,  llm=OpenAI(temperature=0)) -> str:
+# class ResumeField(BaseModel):
+#     field_name: str=Field(description="field name")
+#     field_content: str=Field(description="content of the field")
+def extract_resume_fields(resume: str,  llm=OpenAI(temperature=0,  max_tokens=1024)) -> Union[List[str], Dict[str, str]]:
 
 
     field_name_query =  """Search and extract names of fields contained in the resume delimited with {delimiter} characters. A field name must has content contained in it for it to be considered a field name. 
@@ -225,76 +255,86 @@ def extract_resume_fields(resume: str,  llm=OpenAI(temperature=0)) -> str:
 
     query = """For each field name in {field_names}, check if there is valid content within it in the resume. 
 
-    If the field name is valid, output the content of the field. Otherwise, output -1.
+    If the field name is valid, output in JSON with field name as key and content as value. 
 
       resume: {delimiter}{resume}{delimiter} \n
-
-      {format_instructions} """
+ 
+    """
+    # {format_instructions}
     
-    output_parser = CommaSeparatedListOutputParser()
+    # output_parser = PydanticOutputParser(pydantic_object=ResumeField)
+
+    format_instructions = output_parser.get_format_instructions()
     format_instructions = output_parser.get_format_instructions()
     prompt = PromptTemplate(
         template=query,
         input_variables=["delimiter", "resume", "field_names"],
-        partial_variables={"format_instructions": format_instructions}
+        # partial_variables={"format_instructions": format_instructions}
     )
     chain = LLMChain(llm=llm, prompt=prompt, output_key="field_content")
     overall_chain = SequentialChain(
-    chains=[field_name_chain, chain],
-    input_variables=["delimiter", "resume"],
+        memory=SimpleMemory(memories={"resume":resume}),
+        chains=[field_name_chain, chain],
+        # input_variables=["delimiter", "resume"],
+        input_variables=["delimiter"],
     # Here we return multiple variables
-    output_variables=["field_names",  "field_content"],
-    verbose=True)
-    field_names = overall_chain({"delimiter":"####", "resume":resume}).get("field_names", "")
-    field_content = overall_chain({"delimiter":"####", "resume":resume}).get("field_content", "")
-    print(field_names)
+        output_variables=["field_names",  "field_content"],
+        verbose=True)
+    # response = overall_chain({"delimiter":"####", "resume":resume})
+    response = overall_chain({"delimiter": "####"})
+    field_names = output_parser.parse(response.get("field_names", ""))
+    # sometimes, not always, there's an annoying text "Output: " in front of json that needs to be stripped
+    field_content = '{' + response.get("field_content", "").split('{', 1)[-1]
     print(field_content)
+    field_content = json.loads(field_content)
+    # output_parser.parse(field_content)
+    return field_names, field_content
 
 
 
 
 
-def extract_fields(resume: str, llm=OpenAI(temperature=0, frequency_penalty=1)) -> str:
+# def extract_fields(resume: str, llm=OpenAI(temperature=0, frequency_penalty=1)) -> str:
 
-    """ Extracts field names contained in the resume. """
+#     """ Extracts field names contained in the resume. """
 
-    query =  """Search and extract names of fields contained in the resume delimited with {delimiter} characters. A field name must has content contained in it for it to be considered a field name. 
+#     query =  """Search and extract names of fields contained in the resume delimited with {delimiter} characters. A field name must has content contained in it for it to be considered a field name. 
 
-        Some common resume field names include but not limited to personal information, objective, education, work experience, awards and honors, area of expertise, professional highlights, skills, etc. 
+#         Some common resume field names include but not limited to personal information, objective, education, work experience, awards and honors, area of expertise, professional highlights, skills, etc. 
          
          
-        If there are no obvious field name but some information belong together, like name, phone number, address, please generate a field name for this group of information, such as Personal Information.    
+#         If there are no obvious field name but some information belong together, like name, phone number, address, please generate a field name for this group of information, such as Personal Information.    
 
-         resume: {delimiter}{resume}{delimiter} \n
-         ]
-         {format_instructions}"""
+#          resume: {delimiter}{resume}{delimiter} \n
+#          ]
+#          {format_instructions}"""
     
-    output_parser = CommaSeparatedListOutputParser()
-    format_instructions = output_parser.get_format_instructions()
-    prompt = PromptTemplate(
-        template=query,
-        input_variables=["delimiter", "resume"],
-        partial_variables={"format_instructions": format_instructions}
-    )
+#     output_parser = CommaSeparatedListOutputParser()
+#     format_instructions = output_parser.get_format_instructions()
+#     prompt = PromptTemplate(
+#         template=query,
+#         input_variables=["delimiter", "resume"],
+#         partial_variables={"format_instructions": format_instructions}
+#     )
     
-    _input = prompt.format(delimiter=delimiter, resume = resume)
-    response = llm(_input)
-    print(f"Successfully extracted fields: {response}")
-    return response
+#     _input = prompt.format(delimiter=delimiter, resume = resume)
+#     response = llm(_input)
+#     print(f"Successfully extracted fields: {response}")
+#     return response
 
 
 
-def get_field_content(resume: str, field: str) -> str:
+# def get_field_content(resume: str, field: str) -> str:
    
-   """ Extracts resume field content using OpenAI API calls. """
+#    """ Extracts resume field content using OpenAI API calls. """
      
-   query = f"""Retrieve all the content of field {field} from the resume file delimiter with {delimiter} charactres.
+#    query = f"""Retrieve all the content of field {field} from the resume file delimiter with {delimiter} charactres.
 
-      resume: {delimiter}{resume}{delimiter}
-    """
-   response = get_completion(query)
-   print(f"Successfully got field content: {response}")
-   return response
+#       resume: {delimiter}{resume}{delimiter}
+#     """
+#    response = get_completion(query)
+#    print(f"Successfully got field content: {response}")
+#    return response
 
 
 
@@ -343,14 +383,14 @@ def search_related_samples(job_title: str, directory: str) -> List[str]:
     return related_files
 
 # This is actually a hard one for LLM to get
-#TODO: not there yet
-def extract_work_experience(resume: str, job_title:str, llm=OpenAI()) -> str:
+#TODO: math chain date calculation errors out because of formatting
+def extract_work_experience_level(content: str, job_title:str, llm=OpenAI()) -> str:
 
     """ Extracts work experience level of the given job_title in the resume using OpenAI API calls.
      
     """
     llm_math_chain = LLMMathChain.from_llm(llm=llm, verbose=True)
-    content = get_field_content(resume, "Experience")
+
     tools = [
     Tool(
         name="Calculator",
@@ -368,11 +408,9 @@ def extract_work_experience(resume: str, job_title:str, llm=OpenAI()) -> str:
 
         If content contains work experience related to {job_title}, incorporate these experiences into evalution. 
 
-        Step 1: Calculate the number of years working as {job_title} or other related jobs if content provides date information. 
+        Categorize based on the number fo years: 
 
-        Step 2: Categorize based on the number fo years: 
-
-        If content does not contain any experiences relatable to {job_title}, mark as entry level.
+        If content does not contain any experiences related to {job_title}, mark as entry level.
 
         For under 2 years of work experience, mark as junionr level.
 
@@ -380,7 +418,7 @@ def extract_work_experience(resume: str, job_title:str, llm=OpenAI()) -> str:
 
         For 5-10 years of work experience, mark as senior or executive level.
 
-        Please use today's date {date.today()} in your evaluation. 
+        Today's date is {date.today()}. Please make sure all dates are formatted correctly if you are to use the Calculator tool. 
 
 		Output the category only.
 		"""
@@ -392,8 +430,7 @@ def extract_work_experience(resume: str, job_title:str, llm=OpenAI()) -> str:
     # agent = PlanAndExecute(planner=planner, executor=executor, verbose=True)
     agent = initialize_agent(tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=True)
     response = agent.run(query)
-
-
+    # response = generate_multifunction_response(query, tools, max_iter=5)
     return response
 
 
@@ -506,6 +543,61 @@ def get_summary(path: str, prompt_template: str, chain_type = "stuff",  llm=Open
     return response
 
 
+def find_samples_commonality(files, llm = ChatOpenAI(temperature=0)):
+
+    docs: List[Document]=[]
+    for file in files: 
+        docs.extend(split_doc_file_size(file))
+    # Map
+    map_template = """The following is a set of documents
+    {docs}
+    Based on this list of docs, please identify the main themes 
+    Helpful Answer:"""
+    map_prompt = PromptTemplate.from_template(map_template)
+    map_chain = LLMChain(llm=llm, prompt=map_prompt)
+    # Reduce
+    reduce_template = """The following is set of summaries:
+    {doc_summaries}
+    Take these and distill it into a final, consolidated summary of the main themes. 
+    Helpful Answer:"""
+    reduce_prompt = PromptTemplate.from_template(reduce_template)
+     # Run chain
+    reduce_chain = LLMChain(llm=llm, prompt=reduce_prompt)
+
+    # Takes a list of documents, combines them into a single string, and passes this to an LLMChain
+    combine_documents_chain = StuffDocumentsChain(
+        llm_chain=reduce_chain, document_variable_name="doc_summaries"
+    )
+
+    # Combines and iteravely reduces the mapped documents
+    reduce_documents_chain = ReduceDocumentsChain(
+        # This is final chain that is called.
+        combine_documents_chain=combine_documents_chain,
+        # If documents exceed context for `StuffDocumentsChain`
+        collapse_documents_chain=combine_documents_chain,
+        # The maximum number of tokens to group documents into.
+        token_max=4000,
+    )
+    # Combining documents by mapping a chain over them, then combining results
+    map_reduce_chain = MapReduceDocumentsChain(
+        # Map chain
+        llm_chain=map_chain,
+        # Reduce chain
+        reduce_documents_chain=reduce_documents_chain,
+        # The variable name in the llm_chain to put the documents in
+        document_variable_name="docs",
+        # Return the results of the map steps in the output
+        return_intermediate_steps=False,
+    )
+
+    # text_splitter = CharacterTextSplitter.from_tiktoken_encoder(
+    #     chunk_size=1000, chunk_overlap=0
+    # )
+    # split_docs = text_splitter.split_documents(docs)
+
+    print(map_reduce_chain.run(docs))
+
+
 def create_sample_tools(related_samples: List[str], sample_type: str,) -> List[Tool]:
 
     """ Creates tool for querying multiple documents using ensemble retriever.
@@ -555,7 +647,7 @@ def create_sample_tools(related_samples: List[str], sample_type: str,) -> List[T
 #     return texts_merged
 
 
-def generate_multifunction_response(query: str, tools: List[Tool], llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> str:
+def generate_multifunction_response(query: str, tools: List[Tool], max_iter = 2, llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> str:
 
     """ See: https://python.langchain.com/docs/modules/agents/agent_types/openai_multi_functions_agent """
 
@@ -563,7 +655,7 @@ def generate_multifunction_response(query: str, tools: List[Tool], llm = ChatOpe
         tools,
         llm,
         agent=AgentType.OPENAI_MULTI_FUNCTIONS, 
-        max_iterations=2,
+        max_iterations=max_iter,
         early_stopping_method="generate",
         # verbose=True
     )

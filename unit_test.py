@@ -3,11 +3,12 @@ from upgrade_resume import create_resume_evaluator_tool
 from langchain.chat_models import ChatOpenAI
 from langchain.agents import AgentType, Tool, initialize_agent
 from basic_utils import read_txt
-from common_utils import (get_web_resources, get_summary, generate_multifunction_response, extract_fields,
-                          retrieve_from_db, search_related_samples, create_sample_tools, extract_work_experience, get_field_content, extract_resume_fields)
+from common_utils import (get_web_resources, get_summary, generate_multifunction_response,find_samples_commonality,extract_education_level,
+                          retrieve_from_db, search_related_samples, create_sample_tools, extract_work_experience_level,  extract_resume_fields)
 from langchain.tools import tool
 from langchain_utils import retrieve_faiss_vectorstore, create_search_tools
 from openai_api import get_completion
+import json
 
 resume_file = "resume_samples/sample6.txt"
 def generate_random_info(type):
@@ -76,8 +77,14 @@ def test_company_description(company="Indeed"):
 # FAIL
 def test_work_experience(resume_file="./resume_samples/sample6.txt", my_job_title="software engineer"):
     resume = read_txt(resume_file)
-    experience = extract_work_experience(resume, my_job_title)
+    experience = extract_work_experience_level(resume, my_job_title)
     print(f"WORK EXPERIENCE LEVEL: {experience}")
+
+# Pass
+def test_education_level(resume_file="./resume_samples/sample4.txt"):
+    resume = read_txt(resume_file)
+    education = extract_education_level(resume)
+    print(f"EDUCATION: {education}")
 
 # PASS
 def test_search_similar_resume(my_job_title = "software engineer"):
@@ -85,11 +92,15 @@ def test_search_similar_resume(my_job_title = "software engineer"):
     similar_files=search_related_samples(my_job_title, resume_samples_path)
     print(f"SIMILAR RESUME FILES WRT {my_job_title}: {similar_files}")
 
-# FAIL
-def test_extract_fields(resume_file="./resume_samples/resume2023.txt"):
+# PASS
+def test_extract_fields(resume_file="./resume_samples/test.txt"):
     # fields = extract_fields(read_txt(resume_file))
-    extract_resume_fields(read_txt(resume_file))
-    # print(f"EXTRACTED RESUME FIELDS ARE: {fields}")
+    field_names, field_content = extract_resume_fields(read_txt(resume_file))
+    assert isinstance(field_names, list), "field names not a list!"
+    assert isinstance(field_content, dict), "field content not a dictionary!"
+    print(f"RESUME FIELD NAMES: {field_names}")
+    print(f"RESUME FIELD CONTENT: {field_content}")
+   
 
 
 # This part really seems to test LLM's reasoning ability
@@ -142,7 +153,7 @@ def test_cl_revelancy_query(resume_file=resume_file, my_job_title="data analyst"
 
 # This part tests the ability to retrieve information from vector stores
 # PASS
-def test_retrieve_cl(my_job_title="data analyst", education_level="bachelors of science", work_level="entry level"):
+def test_cl_retrieval(my_job_title="data analyst", education_level="bachelors of science", work_level="entry level"):
     advice_query = f"""Best practices when writing a cover letter for {my_job_title} with the given information:
       highest level of education: {education_level}
       work experience level:  {work_level} """
@@ -184,43 +195,54 @@ def test_cl_samples_query(my_job_title= "accountant"):
 # PASS  
 def test_field_retrieval(field="work history"):
 
-    advice_query = f"""ATS-friendly way of writing {field}"""
+    advice_query = f"""What are some dos and don'ts when writing resume field {field} to make it ATS-friendly?"""
     advices = retrieve_from_db(advice_query)
     return advices
 
-# FAIL
-def test_field_samples_query(resume_file = "./resume_samples/sample1.txt", my_job_title="accountant", field = "work experience"):
+# PASS, A BIT MESSY STILL
+def test_field_samples_query(resume_file="./resume_samples/resume2023.txt", my_job_title="accountant",  education_level="Bachelor's of Arts", work_experience="mid-level"):
 
     resume_samples_path = "./resume_samples/"
     related_samples = search_related_samples(my_job_title, resume_samples_path)
     print(related_samples)
+    # commonality = find_samples_commonality(related_samples)
+    resume = read_txt(resume_file)
+
+
     sample_tools = create_sample_tools(related_samples, "resume")
-    resume_field_content = get_field_content(read_txt(resume_file), field)
+    query_sample = f""" 
 
-    query_missing = f""" 
+    Sample resume are provided in your tools. Research each one and answer the following question:
 
-        Sample resume are provided in your tools. Research each one's field "{field}", if available.
+      1. What common features these resume share?
 
-        Answer the following question:
+      """
+    
+    commonality = generate_multifunction_response(query_sample, sample_tools)
 
-        
+    advice_query = f"""what to include for resume with someone with {education_level} and {work_experience}"""
+    advices = retrieve_from_db(advice_query)
 
-        Remember to compare the field specificied and ignore other field content. 
+    query_missing = f"""Based on the commonality shared among exemplary resume and expert advices, please generate a list of content that may be missing from the resume delimiter with {delimiter} characters.
 
-        For example, if you are asked to compare the Education field, ignore other field information from the samples. 
-
-    """
+            commonality shared among exemplary resume: {commonality}
+            expert advices: {advices}
+            resume: {delimiter}{resume}{delimiter}"""
     
     missing_items = generate_multifunction_response(query_missing, sample_tools)
-    
-    return missing_items
+
+    print(missing_items)
 
 # PASS
-def test_field_relevancy_query(resume_file = "./resume_samples/sample5.txt", my_job_title="customer service manager", field = "work history", posting_path=''):
+def test_field_relevancy_query( my_job_title="customer service manager", field = "work history", posting_path=''):
 
     # relevancy_tools = [search_relevancy_advice]
     tools = create_search_tools("google", 3)
-    resume_field_content = get_field_content(read_txt(resume_file), field)
+
+    resume_field_content = """Various Positions of Increasing Responsibility and Leadership
+            United States Air Force (2018 to present)
+             Currently serving as Squadron Operation Superintendent.
+             Scheduled to leave the Air Force in September 2021."""
 
     job_query  = f"""Research what a {my_job_title} does and output a detailed description of the common skills, responsibilities, education, experience needed."""
     job_description = get_web_resources(job_query) 
@@ -267,10 +289,29 @@ def test_field_relevancy_query(resume_file = "./resume_samples/sample5.txt", my_
     relevancy = generate_multifunction_response(query_relevancy, tools)
     return relevancy
 
-def test_field_evaluation(resume_file = "./resume_samples/resume2023.txt", field="work history"):
+#DECENT, WILL NEED TO UPDATE ADVICE QUERY TO IMPROVE OUTPUT
+def test_field_evaluation( field="work history"):
 
     general_tools = create_search_tools("google", 3)
-    resume_field_content = get_field_content(read_txt(resume_file), field)
+    resume_field_content = """WALMART, remote contractor, full-time 2022-05 – 2022-10
+    BIG DATA ENGINEER
+-   Coordinated with other engineers to evaluate and improve low level
+    deign of back-end features.
+
+-   Tested methodology with writing and execution of test plans,
+    debugging and testing scripts and tools.
+
+-   Updated old code bases to modern development standards, improving
+    functionality.
+
+    WALMART, Tuscaloosa, Alabama, full-time 2018-01 – 2018-06
+
+    STORE ASSOCIATE
+
+-   Offered assistance for increased customer satisfaction.
+
+-   Prioritized tasks to meet tight deadlines, pitching in to assist
+    others with project duties."""
     advice_query = f"""ATS-friendly way of writing {field}"""
     advices = retrieve_from_db(advice_query)
     query_evaluation = f"""You are given some expert advices on writing {field} section of the resume.
@@ -281,7 +322,7 @@ def test_field_evaluation(resume_file = "./resume_samples/resume2023.txt", field
     
     field content: {delimiter}{resume_field_content}{delimiter}. \n
     
-    please provide proof of your reasoning. 
+    Please provide proof of your reasoning. For example, if there is gap in work history, mark it as a weakness unless there is evidence it should not be considered so.
 
     """
     strength_weakness = generate_multifunction_response(query_evaluation, general_tools)
@@ -297,15 +338,19 @@ def test_resume_report():
 
 
 # test_coverletter_tool()
-# test_cl_revelancy_query()
-# test_general_job_description()
-# test_retrieve_cl()
-# test_samples_query()
 # test_resume_tool()
-# test_work_experience()
+
+# test_general_job_description()
+test_work_experience()
+# test_education_level()
+
+# test_cl_revelancy_query()
+# test_cl_retrieval()
+# test_cl_samples_query()
+
 # test_field_samples_query()
 # test_field_relevancy_query()
 # test_field_evaluation()
-# test_search_similar_resume()
-test_extract_fields()
 # test_field_retrieval()
+# test_search_similar_resume()
+# test_extract_fields()
