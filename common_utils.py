@@ -15,7 +15,7 @@ from langchain.chains import RetrievalQA,  LLMChain
 from pathlib import Path
 from basic_utils import read_txt
 from langchain_utils import ( create_wiki_tools, create_search_tools, create_db_tools, create_compression_retriever, create_ensemble_retriever, retrieve_redis_vectorstore,
-                              split_doc, handle_tool_error, retrieve_faiss_vectorstore, split_doc_file_size, reorder_docs)
+                              split_doc, handle_tool_error, retrieve_faiss_vectorstore, split_doc_file_size, reorder_docs, create_summary_chain)
 from langchain import PromptTemplate
 # from langchain.experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
 from langchain.agents.agent_toolkits import create_python_agent
@@ -412,7 +412,7 @@ def extract_work_experience_level(content: str, job_title:str, llm=OpenAI()) -> 
 
         If content does not contain any experiences related to {job_title}, mark as entry level.
 
-        For under 2 years of work experience, mark as junionr level.
+        For 1 to 2 years of work experience, mark as junionr level.
 
         For 2-5 years of work experience, mark as mid-level.
 
@@ -429,7 +429,10 @@ def extract_work_experience_level(content: str, job_title:str, llm=OpenAI()) -> 
     # executor = load_agent_executor(llm, tools, verbose=True)
     # agent = PlanAndExecute(planner=planner, executor=executor, verbose=True)
     agent = initialize_agent(tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=True)
-    response = agent.run(query)
+    try: 
+        response = agent.run(query)
+    except Exception:
+        response = ""
     # response = generate_multifunction_response(query, tools, max_iter=5)
     return response
 
@@ -514,88 +517,6 @@ def retrieve_from_db(query: str, llm=OpenAI(temperature=0.8, cache=False)) -> st
     return response
 
     
-def get_summary(path: str, prompt_template: str, chain_type = "stuff",  llm=OpenAI()) -> str:
-
-    """ See summarization chain: https://python.langchain.com/docs/use_cases/summarization
-    
-    Args:
-
-        path (str): file path
-
-        prompt_template (str): prompt with input variable "text"
-
-    Keyword Args:
-
-        chain_type (str): default is "stuff
-
-        llm (BaseModel): default is OpenAI()
-
-    Returns:
-    
-        a summary of the give file
-    
-    """
-    docs = split_doc_file_size(path)
-    PROMPT = PromptTemplate(template=prompt_template, input_variables=["text"])
-    chain = load_summarize_chain(llm, chain_type=chain_type, prompt=PROMPT)
-    response = chain.run(docs)
-    print(f"Sucessfully got summary: {response}")
-    return response
-
-
-def find_samples_commonality(files, llm = ChatOpenAI(temperature=0)):
-
-    docs: List[Document]=[]
-    for file in files: 
-        docs.extend(split_doc_file_size(file))
-    # Map
-    map_template = """The following is a set of documents
-    {docs}
-    Based on this list of docs, please identify the main themes 
-    Helpful Answer:"""
-    map_prompt = PromptTemplate.from_template(map_template)
-    map_chain = LLMChain(llm=llm, prompt=map_prompt)
-    # Reduce
-    reduce_template = """The following is set of summaries:
-    {doc_summaries}
-    Take these and distill it into a final, consolidated summary of the main themes. 
-    Helpful Answer:"""
-    reduce_prompt = PromptTemplate.from_template(reduce_template)
-     # Run chain
-    reduce_chain = LLMChain(llm=llm, prompt=reduce_prompt)
-
-    # Takes a list of documents, combines them into a single string, and passes this to an LLMChain
-    combine_documents_chain = StuffDocumentsChain(
-        llm_chain=reduce_chain, document_variable_name="doc_summaries"
-    )
-
-    # Combines and iteravely reduces the mapped documents
-    reduce_documents_chain = ReduceDocumentsChain(
-        # This is final chain that is called.
-        combine_documents_chain=combine_documents_chain,
-        # If documents exceed context for `StuffDocumentsChain`
-        collapse_documents_chain=combine_documents_chain,
-        # The maximum number of tokens to group documents into.
-        token_max=4000,
-    )
-    # Combining documents by mapping a chain over them, then combining results
-    map_reduce_chain = MapReduceDocumentsChain(
-        # Map chain
-        llm_chain=map_chain,
-        # Reduce chain
-        reduce_documents_chain=reduce_documents_chain,
-        # The variable name in the llm_chain to put the documents in
-        document_variable_name="docs",
-        # Return the results of the map steps in the output
-        return_intermediate_steps=False,
-    )
-
-    # text_splitter = CharacterTextSplitter.from_tiktoken_encoder(
-    #     chunk_size=1000, chunk_overlap=0
-    # )
-    # split_docs = text_splitter.split_documents(docs)
-
-    print(map_reduce_chain.run(docs))
 
 
 def create_sample_tools(related_samples: List[str], sample_type: str,) -> List[Tool]:
@@ -647,21 +568,21 @@ def create_sample_tools(related_samples: List[str], sample_type: str,) -> List[T
 #     return texts_merged
 
 
-def generate_multifunction_response(query: str, tools: List[Tool], max_iter = 2, llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> str:
+# def generate_multifunction_response(query: str, tools: List[Tool], max_iter = 2, llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> str:
 
-    """ See: https://python.langchain.com/docs/modules/agents/agent_types/openai_multi_functions_agent """
+#     """ See: https://python.langchain.com/docs/modules/agents/agent_types/openai_multi_functions_agent """
 
-    agent = initialize_agent(
-        tools,
-        llm,
-        agent=AgentType.OPENAI_MULTI_FUNCTIONS, 
-        max_iterations=max_iter,
-        early_stopping_method="generate",
-        # verbose=True
-    )
-    response = agent({"input": query}).get("output", "")   
-    print(f"Successfully got multifunction response: {response}")
-    return response
+#     agent = initialize_agent(
+#         tools,
+#         llm,
+#         agent=AgentType.OPENAI_MULTI_FUNCTIONS, 
+#         max_iterations=max_iter,
+#         early_stopping_method="generate",
+#         # verbose=True
+#     )
+#     response = agent({"input": query}).get("output", "")   
+#     print(f"Successfully got multifunction response: {response}")
+#     return response
 
 
 
@@ -730,7 +651,7 @@ def loading_file(json_request:str) -> str:
             return file_content
         else:
             prompt_template = "summarize the follwing text. text: {text} \n in less than 100 words."
-            return get_summary(file, prompt_template=prompt_template)
+            return create_summary_chain(file, prompt_template=prompt_template)
     except Exception as e:
         return "file did not load successfully. try another tool"
     

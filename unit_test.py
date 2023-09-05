@@ -3,10 +3,10 @@ from upgrade_resume import create_resume_evaluator_tool
 from langchain.chat_models import ChatOpenAI
 from langchain.agents import AgentType, Tool, initialize_agent
 from basic_utils import read_txt
-from common_utils import (get_web_resources, get_summary, generate_multifunction_response,find_samples_commonality,extract_education_level,
+from common_utils import (get_web_resources,extract_education_level,
                           retrieve_from_db, search_related_samples, create_sample_tools, extract_work_experience_level,  extract_resume_fields)
 from langchain.tools import tool
-from langchain_utils import retrieve_faiss_vectorstore, create_search_tools
+from langchain_utils import retrieve_faiss_vectorstore, create_search_tools, create_summary_chain, generate_multifunction_response
 from openai_api import get_completion
 import json
 
@@ -116,7 +116,7 @@ def test_cl_revelancy_query(resume_file=resume_file, my_job_title="data analyst"
             {text} \n
             Focus on roles and skills involved for this job. Do not include information irrelevant to this specific position.
         """
-        job_specification = get_summary(posting_path, prompt_template)
+        job_specification = create_summary_chain(posting_path, prompt_template)
     else:
         job_specification = ""
 
@@ -252,7 +252,7 @@ def test_field_relevancy_query( my_job_title="customer service manager", field =
             {text} \n
             Focus on roles and skills involved for this job. Do not include information irrelevant to this specific position.
         """
-        job_specification = get_summary(posting_path, prompt_template)
+        job_specification = create_summary_chain(posting_path, prompt_template)
     else:
         job_specification = ""
 
@@ -338,10 +338,10 @@ def test_resume_report():
 
 
 # test_coverletter_tool()
-# test_resume_tool()
+test_resume_tool()
 
 # test_general_job_description()
-test_work_experience()
+# test_work_experience()
 # test_education_level()
 
 # test_cl_revelancy_query()

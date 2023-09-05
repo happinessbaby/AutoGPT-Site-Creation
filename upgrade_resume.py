@@ -7,9 +7,9 @@ from langchain.output_parsers import CommaSeparatedListOutputParser
 from langchain import PromptTemplate
 from langchain.agents import AgentType, Tool, initialize_agent, create_json_agent
 from basic_utils import read_txt
-from common_utils import (get_web_resources, retrieve_from_db, extract_posting_information, get_summary, generate_multifunction_response,find_samples_commonality,extract_education_level, extract_work_experience_level,
+from common_utils import (get_web_resources, retrieve_from_db, extract_posting_information, extract_education_level, extract_work_experience_level,
                            extract_resume_fields, extract_job_title,  search_related_samples, create_sample_tools, extract_personal_information)
-from langchain_utils import create_search_tools
+from langchain_utils import create_search_tools, create_mapreduce_chain, create_summary_chain, generate_multifunction_response
 from pathlib import Path
 import json
 from json import JSONDecodeError
@@ -45,15 +45,20 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
     
     filename = Path(resume_file).stem
     res_path = os.path.join(resume_evaluation_path, filename+".txt")
-    res_dir = os.mkdir(resume_evaluation_path, filename)
+    res_dir = resume_evaluation_path+filename
+    try:
+      os.mkdir(res_dir)
+    except FileExistsError:
+      pass
+    # stores basic extracted responses, like education level, in a dictionary
     generated_responses = {}
 
     # get resume
     resume = read_txt(resume_file)
+    # extract personal information
     personal_info_dict = extract_personal_information(resume)
     generated_responses.update(personal_info_dict)
-
-    # get resume field names
+    # get resume field names and field content
     field_names, field_content = extract_resume_fields(resume)
     # generated_responses.update( {"resume_fields)
 
@@ -64,7 +69,7 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
         {text} \n
         Focus on roles and skills involved for this job. Do not include information irrelevant to this specific position.
       """
-      job_specification = get_summary(posting_path, prompt_template)
+      job_specification = create_summary_chain(posting_path, prompt_template)
       posting = read_txt(posting_path)
       posting_info_dict=extract_posting_information(posting)
       my_job_title = posting_info_dict["job"]
@@ -90,9 +95,12 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
       company_description = get_web_resources(company_query)
     generated_responses.update({"company description": company_description})
 
+    # get highest level of education
     education_level = extract_education_level(resume)
+    # get work experience level wrt the job position
     work_experience = extract_work_experience_level(resume, my_job_title)
 
+    # samples query to find missing content from resume
     related_samples = search_related_samples(my_job_title, resume_samples_path)
     sample_tools = create_sample_tools(related_samples, "resume")
     query_sample = f""" 
@@ -107,36 +115,26 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
     advices = retrieve_from_db(advice_query)
 
     query_missing = f"""Based on the commonality shared among exemplary resume and expert advices, please generate a list of content that may be missing from the resume delimiter with {delimiter} characters.
-
             commonality shared among exemplary resume: {commonality}
             expert advices: {advices}
-            resume: {delimiter}{resume}{delimiter}"""
-    
+            resume: {delimiter}{resume}{delimiter}""" 
     missing_items = generate_multifunction_response(query_missing, sample_tools)
 
 
-    # sample_tools = create_sample_tools(related_samples, "resume")
-    # query_missing = f""" 
-
-    #     Sample resume are provided in your tools. Your task is to research each one and compare them with the following resume delimited with {delimiter} characters.
-
-    #     resume: {delimiter}{resume}{delimiter}
- 
-    #     After you've done your research and comparison, please answer the following question:
-
-    #     What are some things missing from the resume delimited with {delimiter} characters compared to the sample resume?
-
-    # """ 
-    # missing_items = generate_multifunction_response(query_missing, sample_tools)
     #TODO: this can be a general putpose tool with all web data  
     general_tools = create_search_tools("google", 3)
     # relevancy_tools = [search_relevancy_advice]
 
     field_improvs = ""
+    files = []
     for field in field_names:
-      field_improvs += improve_resume_fields(generated_responses, field, field_content.get(field, ""), res_path, general_tools, os.path.join(res_dir, f"{field}.txt"))
+      file_path = os.path.join(res_dir, f"{field}.txt")
+      field_improvs += improve_resume_fields(generated_responses, field, field_content.get(field, ""),  general_tools, file_path)
+      files.append(file_path)
 
     #TODO generate a reporter agent that can summarize everything without losing any details
+    return create_mapreduce_chain(files)
+
 
 
 
@@ -156,7 +154,7 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
     return f"""resume evaluation file": {res_path}"""
 
 
-def improve_resume_fields(generated_response: Dict[str, str], field:str, field_content:str, res_path:str, general_tools:List[Tool], ) -> None:
+def improve_resume_fields(generated_response: Dict[str, str], field:str, field_content:str, general_tools:List[Tool], file_path: str) -> None:
     
     print(f"CURRENT FIELD IS: {field}")
     my_job_title = generated_response.get("job title", "")
@@ -231,7 +229,7 @@ def improve_resume_fields(generated_response: Dict[str, str], field:str, field_c
 
     # my_advice = llm(upgrade_resume_message).content
 
-    with open(res_path, "w") as f:
+    with open(file_path, "w") as f:
        f.write(strength_weakness + '\n' + relevancy + '\n')
 
     return strength_weakness + '\n' + relevancy + '\n'

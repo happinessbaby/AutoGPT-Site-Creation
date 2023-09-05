@@ -8,7 +8,7 @@ from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
 from basic_utils import read_txt
 from common_utils import (extract_personal_information, get_web_resources,  retrieve_from_db,
-                          get_summary, extract_posting_information, create_sample_tools, extract_job_title, search_related_samples, generate_multifunction_response)
+                         extract_posting_information, create_sample_tools, extract_job_title, search_related_samples)
 from datetime import date
 from pathlib import Path
 import json
@@ -18,7 +18,7 @@ from multiprocessing import Process, Queue, Value
 from langchain.agents.agent_toolkits import create_python_agent
 from langchain.tools.python.tool import PythonREPLTool
 from typing import List
-from langchain_utils import create_search_tools
+from langchain_utils import create_search_tools, create_summary_chain, generate_multifunction_response
 import uuid
 
 
@@ -77,7 +77,7 @@ def generate_basic_cover_letter(my_job_title="", company="", resume_file="",  po
         {text} \n
         Focus on roles and skills involved for this job. Do not include information irrelevant to this specific position.
       """
-      job_specification = get_summary(posting_path, prompt_template)
+      job_specification = create_summary_chain(posting_path, prompt_template)
       posting = read_txt(posting_path)
       posting_info_dict=extract_posting_information(posting)
       my_job_title = posting_info_dict["job"]

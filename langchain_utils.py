@@ -24,6 +24,9 @@ from langchain.chains.qa_with_sources import load_qa_with_sources_chain, stuff_p
 import os
 from feast import FeatureStore
 from langchain.text_splitter import CharacterTextSplitter,  RecursiveCharacterTextSplitter
+from langchain.chains.mapreduce import MapReduceChain
+from langchain.chains import RetrievalQAWithSourcesChain, StuffDocumentsChain
+from langchain.chains import ReduceDocumentsChain, MapReduceDocumentsChain
 from langchain.vectorstores.redis import Redis
 from langchain.embeddings import OpenAIEmbeddings
 import redis
@@ -71,10 +74,10 @@ redis_client = redis.Redis.from_url(redis_url)
 # langchain.llm_cache = RedisCache(redis_client)
 # semantic cache
 # !!!!RedisSentimentCache does not support caching ChatModel outputs.
-langchain.llm_cache = RedisSemanticCache(
-    embedding=OpenAIEmbeddings(),
-    redis_url=redis_url
-)
+# langchain.llm_cache = RedisSemanticCache(
+#     embedding=OpenAIEmbeddings(),
+#     redis_url=redis_url
+# )
 
 
 def split_doc(path='./web_data/', path_type='dir', splitter_type = "recursive", chunk_size=200, chunk_overlap=10) -> List[Document]:
@@ -119,7 +122,7 @@ def split_doc(path='./web_data/', path_type='dir', splitter_type = "recursive", 
     docs = text_splitter.split_documents(documents)
     return docs
 
-def split_doc_file_size(txt_path: str, chunk_size=2000) -> List[Document]:
+def split_doc_file_size(txt_path: str, chunk_size=4000) -> List[Document]:
 
     bytes = os.path.getsize(txt_path)
     # if file is small, don't split
@@ -226,7 +229,7 @@ def create_search_tools(name: str, top_n: int) -> List[Tool]:
         search = GoogleSearchAPIWrapper(k=top_n)
         tool = [
             Tool(
-            name = "Google Search", 
+            name = "web_search", 
             description= "useful for when you need to ask with search",
             func=search.run,
             handle_tool_error = handle_tool_error,
@@ -236,7 +239,7 @@ def create_search_tools(name: str, top_n: int) -> List[Tool]:
         search = SerpAPIWrapper() 
         tool = [
             Tool(
-            name="SerpSearch",
+            name="web_search",
             description= "useful for when you need to ask with search",
             func=search.run,
             handle_tool_error=handle_tool_error,
@@ -350,7 +353,7 @@ def create_QASource_chain(chat, vectorstore, docs=None, chain_type="stuff", inde
     return qa
 
 
-def create_compression_retriever(vectorstore = "index_web_advice") -> ContextualCompressionRetriever:
+def create_compression_retriever(vectorstore = "faiss_web_data") -> ContextualCompressionRetriever:
 
     """ Creates a compression retriever given vector store index name. 
     
@@ -369,8 +372,9 @@ def create_compression_retriever(vectorstore = "index_web_advice") -> Contextual
     pipeline_compressor = DocumentCompressorPipeline(
         transformers=[splitter, redundant_filter, relevant_filter]
     )
-    redis_store = retrieve_redis_vectorstore(vectorstore)
-    retriever = redis_store.as_retriever(search_type="similarity", search_kwargs={"k":1000, "score_threshold":"0.2"})
+    store = retrieve_faiss_vectorstore(vectorstore)
+    retriever = store.as_retriever(search_type="mmr",  search_kwargs={"k":1})
+    # retriever = store.as_retriever(search_type="similarity_score_threshold", search_kwargs={"score_threshold": .5, "k":3})
 
     compression_retriever = ContextualCompressionRetriever(base_compressor=pipeline_compressor, base_retriever=retriever)
 
@@ -405,6 +409,142 @@ def create_elastic_knn():
     )
     
     return knn_search
+
+def create_summary_chain(file: str, prompt_template: str, chain_type = "stuff",  llm=OpenAI()) -> str:
+
+    """ See summarization chain: https://python.langchain.com/docs/use_cases/summarization
+    
+    Args:
+
+        file (str): file path
+
+        prompt_template (str): prompt with input variable "text"
+
+    Keyword Args:
+
+        chain_type (str): default is "stuff
+
+        llm (BaseModel): default is OpenAI()
+
+    Returns:
+    
+        a summary of the give file
+    
+    """
+    docs = split_doc_file_size(file)
+    PROMPT = PromptTemplate(template=prompt_template, input_variables=["text"])
+    chain = load_summarize_chain(llm, chain_type=chain_type, prompt=PROMPT)
+    response = chain.run(docs)
+    print(f"Sucessfully got summary: {response}")
+    return response
+
+def create_mapreduce_chain(files: List[str], llm = ChatOpenAI()) -> str:
+
+    """ Creates a map-reduce chain for multiple document summarization and generalization: https://python.langchain.com/docs/use_cases/summarization#option-2-map-reduce 
+    
+        Args: 
+
+            files (List[str]): a list of file paths in string format
+        
+        Keyword Args:
+
+            llm (Basemodel): default is OpenAI()
+
+        Returns:
+
+            a summary, or main themes, on the provided set of documents
+        
+        """
+
+    docs: List[Document]=[]
+    for file in files: 
+        docs.extend(split_doc_file_size(file))
+    # Map
+    map_template = """The following is a set of documents
+    {docs}
+    Based on this list of docs, please identify the main themes 
+    Helpful Answer:"""
+    map_prompt = PromptTemplate.from_template(map_template)
+    map_chain = LLMChain(llm=llm, prompt=map_prompt)
+    # Reduce
+    reduce_template = """The following is set of summaries:
+    {doc_summaries}
+    Take these and distill it into a final, consolidated summary of the main themes. 
+    Helpful Answer:"""
+    reduce_prompt = PromptTemplate.from_template(reduce_template)
+     # Run chain
+    reduce_chain = LLMChain(llm=llm, prompt=reduce_prompt)
+
+    # Takes a list of documents, combines them into a single string, and passes this to an LLMChain
+    combine_documents_chain = StuffDocumentsChain(
+        llm_chain=reduce_chain, document_variable_name="doc_summaries"
+    )
+
+    # Combines and iteravely reduces the mapped documents
+    reduce_documents_chain = ReduceDocumentsChain(
+        # This is final chain that is called.
+        combine_documents_chain=combine_documents_chain,
+        # If documents exceed context for `StuffDocumentsChain`
+        collapse_documents_chain=combine_documents_chain,
+        # The maximum number of tokens to group documents into.
+        token_max=4000,
+    )
+    # Combining documents by mapping a chain over them, then combining results
+    map_reduce_chain = MapReduceDocumentsChain(
+        # Map chain
+        llm_chain=map_chain,
+        # Reduce chain
+        reduce_documents_chain=reduce_documents_chain,
+        # The variable name in the llm_chain to put the documents in
+        document_variable_name="docs",
+        # Return the results of the map steps in the output
+        return_intermediate_steps=False,
+    )
+
+    # text_splitter = CharacterTextSplitter.from_tiktoken_encoder(
+    #     chunk_size=1000, chunk_overlap=0
+    # )
+    # split_docs = text_splitter.split_documents(docs)
+
+    print(map_reduce_chain.run(docs))
+
+
+
+def generate_multifunction_response(query: str, tools: List[Tool], max_iter = 2, llm = ChatOpenAI(model="gpt-3.5-turbo-0613")) -> str:
+
+    """ General purpose agent that uses the OpenAI functions ability.
+     
+    See: https://python.langchain.com/docs/modules/agents/agent_types/openai_multi_functions_agent 
+
+    Args:
+
+        query (str)
+
+        tools (List[Tool]): all agents must have at least one tool
+
+    Keyworkd Args:
+
+        max_iter (int): maximum iteration for early stopping, default is 2
+
+        llm (BaseModel): default is ChatOpenAI(model="gpt-3.5-turbo-0613")
+
+    Returns:
+
+        answer to the query
+    
+    """
+
+    agent = initialize_agent(
+        tools,
+        llm,
+        agent=AgentType.OPENAI_MULTI_FUNCTIONS, 
+        max_iterations=max_iter,
+        early_stopping_method="generate",
+        # verbose=True
+    )
+    response = agent({"input": query}).get("output", "")   
+    print(f"Successfully got multifunction response: {response}")
+    return response
 
 
 def create_vectorstore(vs_type: str, file: str, file_type: str, index_name: str, embeddings = OpenAIEmbeddings()) -> FAISS or Redis:
@@ -584,7 +724,8 @@ class CustomOutputParser(AgentOutputParser):
 
 if __name__ == '__main__':
 
-    db =  create_vectorstore("redis", "./web_data/", "dir", "index_web_advice")
+    # db =  create_vectorstore("redis", "./web_data/", "dir", "index_web_advice")
+     db = create_vectorstore("faiss", "./web_data/", "dir", "faiss_web_data")
  
 
     
