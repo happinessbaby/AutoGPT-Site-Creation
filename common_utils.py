@@ -14,7 +14,7 @@ from langchain.agents import AgentType
 from langchain.chains import RetrievalQA,  LLMChain
 from pathlib import Path
 from basic_utils import read_txt
-from langchain_utils import ( create_wiki_tools, create_search_tools, create_db_tools, create_compression_retriever, create_ensemble_retriever, retrieve_redis_vectorstore,
+from langchain_utils import ( create_wiki_tools, create_search_tools, create_retriever_tools, create_compression_retriever, create_ensemble_retriever, retrieve_redis_vectorstore,
                               split_doc, handle_tool_error, retrieve_faiss_vectorstore, split_doc_file_size, reorder_docs, create_summary_chain)
 from langchain import PromptTemplate
 # from langchain.experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
@@ -192,7 +192,7 @@ def extract_posting_information(posting: str, llm = ChatOpenAI(temperature=0, mo
 
 def extract_education_level(resume: str) -> str:
 
-    """ Extracts the highest degree including area of study if available from resume. """
+    """ Extracts the highest degree including area of study from resume. """
 
     response = get_completion(f""" Read the resume closely. It is delimited with {delimiter} characters.
                               
@@ -232,6 +232,25 @@ def extract_job_title(resume: str) -> str:
 #     field_name: str=Field(description="field name")
 #     field_content: str=Field(description="content of the field")
 def extract_resume_fields(resume: str,  llm=OpenAI(temperature=0,  max_tokens=1024)) -> Union[List[str], Dict[str, str]]:
+
+    """ Extracts resume field names and field content.
+
+    This utilizes a sequential chain: https://python.langchain.com/docs/modules/chains/foundational/sequential_chains
+
+    Args: 
+
+        resume (str)
+
+    Keyword Args:
+
+        llm (BaseModel): default is OpenAI(temperature=0,  max_tokens=1024). Note max_token is specified due to a cutoff in output if max token is not specified. 
+
+    Returns:
+
+        a list of field names along with a dictionary of field names and their respective content
+    
+    
+    """
 
 
     field_name_query =  """Search and extract names of fields contained in the resume delimited with {delimiter} characters. A field name must has content contained in it for it to be considered a field name. 
@@ -341,17 +360,17 @@ def extract_resume_fields(resume: str,  llm=OpenAI(temperature=0,  max_tokens=10
 #TODO: once there's enough samples, education level and work experience level could also be included in searching criteria
 def search_related_samples(job_title: str, directory: str) -> List[str]:
 
-    """ Searches resume or cover letter samples in the directory with job titles similar to the given job title using OpenAI API calls.
+    """ Searches resume or cover letter samples in the directory for similar content as job title.
 
     Args:
 
         job_title (str)
 
-        directory (str): directionry path
+        directory (str): samples directory path
 
     Returns:
 
-        a list of paths in the directionry
+        a list of paths in the samples directory 
     
     """
 
@@ -386,8 +405,21 @@ def search_related_samples(job_title: str, directory: str) -> List[str]:
 #TODO: math chain date calculation errors out because of formatting
 def extract_work_experience_level(content: str, job_title:str, llm=OpenAI()) -> str:
 
-    """ Extracts work experience level of the given job_title in the resume using OpenAI API calls.
-     
+    """ Extracts work experience level of a given job title from work experience.
+
+    Args:
+
+        content (str): work experience section of a resume
+
+        job_title (str): the job position to extract experience on
+
+    Keyword Args:
+
+        llm (BaseModel): default is OpenAI()
+
+    Returns:
+
+        outputs 'entry level', 'junior level', 'mid-level', 'senior or executive level', or 'technical level or other'
     """
     llm_math_chain = LLMMathChain.from_llm(llm=llm, verbose=True)
 
@@ -439,9 +471,9 @@ def extract_work_experience_level(content: str, job_title:str, llm=OpenAI()) -> 
 
 def get_web_resources(query: str, llm = ChatOpenAI(temperature=0.8, model="gpt-3.5-turbo-0613", cache=False)) -> str:
 
-    """ Retrieves web information given a query. The default search is using WebReserachRetriever: https://python.langchain.com/docs/modules/data_connection/retrievers/web_research.
+    """ Retrieves web answer given a query question. The default search is using WebReserachRetriever: https://python.langchain.com/docs/modules/data_connection/retrievers/web_research.
     
-    Back up is using Zero-Shot-React-Description agent with Google search tool: https://python.langchain.com/docs/modules/agents/agent_types/react.html  """
+    Backup is using Zero-Shot-React-Description agent with Google search tool: https://python.langchain.com/docs/modules/agents/agent_types/react.html  """
 
     try: 
         search = GoogleSearchAPIWrapper()
@@ -480,7 +512,9 @@ def get_web_resources(query: str, llm = ChatOpenAI(temperature=0.8, model="gpt-3
 
 def retrieve_from_db(query: str, llm=OpenAI(temperature=0.8, cache=False)) -> str:
 
-    """ Retrieves query answer from database.
+    """ Retrieves query answer from database. 
+
+    In this case, documents are compressed and reordered before sent to a StuffDocumentChain. 
 
     For usage, see bottom of: https://python.langchain.com/docs/modules/data_connection/document_transformers/post_retrieval/long_context_reorder
   
@@ -519,33 +553,38 @@ def retrieve_from_db(query: str, llm=OpenAI(temperature=0.8, cache=False)) -> st
     
 
 
-def create_sample_tools(related_samples: List[str], sample_type: str,) -> List[Tool]:
+def create_sample_tools(related_samples: List[str], sample_type: str,) -> Union[List[Tool], List[str]]:
 
-    """ Creates tool for querying multiple documents using ensemble retriever.
+    """ Creates a set of tools from files along with the tool names for querying multiple documents. 
+        
+        Note: Document comparison benefits from specifying tool names in prompt. 
      
-      See: https://python.langchain.com/docs/modules/data_connection/retrievers/ensemble
+      The files are split into Langchain Document, which are turned into ensemble retrievers then made into retriever tools. 
 
       Args:
 
-        related_samples (List[str]): list of paths
+        related_samples (list[str]): list of sample file paths
 
         sample_type (str): "resume" or "cover letter"
     
     Returns:
 
-        a list of agent tools
+        a list of agent tools and a list of tool names
           
     """
 
     tools = []
+    tool_names = []
     for file in related_samples:
-        docs = split_doc_file_size(file)
+        docs = split_doc_file_size(file, splitter_type="tiktoken")
         tool_description = f"This is a {sample_type} sample. Use it to compare with other {sample_type} samples"
         ensemble_retriever = create_ensemble_retriever(docs)
-        tool = create_db_tools(ensemble_retriever, f"{sample_type}_{random.choice(string.ascii_letters)}", tool_description)
+        tool_name = f"exemplary_{sample_type}_{random.choice(string.ascii_letters)}"
+        tool = create_retriever_tools(ensemble_retriever, tool_name, tool_description)
+        tool_names.append(tool_name)
         tools.extend(tool)
     print(f"Successfully created {sample_type} tools")
-    return tools
+    return tools, tool_names
 
 
 # @tool
@@ -687,7 +726,7 @@ def create_search_all_chat_history_tool()-> List[Tool]:
     db = retrieve_faiss_vectorstore("chat_debug")
     name = "search_all_chat_history"
     description = """Useful when you want to debug the cuurent conversation referencing historical conversations. Use it especially when debugging error messages. """
-    tools = create_db_tools(db.as_retriever(), name, description)
+    tools = create_retriever_tools(db.as_retriever(), name, description)
     return tools
 
 

@@ -63,6 +63,7 @@ from langchain.retrievers import BM25Retriever, EnsembleRetriever
 
 
 
+
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
 # You may need to update the path depending on where you stored it
@@ -122,16 +123,17 @@ def split_doc(path='./web_data/', path_type='dir', splitter_type = "recursive", 
     docs = text_splitter.split_documents(documents)
     return docs
 
-def split_doc_file_size(txt_path: str, chunk_size=4000) -> List[Document]:
-
-    bytes = os.path.getsize(txt_path)
+def split_doc_file_size(path: str, splitter_type = "recursive", chunk_size=4000) -> List[Document]:
+    
+    bytes = os.path.getsize(path)
+    docs: List[Document] = []
     # if file is small, don't split
     if bytes<4000:
-        docs = [Document(
-            page_content = read_txt(txt_path)
-        )]
+        docs.extend([Document(
+            page_content = read_txt(path)
+        )])
     else:
-        docs = split_doc(txt_path, "file", chunk_size=chunk_size)
+        docs.extend(split_doc(path, "file", chunk_size=chunk_size))
     return docs
 
 
@@ -250,16 +252,16 @@ def create_search_tools(name: str, top_n: int) -> List[Tool]:
 class DocumentInput(BaseModel):
     question: str = Field()
 
-def create_db_tools(retriever: Any, name: str, description: str, llm=OpenAI(), chain_type="stuff") -> List[Tool]:
+def create_retriever_tools(retriever: Any, name: str, description: str, llm=OpenAI(), chain_type="stuff") -> List[Tool]:
 
     """
-    Creates databse tool where vector store is used as a retriever. 
+    Creates retriever tools from all types of retriever. 
 
     See: https://python.langchain.com/docs/use_cases/question_answering/how_to/vector_db_qa
 
     Args: 
 
-        retriever (Any): vectorstore retriever
+        retriever (any): any vectorstore retriever
 
         name (str): tool name
 
@@ -271,7 +273,9 @@ def create_db_tools(retriever: Any, name: str, description: str, llm=OpenAI(), c
 
         chain_type: "stuff" by default
 
-    Returns: List[Tool]
+    Returns:
+        
+        a list of agent tools
 
     """
     tool = [
@@ -287,7 +291,7 @@ def create_db_tools(retriever: Any, name: str, description: str, llm=OpenAI(), c
     return tool
 
 
-def create_retriever_tools(vectorstore: Any, tool_name: str, tool_description: str) -> List[Tool]:   
+def create_vs_retriever_tools(vectorstore: Any, tool_name: str, tool_description: str) -> List[Tool]:   
 
     """Create retriever tools from vector store for conversational retrieval agent
     
@@ -410,7 +414,7 @@ def create_elastic_knn():
     
     return knn_search
 
-def create_summary_chain(file: str, prompt_template: str, chain_type = "stuff",  llm=OpenAI()) -> str:
+def create_summary_chain(path: str, prompt_template: str, chain_type = "stuff",  llm=OpenAI()) -> str:
 
     """ See summarization chain: https://python.langchain.com/docs/use_cases/summarization
     
@@ -431,7 +435,7 @@ def create_summary_chain(file: str, prompt_template: str, chain_type = "stuff", 
         a summary of the give file
     
     """
-    docs = split_doc_file_size(file)
+    docs = split_doc_file_size(path)
     PROMPT = PromptTemplate(template=prompt_template, input_variables=["text"])
     chain = load_summarize_chain(llm, chain_type=chain_type, prompt=PROMPT)
     response = chain.run(docs)
@@ -510,7 +514,7 @@ def create_mapreduce_chain(files: List[str], llm = ChatOpenAI()) -> str:
 
 
 
-def generate_multifunction_response(query: str, tools: List[Tool], max_iter = 2, llm = ChatOpenAI(model="gpt-3.5-turbo-0613")) -> str:
+def generate_multifunction_response(query: str, tools: List[Tool], early_stopping=False, max_iter = 2, llm = ChatOpenAI(model="gpt-3.5-turbo-0613", cache=False)) -> str:
 
     """ General purpose agent that uses the OpenAI functions ability.
      
@@ -533,15 +537,19 @@ def generate_multifunction_response(query: str, tools: List[Tool], max_iter = 2,
         answer to the query
     
     """
-
-    agent = initialize_agent(
-        tools,
-        llm,
-        agent=AgentType.OPENAI_MULTI_FUNCTIONS, 
-        max_iterations=max_iter,
-        early_stopping_method="generate",
-        # verbose=True
-    )
+    if early_stopping:
+        agent = initialize_agent(
+            tools,
+            llm,
+            agent=AgentType.OPENAI_MULTI_FUNCTIONS, 
+            max_iterations=max_iter,
+            early_stopping_method="force",
+            # verbose=True
+        )
+    else:
+        agent = initialize_agent(
+            tools, llm, agent=AgentType.OPENAI_MULTI_FUNCTIONS
+        )
     response = agent({"input": query}).get("output", "")   
     print(f"Successfully got multifunction response: {response}")
     return response

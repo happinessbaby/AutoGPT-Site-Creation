@@ -100,40 +100,65 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
     # get work experience level wrt the job position
     work_experience = extract_work_experience_level(resume, my_job_title)
 
-    # samples query to find missing content from resume
+    # samples query to find missing content from resume using document comparison
+    # Note: document comparison benefits from a clear and simple prompt
     related_samples = search_related_samples(my_job_title, resume_samples_path)
-    sample_tools = create_sample_tools(related_samples, "resume")
-    query_sample = f""" 
+    sample_tools, tool_names = create_sample_tools(related_samples, "resume")
+    query_sample = f"""  You are an expert resume advisor that specializes in comparing exemplary sample resume. 
 
-    Sample resume are provided in your tools. Research each one and answer the following question:
+    Sample resume are provided in your tools. Research {str(tool_names)} and answer the following question:
 
-      1. What common features these resume share?
+       What field information do these resume share, or what content do they have in common? 
 
-      """
+    Please do not list your answer but write in complete sentences as an expert resume advisor. 
+
+    Your answer should be general without losing details. For example, you should not compare company names but should compare shared work experiences.
+
+    """  
     commonality = generate_multifunction_response(query_sample, sample_tools)
-    advice_query = f"""what to include for resume with someone with {education_level} and {work_experience}"""
+    # Note: retrieval query works best if clear, concise, and detail-dense
+    advice_query = f"""what to include for resume with someone with {education_level} and {work_experience} for {my_job_title}"""
     advices = retrieve_from_db(advice_query)
 
-    query_missing = f"""Based on the commonality shared among exemplary resume and expert advices, please generate a list of content that may be missing from the resume delimiter with {delimiter} characters.
-            commonality shared among exemplary resume: {commonality}
-            expert advices: {advices}
-            resume: {delimiter}{resume}{delimiter}""" 
+    query_missing = f""" You are an expert resume advisor that specializes in finding missing fields and content. 
+
+        Your job is to find missing items in the resume delimiter with {delimiter} characters using expert suggestions. 
+
+        Ignore all formatting advices and any specific details such as personal details, dates, schools, companies, affiliations, hobbies, etc. 
+        
+        Your answer should be general enough to allow applicant to fill out the missing content with their own information. 
+
+        Please output only the missing field names and/or missing field content in a list. Do not provide the source. 
+
+        expert suggestion: {advices} \n {commonality} \n
+
+        resume: {delimiter}{resume}{delimiter}. """ 
+    
     missing_items = generate_multifunction_response(query_missing, sample_tools)
+    file_path = file_path = os.path.join(res_dir, "missing.txt")
+    with open(file_path, "w") as f:
+      f.write(missing_items)
+
 
 
     #TODO: this can be a general putpose tool with all web data  
     general_tools = create_search_tools("google", 3)
     # relevancy_tools = [search_relevancy_advice]
 
-    field_improvs = ""
     files = []
     for field in field_names:
       file_path = os.path.join(res_dir, f"{field}.txt")
-      field_improvs += improve_resume_fields(generated_responses, field, field_content.get(field, ""),  general_tools, file_path)
+      improve_resume_fields(generated_responses, field, field_content.get(field, ""),  general_tools, file_path)
       files.append(file_path)
 
     #TODO generate a reporter agent that can summarize everything without losing any details
-    return create_mapreduce_chain(files)
+    template = """Write a detailed summary of the following: {text}
+        DETAILED SUMMARY: """
+    response = ""
+    for file in files:
+       response += create_summary_chain(file, template, chain_type="refine")
+    return response
+    # return create_mapreduce_chain(files)
 
 
 
@@ -161,12 +186,12 @@ def improve_resume_fields(generated_response: Dict[str, str], field:str, field_c
     company_description = generated_response.get("company description", "")
     job_specification = generated_response.get("job specification", "")
     job_description = generated_response.get("job description", "")
-    education_level = generated_response.get("education", "")
+    # education_level = generated_response.get("education", "")
 
     # The purpose of getting expert advices is to evaluate weaknesses in the current resume field content
-    advice_query = f"""ATS-friendly way of writing {field}"""
+    advice_query =  f"""What are some dos and don'ts when writing resume field {field} to make it ATS-friendly?"""
     advices = retrieve_from_db(advice_query)
-    query_evaluation = f"""You are given some expert advices on writing {field} section of the resume.
+    query_evaluation = f""" You are an expert resume advisor. You are given some expert advices on writing {field} section of the resume.
     
     advices: {advices}
 
@@ -175,13 +200,15 @@ def improve_resume_fields(generated_response: Dict[str, str], field:str, field_c
     field content: {delimiter}{field_content}{delimiter}. \n
     
     Please provide proof of your reasoning. For example, if there is gap in work history, mark it as a weakness unless there is evidence it should not be considered so.
+    
+    Ignore all formatting. They should not be considered as weaknesses or strengths. 
 
     """
     strength_weakness = generate_multifunction_response(query_evaluation, general_tools)
 
     # Get resume's relevant and irrelevant info for resume field: few-shot learning works great here
     # The purpose of identitying irrelevant and relevant information is so that irrelevant information can be deleted or reworded   
-    query_relevancy = f"""Determine the relevant and irrelevant information contained in the field content. 
+    query_relevancy = f"""You are an expert resume advisor. Determine the relevant and irrelevant information contained in the field content. 
 
      Generate a list of irrelevant information that should not be included in the cover letter and a list of relevant information that should be included in the resume field.
        
@@ -207,7 +234,7 @@ def improve_resume_fields(generated_response: Dict[str, str], field:str, field_c
 
       1. Experience as a front desk receptionist is not directly related to the role of a data analyst
 
-      Please do not do anything and output -1 if field name is personal informaion or contains personal information such as name and links. These do not need any evaluation on relevancy
+      You do not need to evaluate field that contains personal information. 
 
       """
 
@@ -232,7 +259,7 @@ def improve_resume_fields(generated_response: Dict[str, str], field:str, field_c
     with open(file_path, "w") as f:
        f.write(strength_weakness + '\n' + relevancy + '\n')
 
-    return strength_weakness + '\n' + relevancy + '\n'
+    # return strength_weakness + '\n' + relevancy + '\n'
   
 
 

@@ -6,9 +6,11 @@ from basic_utils import read_txt
 from common_utils import (get_web_resources,extract_education_level,
                           retrieve_from_db, search_related_samples, create_sample_tools, extract_work_experience_level,  extract_resume_fields)
 from langchain.tools import tool
-from langchain_utils import retrieve_faiss_vectorstore, create_search_tools, create_summary_chain, generate_multifunction_response
+from langchain_utils import retrieve_faiss_vectorstore, create_search_tools, create_summary_chain, generate_multifunction_response, split_doc, split_doc_file_size
 from openai_api import get_completion
+from langchain.chains.summarize import load_summarize_chain
 import json
+from pathlib import Path
 
 resume_file = "resume_samples/sample6.txt"
 def generate_random_info(type):
@@ -38,6 +40,7 @@ def test_coverletter_tool(resume_file=resume_file, job="data analyst", company="
                               job post links: {posting_link} \n                          
                               """)
     print(f"COVER LETTER: {cover_letter}")
+
 
 
 def test_resume_tool(resume_file="./resume_samples/test.txt", job="data analyst", company="", posting_link="") -> str:
@@ -199,38 +202,44 @@ def test_field_retrieval(field="work history"):
     advices = retrieve_from_db(advice_query)
     return advices
 
-# PASS, A BIT MESSY STILL
-def test_field_samples_query(resume_file="./resume_samples/resume2023.txt", my_job_title="accountant",  education_level="Bachelor's of Arts", work_experience="mid-level"):
+# MISSING CONTENT PART STILL FAILING, REST PASS
+def test_field_samples_query(resume_file="./resume_samples/test.txt", my_job_title="accountant",  education_level="Bachelor's of Arts", work_experience="entry level"):
 
     resume_samples_path = "./resume_samples/"
     related_samples = search_related_samples(my_job_title, resume_samples_path)
     print(related_samples)
-    # commonality = find_samples_commonality(related_samples)
     resume = read_txt(resume_file)
+    sample_tools, tool_names = create_sample_tools(related_samples, "resume")
+    query_sample = f"""  You are an expert resume advisor that specializes in comparing exemplary sample resume. 
 
+    Sample resume are provided in your tools. Research {str(tool_names)} and answer the following question:
 
-    sample_tools = create_sample_tools(related_samples, "resume")
-    query_sample = f""" 
+       What field information do these resume share, or what content do they have in common? 
 
-    Sample resume are provided in your tools. Research each one and answer the following question:
+    Please do not list your answer but write in complete sentences as an expert resume advisor. 
 
-      1. What common features these resume share?
+    Your answer should be general without losing details. For example, you should not compare company names but should compare shared work experiences.
 
-      """
-    
+    """  
     commonality = generate_multifunction_response(query_sample, sample_tools)
-
-    advice_query = f"""what to include for resume with someone with {education_level} and {work_experience}"""
+    advice_query = f"""what to include for resume with someone with {education_level} and {work_experience} for {my_job_title}"""
+    # stressing the level of detail in prompt is important
     advices = retrieve_from_db(advice_query)
+    query_missing = f""" You are an expert resume advisor that specializes in finding missing fields and content. 
+    
+            Your job is to find missing items in the resume delimiter with {delimiter} characters using expert suggestions. 
 
-    query_missing = f"""Based on the commonality shared among exemplary resume and expert advices, please generate a list of content that may be missing from the resume delimiter with {delimiter} characters.
+            Ignore all formatting advices and any specific details such as personal details, dates, schools, companies, affiliations, hobbies, etc. 
+            
+            Your answer should be general enough to allow applicant to fill out the missing content with their own information. 
 
-            commonality shared among exemplary resume: {commonality}
-            expert advices: {advices}
-            resume: {delimiter}{resume}{delimiter}"""
+            Please output only the missing field names and/or missing field content in a list. Do not provide the source. 
+
+            expert suggestion: {advices} \n {commonality} \n
+
+            resume: {delimiter}{resume}{delimiter}. """ 
     
     missing_items = generate_multifunction_response(query_missing, sample_tools)
-
     print(missing_items)
 
 # PASS
@@ -330,8 +339,15 @@ def test_field_evaluation( field="work history"):
     return strength_weakness
     
 
-def test_resume_report():
-    return None
+
+def test_resume_report(directory = "./static/resume_evaluation/test/", llm = ChatOpenAI(temperature=0, model_name="gpt-3.5-turbo-16k")):
+    
+    # split_docs = split_doc(directory, 'dir', chunk_size=4000)
+    split_docs = []
+    for path in Path(directory).glob('**/*.txt'):
+        split_docs.extend(split_doc_file_size(path, "dir", chunk_size=3500))
+    chain = load_summarize_chain(llm, chain_type="refine")
+    print(chain.run(split_docs))
 
 
 
@@ -354,3 +370,5 @@ test_resume_tool()
 # test_field_retrieval()
 # test_search_similar_resume()
 # test_extract_fields()
+
+# test_resume_report()
