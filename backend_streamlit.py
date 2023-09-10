@@ -344,8 +344,8 @@ class Chat(ChatController):
             if content_topics:
                 entity = f"""interview material topics: {str(content_topics)}"""
                 self.new_chat.update_entities(entity)
-            interview_material = f"faiss_interview_material_{st.session_state.userid}"
-            vs = merge_faiss_vectorstore( interview_material, read_path)
+            vs_name = f"faiss_interview_material_{st.session_state.userid}"
+            vs = merge_faiss_vectorstore(vs_name, read_path)
             tool_name = vs_name.removeprefix("faiss_").removesuffix(f"_{st.session_state.userid}")
             tool_description =  """Useful for generating interview questions and answers. 
                 Use this tool more than any other tool during a mock interview session. This tool can also be used for questions about topics in the interview material topics. 

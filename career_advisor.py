@@ -137,9 +137,8 @@ class ChatController():
         # resume_advice_tool = create_resume_evaluator_tool()
         # resume evaluator tool
         resume_evaluator_tool = [resume_evaluator]
-        # interview_tool = self.initiate_interview_tool()
         # interview mode starter tool
-        interview_starter_tool = [self.interview_starter]
+        interview_tool = self.initiate_interview_tool()
         # file_loader_tool = create_file_loader_tool()
         # file loader tool
         file_loader_tool = [file_loader]
@@ -166,7 +165,7 @@ class ChatController():
         # wiki tool
         wiki_tool = create_wiki_tools()
         # gather all the tools together
-        self.tools = general_tool + cover_letter_tool + resume_evaluator_tool + web_tool + interview_starter_tool + search_tool + file_loader_tool + wiki_tool
+        self.tools = general_tool + cover_letter_tool + resume_evaluator_tool + web_tool + interview_tool + search_tool + file_loader_tool + wiki_tool
 
         tool_names = [tool.name for tool in self.tools]
 
@@ -204,12 +203,8 @@ class ChatController():
         # AI:
 
         # OPTION 1: agent = CHAT_CONVERSATIONAL_REACT_DESCRIPTION
-        # initialize memory
-        self.memory = ConversationBufferMemory(llm=self.llm, memory_key="chat_history",return_messages=True, input_key="input")
-        self.memory = AgentTokenBufferMemory(memory_key="chat_history", llm=self.llm, return_messages=True, input_key="input")
-
-        self.chat_memory.output_key = "output"  
         # initialize CHAT_CONVERSATIONAL_REACT_DESCRIPTION agent
+        self.chat_memory.output_key = "output"  
         self.chat_agent  = initialize_agent(self.tools, 
                                             self.llm, 
                                             agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION, 
@@ -221,6 +216,7 @@ class ChatController():
         # modify default agent prompt
         prompt = self.chat_agent.agent.create_prompt(system_message=template, input_variables=['chat_history', 'input', 'entities', 'agent_scratchpad'], tools=self.tools)
         self.chat_agent.agent.llm_chain.prompt = prompt
+        # Option 2: structured chat agent for multi input tools, currently cannot get to use tools
         # suffix = """Begin! Reminder to ALWAYS respond with a valid json blob of a single action. 
         # Use tools if necessary. Respond directly if appropriate. 
         
@@ -250,13 +246,13 @@ class ChatController():
         self.mode = "chat"
 
 
-        # OPTION 2: agent = custom LLMSingleActionAgent
+        # OPTION 3: agent = custom LLMSingleActionAgent
         # agent = self.create_custom_llm_agent()
         # self.chat_agent = AgentExecutor.from_agent_and_tools(
         #     agent=agent, tools=self.tools, verbose=True, memory=memory
         # )
 
-        # Option 3: agent = conversational retrieval agent
+        # Option 4: agent = conversational retrieval agent
 
         # template = f"""The following is a friendly conversation between a human and an AI. 
         # The AI is talkative and provides lots of specific details from its context.
@@ -480,18 +476,8 @@ class ChatController():
 
         """
  
-        # try: 
-        #     json_request = json_request.strip("'<>() ").replace('\'', '\"')
-        #     args = json.loads(json_request)
-        # except JSONDecodeError:
-        #     args = {}       
-        # if "interview topic" in args:
-        #     topic = args["interview topic"]
-        # else:
-        #     #TODO extract interview topics from entities list, if available
-        #     topic = ""
-            
-        interview_stopper_tool = [self.interview_stopper]
+           
+        interview_stopper_tool = self.ends_interview_tool()
         # if no study material uploaded, there's no interview tools to start with.
         try:
             self.interview_tools
@@ -622,7 +608,7 @@ class ChatController():
                 self.update_meta_data(evaluation_result)
             
             # convert dict to string for chat output
-            # response = response.get("output", "sorry, something happened, try again.")
+            response = response.get("output", "sorry, something happened, try again.")
         # let instruct agent handle all exceptions with feedback loop
         except Exception as e:
             print(f"ERROR HAS OCCURED IN ASKAI: {e}")
@@ -776,45 +762,71 @@ class ChatController():
             print(f"Successfully updated meta data: {data}")
     
 
-    # def initiate_interview_tool(self) -> List[Tool]:
+    def initiate_interview_tool(self) -> List[Tool]:
 
-    #     """ Agent tool used to initialized the interview session."""
+        """ Agent tool used to initialized the interview session."""
         
-    #     name = "interview_initiator"
-    #     parameters = '{{"interview topic: <interview topic>"}}'
-    #     description = f"""Initiates the interview process.
-    #         Use this tool whenever Human wants to conduct a mock interview. Do not use this tool for study purposes or answering interview questions. 
-    #         Input should be JSON in the following format: {parameters} 
-    #         Output should be informing Human that you have succesfully created an AI interviewer and ask them if they could upload any interview material if they have not already done so."""
-    #     tools = [
-    #         Tool(
-    #         name = name,
-    #         func = self._initialize_interview_agent,
-    #         description = description, 
-    #         verbose = False,
-    #         handle_tool_error=handle_tool_error,
-    #         )
-    #     ]
-    #     print("Succesfully created interview initiator tool.")
-    #     return tools
+        name = "interview_starter"
+        parameters = '{{"interview topic": "<interview topic>"}}'
+        description = f"""Initiates the interview process.
+            Use this tool whenever Human wants to conduct a mock interview. Do not use this tool for study purposes or answering interview questions. 
+            Input should be a single string strictly in the following JSON format: {parameters} \n
+            Output should be informing Human that you have succesfully created an AI interviewer and ask them if they could upload any interview material if they have not already done so."""
+        tools = [
+            Tool(
+            name = name,
+            func = self.interview_starter,
+            description = description, 
+            verbose = False,
+            handle_tool_error=handle_tool_error,
+            )
+        ]
+        print("Succesfully created interview initiator tool.")
+        return tools
     
-    @tool
-    def interview_starter(self) -> str:
+    def interview_starter(self, json_request:str) -> str:
 
-        """ Initiates the interview process.
-            Use this tool whenever Human wants to conduct a mock interview. Do not use this tool for study purposes or answering interview questions. """
-        
+        self.topics = ""
+        try:
+            args = json.loads(json_request)
+            self.topics = args["interview topic"]
+        except Exception:
+            self.topics = ""
         self.mode = "interview"
-        return "Succesfully created an AI interviewer, upload any interview material if have not already done so."
 
-    @tool
-    def interview_stopper(self) -> str:
+    def ends_interview_tool(self) -> List[Tool]:
 
-        """Ends the interview session. Use this whenever Human asks to end the interview session.
-            Input is empty. """     
-           
+        """ Agent tool used to end the interview session."""
+        
+        name = "interview_stopper"
+        parameters = '{{"user request": "<user request>"}}'
+        description = f"""Ends the interview process.Use this whenever user asks to end the interview session or asks help with other things.
+            If user asks for help with resume, job search, or cover letter, use this tool to end the interview.   
+            Input should be a single string strictly in the following JSON format: {parameters}  \n"""
+        tools = [
+            Tool(
+            name = name,
+            func = self.interview_stopper,
+            description = description, 
+            verbose = False,
+            handle_tool_error=handle_tool_error,
+            )
+        ]
+        print("Succesfully created interview initiator tool.")
+        return tools
+
+
+    def interview_stopper(self, json_request:str) -> str:
+                
+        try:
+            args = json.loads(json_request)
+            request = args["user request"]
+        except Exception:
+            request = "please inform user that interivew session has ended"
         self.mode = "chat"
-        return "Please provide a brief feedback on your experience"
+        return request
+        
+
     
     @tool
     def debug_error(self, error_message: str) -> str:
