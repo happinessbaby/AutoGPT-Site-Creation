@@ -26,7 +26,7 @@ from functools import lru_cache
 from typing import Any
 import multiprocessing as mp
 from langchain.embeddings import OpenAIEmbeddings
-from langchain_utils import retrieve_faiss_vectorstore, create_vectorstore, merge_faiss_vectorstore, create_retriever_tools
+from langchain_utils import retrieve_faiss_vectorstore, create_vectorstore, merge_faiss_vectorstore, create_vs_retriever_tools
 
 
 
@@ -176,7 +176,7 @@ class Chat(ChatController):
                     # with col3:
 
                     uploaded_files = st.file_uploader(label="Upload your file",
-                                                       type=["pdf","odt", "docx","txt", "zip", "pptx", "ipynb"], 
+                                                       type=["pdf","odt", "docx","txt", "zip", "pptx"], 
                                                        accept_multiple_files=True)
                     add_vertical_space(3)
                     link = st.text_input("Share your link", "", key = "link")
@@ -197,6 +197,16 @@ class Chat(ChatController):
                     if submit_button:
                         if uploaded_files:
                             self.process_file(uploaded_files)
+                            # save_dir = os.path.join(upload_file_path, st.session_state.userid)
+                            # for uploaded_file in uploaded_files:
+                            #     file_ext = Path(uploaded_file.name).suffix
+                            #     filename = str(uuid.uuid4())+file_ext
+                            #     save_path = os.path.join(save_dir, filename)
+                            #     with open(save_path, 'wb') as f:
+                            #         f.write(uploaded_file.getvalue())
+                            
+                            # question = f"""User has uploaded the files to the following directory. Use the 'file_processor' tool to process these files please. Directory: {save_dir}"""
+                            # response = self.new_chat.askAI(st.session_state.userid, question, callbacks=streamlit_handler)
                             # file_entities_list= self.process_file(uploaded_files)
                             # print(file_entities_list)
                             # if file_entities_list:
@@ -324,11 +334,11 @@ class Chat(ChatController):
             name = content_type.strip().replace(" ", "_")
             vs_name = f"faiss_{name}_{st.session_state.userid}"
             vs = create_vectorstore("faiss", read_path, "file", vs_name)
-            tool_name = vs_name.removeprefix("faiss_").removesuffix(f"_{self.userid}")
+            tool_name = vs_name.removeprefix("faiss_").removesuffix(f"_{st.session_state.userid}")
             tool_description =  """Useful for generating personalized interview questions and answers. 
                 Use this tool more than any other tool during a mock interview session when there's a need to reference special content.
                 Do not use this tool to load any files or documents.  """ 
-            tools = create_retriever_tools(vs, tool_name, tool_description)
+            tools = create_vs_retriever_tools(vs, tool_name, tool_description)
             self.new_chat.update_tools(tools, "interview")
         else:
             if content_topics:
@@ -336,11 +346,11 @@ class Chat(ChatController):
                 self.new_chat.update_entities(entity)
             interview_material = f"faiss_interview_material_{st.session_state.userid}"
             vs = merge_faiss_vectorstore( interview_material, read_path)
-            tool_name = vs_name.removeprefix("faiss_").removesuffix(f"_{self.userid}")
+            tool_name = vs_name.removeprefix("faiss_").removesuffix(f"_{st.session_state.userid}")
             tool_description =  """Useful for generating interview questions and answers. 
                 Use this tool more than any other tool during a mock interview session. This tool can also be used for questions about topics in the interview material topics. 
                 Do not use this tool to load any files or documents. This should be used only for searching and generating questions and answers of the relevant materials and topics. """
-            tools = create_retriever_tools(vs, tool_name, tool_description)
+            tools = create_vs_retriever_tools(vs, tool_name, tool_description)
             self.new_chat.update_tools(tools, "interview")
 
 

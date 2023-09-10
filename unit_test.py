@@ -1,12 +1,12 @@
-from generate_cover_letter import create_cover_letter_generator_tool
-from upgrade_resume import create_resume_evaluator_tool
+from generate_cover_letter import cover_letter_generator
+from upgrade_resume import resume_evaluator
 from langchain.chat_models import ChatOpenAI
 from langchain.agents import AgentType, Tool, initialize_agent
 from basic_utils import read_txt
-from common_utils import (get_web_resources,extract_education_level,
+from common_utils import (get_web_resources,extract_education_level,file_loader,
                           retrieve_from_db, search_related_samples, create_sample_tools, extract_work_experience_level,  extract_resume_fields)
 from langchain.tools import tool
-from langchain_utils import retrieve_faiss_vectorstore, create_search_tools, create_summary_chain, generate_multifunction_response, split_doc, split_doc_file_size
+from langchain_utils import retrieve_faiss_vectorstore, create_search_tools, create_summary_chain, generate_multifunction_response, split_doc, split_doc_file_size, create_refine_chain, create_mapreduce_chain
 from openai_api import get_completion
 from langchain.chains.summarize import load_summarize_chain
 import json
@@ -25,7 +25,7 @@ def test_coverletter_tool(resume_file=resume_file, job="data analyst", company="
 
     """ End-to-end testing of the cover letter generator without the UI. """
 
-    tools = create_cover_letter_generator_tool() 
+    tools = [cover_letter_generator] 
     agent= initialize_agent(
         tools, 
         llm=ChatOpenAI(cache=False), 
@@ -47,7 +47,7 @@ def test_resume_tool(resume_file="./resume_samples/test.txt", job="data analyst"
 
     """ End-to-end testing of the resume evaluator without the UI. """
     
-    tools = create_resume_evaluator_tool()
+    tools = [resume_evaluator] + [file_loader]
     agent= initialize_agent(
         tools, 
         llm=ChatOpenAI(cache=False), 
@@ -179,19 +179,19 @@ def test_cl_retrieval(my_job_title="data analyst", education_level="bachelors of
 
 # This seems to test tool using ability and reasoning ability
 # BARELY PASSING
-def test_cl_samples_query(my_job_title= "accountant"):
+def test_cl_samples_query(my_job_title= "Information Systems Technology Manager"):
 
     cover_letter_samples_path = "./sample_cover_letters/"
         # Get sample comparisons
+    related_samples = search_related_samples(my_job_title, cover_letter_samples_path)
+    sample_tools, tool_names = create_sample_tools(related_samples, "cover_letter")
     query_samples = f""" 
 
-    Sample cover letters are provided in your tools. Research each one and answer the following question:
+    Sample cover letters are provided in your tools. Research {str(tool_names)} and answer the following question: and answer the following question:
 
       1. What common features these cover letters share?
 
       """
-    related_samples = search_related_samples(my_job_title, cover_letter_samples_path)
-    sample_tools = create_sample_tools(related_samples, "cover_letter")
     response = generate_multifunction_response(query_samples, sample_tools)
     print(f"SAMPLES COMPARISON RESPONSE: {response}")
 
@@ -340,21 +340,48 @@ def test_field_evaluation( field="work history"):
     
 
 
-def test_resume_report(directory = "./static/resume_evaluation/test/", llm = ChatOpenAI(temperature=0, model_name="gpt-3.5-turbo-16k")):
+def test_refine_chain(directory = "./static/resume_evaluation/test/"):
     
-    # split_docs = split_doc(directory, 'dir', chunk_size=4000)
-    split_docs = []
+    template = """Write a detailed summary of the following: {text}
+        DETAILED SUMMARY: """ 
+    refine_template = (
+        "Your job is to produce a final summary\n"
+        "We have provided an existing summary up to a certain point: {existing_answer}\n"
+        "We have the opportunity to refine the existing summary"
+        "(only if needed) with some more context below.\n"
+        "------------\n"
+        "{text}\n"
+        "------------\n"
+        "Given the new context, refine the original summary."
+    )
+    files = []
     for path in Path(directory).glob('**/*.txt'):
-        split_docs.extend(split_doc_file_size(path, "dir", chunk_size=3500))
-    chain = load_summarize_chain(llm, chain_type="refine")
-    print(chain.run(split_docs))
+        file = str(path)
+        files.append(file)
+    print(create_refine_chain(files, template, refine_template))
 
+def test_mapreduce_chain(directory = "./static/resume_evaluation/test/"):
+
+    map_template = """The following is a set of documents
+    {docs}
+    Based on this list of docs, please identify the main themes 
+    Helpful Answer:"""
+    # Reduce
+    reduce_template = """The following is set of summaries:
+    {doc_summaries}
+    Take these and distill it into a final, consolidated summary of the main themes. 
+    Helpful Answer:"""
+    files = []
+    for path in Path(directory).glob('**/*.txt'):
+        file = str(path)
+        files.append(file)
+    print(create_mapreduce_chain(files, map_template, reduce_template))
 
 
 
 
 # test_coverletter_tool()
-test_resume_tool()
+# test_resume_tool()
 
 # test_general_job_description()
 # test_work_experience()
@@ -362,7 +389,7 @@ test_resume_tool()
 
 # test_cl_revelancy_query()
 # test_cl_retrieval()
-# test_cl_samples_query()
+test_cl_samples_query()
 
 # test_field_samples_query()
 # test_field_relevancy_query()
@@ -370,5 +397,5 @@ test_resume_tool()
 # test_field_retrieval()
 # test_search_similar_resume()
 # test_extract_fields()
-
-# test_resume_report()
+# test_refine_chain()
+# test_mapreduce_chain()

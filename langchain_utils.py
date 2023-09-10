@@ -1,7 +1,7 @@
 from langchain.agents.react.base import DocstoreExplorer
 from langchain.document_loaders import TextLoader, DirectoryLoader
 from langchain.docstore.wikipedia import Wikipedia
-from langchain.indexes import VectorstoreIndexCreator
+# from langchain.indexes import VectorstoreIndexCreator
 from langchain.chat_models import ChatOpenAI
 from langchain.llms import OpenAI
 from langchain.tools.python.tool import PythonREPLTool
@@ -137,17 +137,17 @@ def split_doc_file_size(path: str, splitter_type = "recursive", chunk_size=4000)
     return docs
 
 
-def get_index(path = ".", path_type="file"):
+# def get_index(path = ".", path_type="file"):
 
-    if (path_type=="file"):
-        loader = TextLoader(path, encoding='utf8')
-    elif (path_type=="dir"):
-        loader = DirectoryLoader(path, glob="*.txt")
-    # loader = TextLoader(file, encoding='utf8')
-    index = VectorstoreIndexCreator(
-        vectorstore_cls=DocArrayInMemorySearch
-    ).from_loaders([loader])
-    return index
+#     if (path_type=="file"):
+#         loader = TextLoader(path, encoding='utf8')
+#     elif (path_type=="dir"):
+#         loader = DirectoryLoader(path, glob="*.txt")
+#     # loader = TextLoader(file, encoding='utf8')
+#     index = VectorstoreIndexCreator(
+#         vectorstore_cls=DocArrayInMemorySearch
+#     ).from_loaders([loader])
+#     return index
 
     
 def reorder_docs(docs: List[Document]) -> List[Document]:
@@ -437,18 +437,62 @@ def create_summary_chain(path: str, prompt_template: str, chain_type = "stuff", 
     """
     docs = split_doc_file_size(path)
     PROMPT = PromptTemplate(template=prompt_template, input_variables=["text"])
-    chain = load_summarize_chain(llm, chain_type=chain_type, prompt=PROMPT)
+    chain = load_summarize_chain(llm, chain_type="stuff", prompt=PROMPT)
     response = chain.run(docs)
     print(f"Sucessfully got summary: {response}")
     return response
 
-def create_mapreduce_chain(files: List[str], llm = ChatOpenAI()) -> str:
+def create_refine_chain(files: List[str], prompt_template:str, refine_template:str, llm=ChatOpenAI()) -> str:
 
-    """ Creates a map-reduce chain for multiple document summarization and generalization: https://python.langchain.com/docs/use_cases/summarization#option-2-map-reduce 
+    """ Creates a refine chain for multiple documents summarization: https://python.langchain.com/docs/use_cases/summarization#option-3-refine
+
+        Args: 
+
+            files (List[str]): a list of file paths 
+
+            prompt_template (str): main prompt
+
+            refine_template (str): refine prompt at each intermediate step
+        
+        Keyword Args:
+
+            llm (Basemodel): default is ChatOpenAI()
+
+        Returns:
+
+            a sequential summary on the provided set of documents
+
+    """
+    docs: List[Document]=[]
+    for file in files: 
+        docs.extend(split_doc_file_size(file))
+    prompt = PromptTemplate.from_template(prompt_template)
+    refine_prompt = PromptTemplate.from_template(refine_template)
+    chain = load_summarize_chain(
+        llm=llm,
+        chain_type="refine",
+        question_prompt=prompt,
+        refine_prompt=refine_prompt,
+        return_intermediate_steps=True,
+        input_key="input_documents",
+        output_key="output_text",
+    )
+    result = chain({"input_documents": docs}, return_only_outputs=True)
+    return result["output_text"]
+
+
+def create_mapreduce_chain(files: List[str], map_template:str, reduce_template:str, llm = ChatOpenAI()) -> str:
+
+    """ Creates a map-reduce chain for multiple documents summarization and generalization: https://python.langchain.com/docs/use_cases/summarization#option-2-map-reduce 
     
         Args: 
 
-            files (List[str]): a list of file paths in string format
+            files (List[str]): a list of file paths 
+
+            map_template (str): mapping stage prompt
+
+            reduce_template (str): reducing stage prompt
+
         
         Keyword Args:
 
@@ -456,7 +500,7 @@ def create_mapreduce_chain(files: List[str], llm = ChatOpenAI()) -> str:
 
         Returns:
 
-            a summary, or main themes, on the provided set of documents
+            a summary on the provided set of documents
         
         """
 
@@ -464,17 +508,9 @@ def create_mapreduce_chain(files: List[str], llm = ChatOpenAI()) -> str:
     for file in files: 
         docs.extend(split_doc_file_size(file))
     # Map
-    map_template = """The following is a set of documents
-    {docs}
-    Based on this list of docs, please identify the main themes 
-    Helpful Answer:"""
     map_prompt = PromptTemplate.from_template(map_template)
     map_chain = LLMChain(llm=llm, prompt=map_prompt)
     # Reduce
-    reduce_template = """The following is set of summaries:
-    {doc_summaries}
-    Take these and distill it into a final, consolidated summary of the main themes. 
-    Helpful Answer:"""
     reduce_prompt = PromptTemplate.from_template(reduce_template)
      # Run chain
     reduce_chain = LLMChain(llm=llm, prompt=reduce_prompt)
@@ -670,7 +706,7 @@ def handle_tool_error(error: ToolException) -> str:
     """ Handles tool exceptions. """
 
     if error==JSONDecodeError or error.args[0].startswith("Too many arguments to single-input tool"):
-        return "Format in Json with correct key and try again."
+        return "Format in a single JSON string with correct key and value and try again."
     return (
         "The following errors occurred during tool execution:"
         + error.args[0]

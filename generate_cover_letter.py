@@ -7,7 +7,7 @@ from langchain import PromptTemplate
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
 from basic_utils import read_txt
-from common_utils import (extract_personal_information, get_web_resources,  retrieve_from_db,
+from common_utils import (extract_personal_information, get_web_resources,  retrieve_from_db,extract_education_level, extract_work_experience_level,
                          extract_posting_information, create_sample_tools, extract_job_title, search_related_samples)
 from datetime import date
 from pathlib import Path
@@ -19,6 +19,7 @@ from langchain.agents.agent_toolkits import create_python_agent
 from langchain.tools.python.tool import PythonREPLTool
 from typing import List
 from langchain_utils import create_search_tools, create_summary_chain, generate_multifunction_response
+from langchain.tools import tool
 import uuid
 
 
@@ -68,7 +69,7 @@ def generate_basic_cover_letter(my_job_title="", company="", resume_file="",  po
     resume_content = read_txt(resume_file)
     # Get personal information from resume
     personal_info_dict = extract_personal_information(resume_content)
-    education_level = personal_info_dict["education"]
+  
     
     # Get job information from posting link
     job_specification = ""
@@ -95,6 +96,10 @@ def generate_basic_cover_letter(my_job_title="", company="", resume_file="",  po
       company_query = f""" Research what kind of company {company} is, such as its culture, mission, and values.                       
                           Look up the exact name of the company. If it doesn't exist or the search result does not return a company, output -1."""
       company_description = get_web_resources(company_query)
+
+
+    education_level = extract_education_level(resume_content)
+     # work_experience = extract_work_experience_level(resume, my_job_title)
     
 
     # Get resume's relevant and irrelevant info for job: few-shot learning works great here
@@ -136,15 +141,15 @@ def generate_basic_cover_letter(my_job_title="", company="", resume_file="",  po
     advices = retrieve_from_db(advice_query)
 
     # Get sample comparisons
+    related_samples = search_related_samples(my_job_title, cover_letter_samples_path)
+    sample_tools, tool_names = create_sample_tools(related_samples, "cover_letter")
     query_samples = f""" 
 
-    Sample cover letters are provided in your tools. Research each one and answer the following question:
+    Sample cover letters are provided in your tools. Research {str(tool_names)} and answer the following question: and answer the following question:
 
       1. What common features these cover letters share?
 
       """
-    related_samples = search_related_samples(my_job_title, cover_letter_samples_path)
-    sample_tools = create_sample_tools(related_samples, "cover_letter")
     shared_practices = generate_multifunction_response(query_samples, sample_tools)
     
  
@@ -235,16 +240,23 @@ def generate_basic_cover_letter(my_job_title="", company="", resume_file="",  po
     return cover_letter
 
 
-
-def processing_cover_letter(json_request: str) -> None:
+@tool
+def cover_letter_generator(json_request:str) -> str:
     
-    """ Input parser: input is LLM's action_input in JSON format. This function then processes the JSON data and feeds them to the cover letter generator. """
+    """Helps to generate a cover letter. Use this tool more than any other tool when user asks to write a cover letter.  
 
+    Input should be a single string strictly in the following JSON format:  '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link": "<job post link>"}}'\n
+
+    (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) \n
+    """
+    
     try:
-        args = json.loads(json_request)
-    except JSONDecodeError:
-        return "Format in JSON and try again." 
-    # if resume doesn't exist, ask for resume
+      json_request = json_request.strip("'<>() ").replace('\'', '\"')
+      args = json.loads(json_request)
+    except JSONDecodeError as e:
+      print(f"JSON DECODE ERROR: {e}")
+      return "Format in a single string JSON and try again."
+   
     if ("resume file" not in args or args["resume file"]=="" or args["resume file"]=="<resume file>"):
       return "Can you provide your resume so I can further assist you? "
     else:
@@ -267,29 +279,62 @@ def processing_cover_letter(json_request: str) -> None:
     return generate_basic_cover_letter(my_job_title=job, company=company, resume_file=resume_file, posting_path=posting_path)
 
 
+
+
+# def processing_cover_letter(json_request: str) -> None:
     
-def create_cover_letter_generator_tool() -> List[Tool]:
+#     """ Input parser: input is LLM's action_input in JSON format. This function then processes the JSON data and feeds them to the cover letter generator. """
+
+#     try:
+#         args = json.loads(json_request)
+#     except JSONDecodeError:
+#         return "Format in JSON and try again." 
+#     # if resume doesn't exist, ask for resume
+#     if ("resume file" not in args or args["resume file"]=="" or args["resume file"]=="<resume file>"):
+#       return "Can you provide your resume so I can further assist you? "
+#     else:
+#       # may need to clean up the path first
+#         resume_file = args["resume file"]
+#     if ("job" not in args or args["job"] == "" or args["job"]=="<job>"):
+#         job = ""
+#     else:
+#       job = args["job"]
+#     if ("company" not in args or args["company"] == "" or args["company"]=="<company>"):
+#         company = ""
+#     else:
+#         company = args["company"]
+#     if ("job post link" not in args or args["job post link"]=="" or args["job post link"]=="<job post link>"):
+#         posting_path = ""
+#     else:
+#         posting_path = args["job post link"]
+
+
+#     return generate_basic_cover_letter(my_job_title=job, company=company, resume_file=resume_file, posting_path=posting_path)
+
+
     
-    """ Input parser: input is user's input as a string of text. This function takes in text and parses it into JSON format. 
+# def create_cover_letter_generator_tool() -> List[Tool]:
     
-    Then it calls the processing_cover_letter function to process the JSON data. """
+#     """ Input parser: input is user's input as a string of text. This function takes in text and parses it into JSON format. 
     
-    name = "cover_letter_generator"
-    parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link": "<job post link>"}}'
-    description = f"""Helps to generate a cover letter. Use this tool more than any other tool when user asks to write a cover letter.  
-    Input should be JSON in the following format: {parameters} \n
-    (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) 
-    """
-    tools = [
-        Tool(
-        name = name,
-        func =processing_cover_letter,
-        description = description, 
-        verbose = False,
-        )
-    ]
-    print("Sucessfully created cover letter generator tool. ")
-    return tools
+#     Then it calls the processing_cover_letter function to process the JSON data. """
+    
+#     name = "cover_letter_generator"
+#     parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link": "<job post link>"}}'
+#     description = f"""Helps to generate a cover letter. Use this tool more than any other tool when user asks to write a cover letter.  
+#     Input should be JSON in the following format: {parameters} \n
+#     (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) 
+#     """
+#     tools = [
+#         Tool(
+#         name = name,
+#         func =processing_cover_letter,
+#         description = description, 
+#         verbose = False,
+#         )
+#     ]
+#     print("Sucessfully created cover letter generator tool. ")
+#     return tools
 
   
     
