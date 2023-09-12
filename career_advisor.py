@@ -73,8 +73,11 @@ from langchain.tools import tool, format_tool_to_openai_function
 import re
 import asyncio
 from tenacity import retry, wait_exponential, stop_after_attempt
+from langchain.agents.agent_toolkits import FileManagementToolkit
+from langchain.tools.file_management.read import ReadFileTool
 from langchain.cache import InMemoryCache
 from langchain.tools import StructuredTool
+
 
 
 
@@ -91,7 +94,7 @@ delimiter = "####"
 word_count = 100
 memory_max_token = 500
 memory_key="chat_history"
-upload_file_path = os.environ["UPLOAD_FILE_PATH"]
+
 
 
 
@@ -109,18 +112,15 @@ class ChatController():
     embeddings = OpenAIEmbeddings()
     chat_memory = ConversationBufferMemory(llm=llm, memory_key=memory_key, return_messages=True, input_key="input", output_key="output", max_token_limit=memory_max_token)
     # chat_memory = ReadOnlySharedMemory(memory=chat_memory)
-    # initialize new memory (shared betweeen interviewer and grader_agent)
-    interview_memory = AgentTokenBufferMemory(memory_key=memory_key, llm=llm, input_key="input", max_token_limit=memory_max_token)
     # retry_decorator = _create_retry_decorator(llm)
     langchain.llm_cache = InMemoryCache()
 
 
     def __init__(self, userid):
         self.userid = userid
+        self.mode = "chat"
         self._initialize_log()
         self._initialize_chat_agent()
-        self._initialize_interview_agent()
-        self._initialize_interview_grader()
         if update_instruction:
             self._initialize_meta_agent()
         
@@ -141,7 +141,14 @@ class ChatController():
         interview_tool = self.initiate_interview_tool()
         # file_loader_tool = create_file_loader_tool()
         # file loader tool
-        file_loader_tool = [file_loader]
+        working_directory = f"./static/{self.userid}/"
+        # file_loader_tool = [file_loader]
+        file_sys_tools = FileManagementToolkit(
+            root_dir=working_directory, # ensures only the working directory is accessible 
+            selected_tools=["read_file", "list_directory"],
+        ).get_tools()
+        file_sys_tools[0].return_direct = True
+        file_sys_tools[1].return_direct = True
         # general vector store tool
         store = retrieve_faiss_vectorstore("faiss_web_data")
         retriever = store.as_retriever()
@@ -165,8 +172,7 @@ class ChatController():
         # wiki tool
         wiki_tool = create_wiki_tools()
         # gather all the tools together
-        self.tools = general_tool + cover_letter_tool + resume_evaluator_tool + web_tool + interview_tool + search_tool + file_loader_tool + wiki_tool
-
+        self.tools = general_tool + cover_letter_tool + resume_evaluator_tool + web_tool + interview_tool + search_tool + wiki_tool + [tool for tool in file_sys_tools]
         tool_names = [tool.name for tool in self.tools]
 
 
@@ -177,6 +183,7 @@ class ChatController():
 
         # initialize dynamic args for prompt
         self.entities = ""
+        self.instruction = ""
         # initialize chat history
         # self.chat_history=[]
         # initiate prompt template
@@ -184,6 +191,8 @@ class ChatController():
         The AI is talkative and provides lots of specific details from its context.
           
         If the AI does not know the answer to a question, it truthfully says it does not know. 
+
+        Instruction: {instruction}
 
         You are provided with information about entities the Human mentioned. If available, they are very important.
 
@@ -214,7 +223,7 @@ class ChatController():
                                             handle_parsing_errors=True,
                                             callbacks = [self.handler])
         # modify default agent prompt
-        prompt = self.chat_agent.agent.create_prompt(system_message=template, input_variables=['chat_history', 'input', 'entities', 'agent_scratchpad'], tools=self.tools)
+        prompt = self.chat_agent.agent.create_prompt(system_message=template, input_variables=['chat_history', 'input', 'entities', 'instruction', 'agent_scratchpad'], tools=self.tools)
         self.chat_agent.agent.llm_chain.prompt = prompt
         # Option 2: structured chat agent for multi input tools, currently cannot get to use tools
         # suffix = """Begin! Reminder to ALWAYS respond with a valid json blob of a single action. 
@@ -242,8 +251,6 @@ class ChatController():
         #     },
         #     allowed_tools=tool_names,
         # )
-        # switch on regular chat mode
-        self.mode = "chat"
 
 
         # OPTION 3: agent = custom LLMSingleActionAgent
@@ -416,142 +423,6 @@ class ChatController():
 
 
 
-    def _initialize_interview_grader(self) -> None:
-
-
-        """ Initialize interview grader agent, a Conversational Retrieval Agent: https://python.langchain.com/docs/use_cases/question_answering/how_to/conversational_retrieval_agents """
-
-        system_message = SystemMessage(
-        content=(
-
-          """You are a professional interview grader who grades the quality of responses to interview questions. 
-          
-          Access your memory and retrieve the very last piece of the conversation, if available.
-
-          Determine if the AI has asked an interview questio. If it has, you are to grade the Human input based on how well it answers the question.
-
-          You will need to use your tool "search_interview_material", if relevant, to search for the correct answer to the interview question.
-        
-          If the answer is cannot be found in the your search, use other tools or answer to your best knowledge. 
-
-          Remember, the Human may not know the answer or may have answered the question incorrectly. Therefore it is important that you provide an informative feedback to the Human's response in the format:
-
-          Positive Feedback: <in which ways the Human answered the question well>
-
-          Negative Feedback: <in which ways the Human failed to answer the question>
-
-          If to your best knowledge the very last piece of conversation does not contain an interview question, do not provide any feedback since you only grades interview questions. 
-
-        
-            """
-        #   Your feedback should take both the correct answer and the Human's response into consideration. When the Human's response implies that they don't know the answer, provide the correct answer in your feedback.
-        )
-        )
-        prompt = OpenAIFunctionsAgent.create_prompt(
-        system_message=system_message,
-        extra_prompt_messages=[MessagesPlaceholder(variable_name="chat_history")]
-        )
-        agent = OpenAIFunctionsAgent(llm=self.llm, tools=self.interview_tools, prompt=prompt)
-        self.grader_agent = AgentExecutor(agent=agent, 
-                                        tools=self.interview_tools, 
-                                        memory=self.interview_memory, 
-                                        # verbose=True,
-                                        return_intermediate_steps=True, 
-                                        handle_parsing_errors=True,
-                                        callbacks = [self.handler])
-        #switch on interview mode after all initializaion is done
-        # self.mode = "interview"
-        
-
-
-
-    def _initialize_interview_agent(self) -> None:
-
-
-        """ Initialize interviewer agent, a Conversational Retrieval Agent: https://python.langchain.com/docs/use_cases/question_answering/how_to/conversational_retrieval_agents
-
-        Args: 
-
-            json_request (str): input argument from human's question, in this case the interview topic that may be contained in the Human input.
-
-        """
- 
-           
-        interview_stopper_tool = self.ends_interview_tool()
-        # if no study material uploaded, there's no interview tools to start with.
-        try:
-            self.interview_tools
-        except AttributeError:
-            self.interview_tools = interview_stopper_tool
-        else:
-            self.interview_tools += interview_stopper_tool
-
-            # Human may also have asked for a specific interview topic: {topic}
-        #initialize interviewer agent
-        template =   f"""
-            You are an AI job interviewer who asks Human interview questions. 
-
-            The specific interview content which you're to research for making personalized interview questions  is contained in the tool "search_interview_material", if available.
-
-
-            If the Human is asking about other things instead of answering an interview question, steer them back to the interview process.
-
-            As an interviewer, you do not need to assess Human's response to your questions. Their response will be sent to a professional grader.         
-
-            Sometimes you will be provided with the professional grader's feedback. They will be handed out to the Human at the end of the session. You should ignore them unless Huamns wants some immediate feedbacks.  
-
-            Always remember your role as an interviewer. Unless you're told to stop interviewing, you should not stop asking interview questions in the format: 
-
-            Question: <new interview question>
-
-            You should ask a few personal questions at the start of the interview. Therefore, you should research the candidate's resume, cover letter, or profile too, if the relevant tools are available. 
-
-            Sometimes you are also provided with the job position information and company information. Please do not stop asking questions until the end of the interview session. 
-              
-
-           """
-        
-        system_message = SystemMessage(
-        content=(
-          template
-        )
-        )
-        prompt = OpenAIFunctionsAgent.create_prompt(
-            system_message=system_message,
-            extra_prompt_messages=[MessagesPlaceholder(variable_name="chat_history")]
-            )
-
-        agent = OpenAIFunctionsAgent(llm=self.llm, tools=self.interview_tools, prompt=prompt)
-
-        # messages = chat_prompt.format_messages(
-        #           grader_feedback = self.grader_feedback,
-        #         instructions = self.instructions
-        # )
-
-        # prompt = OpenAIFunctionsAgent.create_prompt(
-        #         # system_message=system_msg,
-        #         extra_prompt_messages=messages,
-        #     )
-        # agent = OpenAIFunctionsAgent(llm=llm, tools=study_tools, prompt=prompt)
-
-        self.interview_agent = AgentExecutor(agent=agent,
-                                    tools=self.interview_tools, 
-                                    memory=self.interview_memory, 
-                                    # verbose=True,
-                                    return_intermediate_steps=True,
-                                    handle_parsing_errors=True,
-                                    callbacks = [self.handler])
-        # call to initalize grader_agent
-        # self._initialize_interview_grader()
-
-
-        
-
-
-        
-        # ask for feedback
-
-
     @retry(
         wait=wait_exponential(multiplier=1, min=4, max=10),  # Exponential backoff between retries
         stop=stop_after_attempt(5)  # Maximum number of retry attempts
@@ -579,25 +450,16 @@ class ChatController():
         try:    
             # BELOW IS USED WITH CONVERSATIONAL RETRIEVAL AGENT (grader_agent and interviewer)
             if (update_instruction):
-                instruction = self.askMetaAgent()
-                print(instruction)
-            if self.mode == "interview":             
-                grader_feedback = self.grader_agent({"input":user_input}).get("output", "")
-                print(f"GRADER FEEDBACK: {grader_feedback}")
-                response = self.interview_agent({"input":user_input})
-                # self.study_memory.chat_memory.add_ai_message(self.instructions)
-                # update chat history for instruct agent
-                # self.update_chat_history(self.study_memory)
-            # BELOW IS USED WITH CHAT_CONVERSATIONAL_REACT_DESCRIPTION (chat_agent)
-            elif self.mode =="chat":     
-                response = self.chat_agent({"input": user_input, "chat_history":[], "entities": self.entities}, callbacks = [callbacks])
-                # response = asyncio.run(self.chat_agent.arun({"input": user_input, "entities": self.entities}, callbacks = [callbacks]))
-                # print(f"CHAT AGENT MEMORY: {self.chat_agent.memory.buffer}")
-                # update chat history for instruct agent
-                # self.update_chat_history(self.chat_memory)
-                # print(f"INSTRUCT AGENT MEMORY: {self.chat_agent.memory.buffer}")
-                # update instruction from feedback 
-                # self.update_instructions(feedback)       
+                self.instruction = self.askMetaAgent()
+                print(self.instruction)
+            response = self.chat_agent({"input": user_input, "chat_history":[], "entities": self.entities, "instruction": self.instruction}, callbacks = [callbacks])
+            # response = asyncio.run(self.chat_agent.arun({"input": user_input, "entities": self.entities}, callbacks = [callbacks]))
+            # print(f"CHAT AGENT MEMORY: {self.chat_agent.memory.buffer}")
+            # update chat history for instruct agent
+            # self.update_chat_history(self.chat_memory)
+            # print(f"INSTRUCT AGENT MEMORY: {self.chat_agent.memory.buffer}")
+            # update instruction from feedback 
+            # self.update_instructions(feedback)       
             if (evaluate_result):
                 evalagent_q = Queue()
                 evalagent_p = Process(target = self.askEvalAgent, args=(response, evalagent_q, ))
@@ -621,7 +483,6 @@ class ChatController():
                 # self.update_instructions(feedback)
             if evaluate_result:
                 self.update_meta_data(error_msg)
-            error_querry = """Please debug the chat conversation"""
             self.askAI(userid, user_input, callbacks)        
 
         # pickle memory (sanity check)
@@ -728,13 +589,12 @@ class ChatController():
 
     def update_entities(self,  text:str) -> None:
 
-        """ Updates entities list for main chat agent. """
-        # if "resume" in text:
-        #     self.delete_entities("resume")
-        # if "cover letter" in text:
-        #     self.delete_entities("cover letter")
-        # if "resume evaluation" in text:
-        #     self.delete_entities("resume evaluation")
+        """ Updates entities list for main chat agent. Entities are files user loads or topics of the files. """
+
+        if "resume" in text:
+            self.delete_entities("resume")
+        if "cover letter" in text:
+            self.delete_entities("cover letter")
         self.entities += f"\n{text}\n"
         print(f"Successfully added entities {self.entities}.")
 
@@ -742,16 +602,17 @@ class ChatController():
 
         """ Deletes entities of specific type. """
 
-        starting_idices = [m.start() for m in re.finditer(type, self.entities)]
-        file_name_len = 68
-        for idx in starting_idices:
-            self.entities = self.entities.replace(self.entities[idx: idx+file_name_len], "")
+        starting_indices = [m.start() for m in re.finditer(type, self.entities)]
+        end_indices = [m.start() for m in re.finditer("$$$$", self.entities)]
+        for i in range(len(starting_indices)):
+            self.entities = self.entities.replace(self.entities[starting_indices[i]:end_indices[i]], "")
 
     # def update_instructions(self, meta_output:str) -> None:
     #     delimiter = "Instructions: "
     #     new_instructions = meta_output[meta_output.find(delimiter) + len(delimiter) :]
     #     self.instructions = new_instructions
     #     print(f"Successfully updated instruction to: {new_instructions}")
+
 
     def update_meta_data(self, data: str) -> None:
         
@@ -771,7 +632,7 @@ class ChatController():
         description = f"""Initiates the interview process.
             Use this tool whenever Human wants to conduct a mock interview. Do not use this tool for study purposes or answering interview questions. 
             Input should be a single string strictly in the following JSON format: {parameters} \n
-            Output should be informing Human that you have succesfully created an AI interviewer and ask them if they could upload any interview material if they have not already done so."""
+            Output should be asking user confirmation to proceed to the interview process and if they could upload any interview material if they have not already done so."""
         tools = [
             Tool(
             name = name,
@@ -793,38 +654,6 @@ class ChatController():
         except Exception:
             self.topics = ""
         self.mode = "interview"
-
-    def ends_interview_tool(self) -> List[Tool]:
-
-        """ Agent tool used to end the interview session."""
-        
-        name = "interview_stopper"
-        parameters = '{{"user request": "<user request>"}}'
-        description = f"""Ends the interview process.Use this whenever user asks to end the interview session or asks help with other things.
-            If user asks for help with resume, job search, or cover letter, use this tool to end the interview.   
-            Input should be a single string strictly in the following JSON format: {parameters}  \n"""
-        tools = [
-            Tool(
-            name = name,
-            func = self.interview_stopper,
-            description = description, 
-            verbose = False,
-            handle_tool_error=handle_tool_error,
-            )
-        ]
-        print("Succesfully created interview initiator tool.")
-        return tools
-
-
-    def interview_stopper(self, json_request:str) -> str:
-                
-        try:
-            args = json.loads(json_request)
-            request = args["user request"]
-        except Exception:
-            request = "please inform user that interivew session has ended"
-        self.mode = "chat"
-        return request
         
 
     

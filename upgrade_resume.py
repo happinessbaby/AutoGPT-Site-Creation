@@ -7,7 +7,7 @@ from langchain.output_parsers import CommaSeparatedListOutputParser
 from langchain import PromptTemplate
 from langchain.agents import AgentType, Tool, initialize_agent, create_json_agent
 from basic_utils import read_txt
-from common_utils import (get_web_resources, retrieve_from_db, extract_posting_information, extract_education_level, extract_work_experience_level,
+from common_utils import (get_web_resources, retrieve_from_db, extract_posting_information, extract_education_level, extract_work_experience_level, search_relevancy_advice,
                            extract_resume_fields, extract_job_title,  search_related_samples, create_sample_tools, extract_personal_information)
 from langchain_utils import create_search_tools, create_mapreduce_chain, create_summary_chain, generate_multifunction_response, create_refine_chain, handle_tool_error
 from pathlib import Path
@@ -21,12 +21,14 @@ from langchain.tools.python.tool import PythonREPLTool
 from typing import Dict, List, Optional
 from langchain.document_loaders import BSHTMLLoader
 from langchain.tools import tool
+from langchain.agents.agent_toolkits import FileManagementToolkit
+import docx
 import uuid
 
 
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
-resume_evaluation_path = os.environ["RESUME_EVALUATION_PATH"]
+# resume_evaluation_path = os.environ["RESUME_EVALUATION_PATH"]
 resume_samples_path = os.environ["RESUME_SAMPLES_PATH"]
 # TODO: caching and serialization of llm
 llm = ChatOpenAI(temperature=0.0)
@@ -44,13 +46,9 @@ delimiter4 = "****"
 
 def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path="") -> str:
 
-    filename = Path(resume_file).stem
-    res_path = os.path.join(resume_evaluation_path, filename+".txt")
-    res_dir = resume_evaluation_path+filename
-    try:
-      os.mkdir(res_dir)
-    except FileExistsError:
-      pass
+
+    dirname, fname = os.path.split(resume_file)
+    res_path = os.path.join(dirname, Path(fname).stem +"_re"+".txt")
     # stores basic extracted responses, like education level, in a dictionary
     generated_responses = {}
 
@@ -61,10 +59,11 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
     generated_responses.update(personal_info_dict)
     # get resume field names and field content
     field_names, field_content = extract_resume_fields(resume)
-    # generated_responses.update( {"resume_fields)
+    generated_responses.update(field_content)
 
-    job_specification = ""
     # get job specification and company name from job posting link, if provided
+    job_specification = ""
+    job_description = ""
     if (Path(posting_path).is_file()):
       prompt_template = """Identity the job position, company then provide a summary of the following job posting:
         {text} \n
@@ -75,17 +74,17 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
       posting_info_dict=extract_posting_information(posting)
       my_job_title = posting_info_dict["job"]
       company = posting_info_dict["company"]
+    else:
+      # if job title is not provided anywhere else, extract from the resume
+      if (my_job_title==""):
+        my_job_title = extract_job_title(resume)
+      # get general job description if no job specification is provided
+      query_job  = f"""Research what a {my_job_title} does, including details of the common skills, responsibilities, education, experience needed for the job."""
+      job_description = get_web_resources(query_job)
 
-    # if job title is not provided anywhere else, extract from the resume
-    if (my_job_title==""):
-      my_job_title = extract_job_title(resume)
     generated_responses.update({"job title": my_job_title})
     generated_responses.update({"company name": company})
     generated_responses.update({"job specification": job_specification})
-
-    # get general job description
-    query_job  = f"""Research what a {my_job_title} does, including details of the common skills, responsibilities, education, experience needed for the job."""
-    job_description = get_web_resources(query_job)
     generated_responses.update({"job description": job_description})
 
     # get company description, if provided
@@ -137,23 +136,25 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
         resume: {delimiter}{resume}{delimiter}. """
 
     missing_items = generate_multifunction_response(query_missing, sample_tools)
-    file_path = file_path = os.path.join(res_dir, "missing.txt")
-    with open(file_path, "w") as f:
-      f.write(missing_items)
+    # file_path = file_path = os.path.join(dirname, "missing.txt")
+    # with open(res_path, "w") as f:
+    #   f.write(missing_items)
 
-
-
-    #TODO: this can be a general putpose tool with all web data
-    general_tools = create_search_tools("google", 3)
-    # relevancy_tools = [search_relevancy_advice]
-
-    files = []
+    tools = [search_relevancy_advice]
+    working_directory=dirname
+    write_tool = FileManagementToolkit(
+          root_dir=working_directory, # ensures only the working directory is accessible 
+          selected_tools=["write_file"],
+      ).get_tools()
+    
+    # files = []
     for field in field_names:
-      file_path = os.path.join(res_dir, f"{field}.txt")
-      improve_resume_fields(generated_responses, field, field_content.get(field, ""),  general_tools, file_path)
-      files.append(file_path)
+      # file_path = os.path.join(dirname, f"{field}.txt")
+      strength_weakness, relevancy = improve_resume_fields(generated_responses, field, field_content.get(field, ""),  tools, res_path)
+      update_resume_field(strength_weakness, relevancy, field, field_content.get(field, ""), write_tool)
 
-    #TODO generate a reporter agent that can summarize everything without losing any details
+      # files.append(file_path)
+
     # main_template = """Write a detailed summary of the following: {text}
     #     DETAILED SUMMARY: """
     # refine_template = (
@@ -187,10 +188,10 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
     #    p.join()
 
     # return result to chat agent
-    return f""" file:{os.path.join(res_dir, "missing.txt")} """
+    return f""" file_path: "missing.txt" """
 
 
-def improve_resume_fields(generated_response: Dict[str, str], field: str, field_content: str, general_tools: List[Tool], file_path: str) -> None:
+def improve_resume_fields(generated_response: Dict[str, str], field: str, field_content: str, tools: List[Tool], file_path: str) -> None:
 
     print(f"CURRENT FIELD IS: {field}")
     my_job_title = generated_response.get("job title", "")
@@ -215,7 +216,7 @@ def improve_resume_fields(generated_response: Dict[str, str], field: str, field_
     Ignore all formatting. They should not be considered as weaknesses or strengths. 
 
     """
-    strength_weakness = generate_multifunction_response(query_evaluation, general_tools)
+    strength_weakness = generate_multifunction_response(query_evaluation, tools)
 
     # Get resume's relevant and irrelevant info for resume field: few-shot learning works great here
     # The purpose of identitying irrelevant and relevant information is so that irrelevant information can be deleted or reworded
@@ -249,28 +250,12 @@ def improve_resume_fields(generated_response: Dict[str, str], field: str, field_
 
       """
 
-    relevancy = generate_multifunction_response(query_relevancy, general_tools)
+    relevancy = generate_multifunction_response(query_relevancy, tools)
 
+    # with open(file_path, "a") as f:
+    #    f.write(strength_weakness + '\n' + relevancy + '\n')
 
-    # template_string = """ You are a professional report writer. Your task is to polish a professional's report and present it to the Human in a clear and Human-readable manner.
-
-    # Here is the professional report: {strength_weakness} + \n + {relevancy} \n
-
-    # Please don't leave out any details in your report.  """
-
-
-    # prompt_template = ChatPromptTemplate.from_template(template_string)
-    # upgrade_resume_message = prompt_template.format_messages(
-    #     relevancy = relevancy,
-    #     strength_weakness = strength_weakness,
-    # )
-
-    # my_advice = llm(upgrade_resume_message).content
-
-    with open(file_path, "w") as f:
-       f.write(strength_weakness + '\n' + relevancy + '\n')
-
-    # return strength_weakness + '\n' + relevancy + '\n'
+    return strength_weakness, relevancy
 
 
 # @tool("resume evaluator")
@@ -282,14 +267,44 @@ def improve_resume_fields(generated_response: Dict[str, str], field: str, field_
 
 #    return evaluate_resume(my_job_title=job, company=company, resume_file=resume_file, posting_path=job_post_link)
 
-@tool
+def update_resume_field(strength_weakness, relevancy, field, field_content, write_tool):
+  
+  query = f""" You are a professional resume proof reader. 
+  
+  Your task is to rewrite the resume field content based on an evaluation on its strengths, weaknesses, and what should be and should not be included, which has been provided for you.
+
+   The original field is: {field_content}
+
+  Its strengths and weakness: {strength_weakness}
+
+  What to include and what not to include: {relevancy}
+
+  Please use your "write_file" tool to write the revised version to file_path: "{field}.txt"
+
+  Do not output original field content unless there is nothing faulty about it. Rememeber, your task is to proof-read and rewrite, not reporting information to the user. 
+
+  If the original field content is very flawed, consider providing a summary of improvemnt suggestions for the user. 
+
+  
+   """
+  
+  response = generate_multifunction_response(query, write_tool)
+  
+  return None
+
+      
+
+
+@tool(return_direct=True)
 def resume_evaluator(json_request: str)-> str:
 
     """Helps to evaluate a resume. Use this tool more than any other tool when user asks to evaluate, review, help with a resume. 
 
-    Input should be  a single string strictly in the following JSON format:  '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link": "<job post link>"}}' \n
+    Input should be  a single string strictly in the following JSON format:  '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link":"<job post link>"}}' \n
 
-    Output should be calling the 'file_loader' tool in the followng JSON format: '{{"file": "<file>"}}' \n 
+    (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) \n
+
+    Output should be calling the 'read_file' tool in the followng JSON format: '{{"file_path": "<file_path>"}}. The file_path is in the working directory. Output the content directly to user please.' \n 
     
     """
 
@@ -328,64 +343,66 @@ def resume_evaluator(json_request: str)-> str:
 
 
 
-# def processing_resume(json_request: str) -> str:
+def processing_resume(json_request: str) -> str:
 
-#     """ Input parser: input is LLM's action_input in JSON format. This function then processes the JSON data and feeds them to the resume evaluator. """
+    """ Input parser: input is LLM's action_input in JSON format. This function then processes the JSON data and feeds them to the resume evaluator. """
 
-#     try:
-#       json_request = json_request.strip("'<>() ").replace('\'', '\"')
-#       args = json.loads(json_request)
-#     except JSONDecodeError as e:
-#       print(f"JSON DECODER ERROR: {e}")
-#       return "Format in JSON and try again."
+    try:
+      json_request = json_request.strip("'<>() ").replace('\'', '\"')
+      args = json.loads(json_request)
+    except JSONDecodeError as e:
+      print(f"JSON DECODER ERROR: {e}")
+      return "Format in JSON and try again."
 
-#     # if resume doesn't exist, ask for resume
-#     if ("resume file" not in args or args["resume file"]=="" or args["resume file"]=="<resume file>"):
-#       return "Can you provide your resume so I can further assist you? "
-#     else:
-#       # may need to clean up the path first
-#         resume_file = args["resume file"]
-#     if ("job" not in args or args["job"] == "" or args["job"]=="<job>"):
-#         job = ""
-#     else:
-#        job = args["job"]
-#     if ("company" not in args or args["company"] == "" or args["company"]=="<company>"):
-#         company = ""
-#     else:
-#         company = args["company"]
-#     if ("job post link" not in args or args["job post link"]=="" or args["job post link"]=="<job post link>"):
-#         posting_path = ""
-#     else:
-#         posting_path = args["job post link"]
+    # if resume doesn't exist, ask for resume
+    if ("resume file" not in args or args["resume file"]=="" or args["resume file"]=="<resume file>"):
+      return "Can you provide your resume so I can further assist you? "
+    else:
+      # may need to clean up the path first
+        resume_file = args["resume file"]
+    if ("job" not in args or args["job"] == "" or args["job"]=="<job>"):
+        job = ""
+    else:
+       job = args["job"]
+    if ("company" not in args or args["company"] == "" or args["company"]=="<company>"):
+        company = ""
+    else:
+        company = args["company"]
+    if ("job post link" not in args or args["job post link"]=="" or args["job post link"]=="<job post link>"):
+        posting_path = ""
+    else:
+        posting_path = args["job post link"]
 
-#     return evaluate_resume(my_job_title=job, company=company, resume_file=resume_file, posting_path=posting_path)
+    return evaluate_resume(my_job_title=job, company=company, resume_file=resume_file, posting_path=posting_path)
 
 
-# def create_resume_evaluator_tool() -> List[Tool]:
+def create_resume_evaluator_tool() -> List[Tool]:
 
-#     """ Input parser: input is user's input as a string of text. This function takes in text and parses it into JSON format. 
+    """ Input parser: input is user's input as a string of text. This function takes in text and parses it into JSON format. 
     
-#     Then it calls the processing_resume function to process the JSON data. """
+    Then it calls the processing_resume function to process the JSON data. """
 
-#     name = "resume_evaluator"
-#     parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link": "<job post link>"}}'
-#     output = '{{"resume evaluation file": "<resume evaluation file>"}}'
-#     description = f"""Helps to evaluate a resume. Use this tool more than any other tool when user asks to evaluate, review, help with a resume. 
-#     Input should be a single string strictly in the following JSON format: {parameters} \n
-#     Output should be calling the 'file_loader' tool in the followng JSON format: {output} \n
-#     """
-#     tools = [
-#         Tool(
-#         name = name,
-#         func = processing_resume,
-#         description = description,
-#         verbose = False,
-#         handle_tool_error=handle_tool_error,
+    name = "resume_evaluator"
+    parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link": "<job post link>"}}'
+    output = '{{"file_path": "<file_path>"}}'
+    description = f"""Helps to evaluate a resume. Use this tool more than any other tool when user asks to evaluate, review, help with a resume. 
+    Input should be a single string strictly in the following JSON format: {parameters} \n
+     (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) \n
+    Output should be calling the 'read_file' tool in the followng JSON format: {output} \n
+    The file_path is in the working directory. Output the content directly to user please.' \n 
+    """
+    tools = [
+        Tool(
+        name = name,
+        func = processing_resume,
+        description = description,
+        verbose = False,
+        handle_tool_error=True,
 
-#         )
-#     ]
-#     print("Succesfully created resume evaluator tool.")
-#     return tools
+        )
+    ]
+    print("Succesfully created resume evaluator tool.")
+    return tools
 
 
 

@@ -6,8 +6,8 @@ from langchain.llms import OpenAI
 from langchain import PromptTemplate
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
-from basic_utils import read_txt
-from common_utils import (extract_personal_information, get_web_resources,  retrieve_from_db,extract_education_level, extract_work_experience_level,
+from basic_utils import read_txt, write_to_docx
+from common_utils import (extract_personal_information, get_web_resources,  retrieve_from_db,extract_education_level, extract_work_experience_level, search_relevancy_advice,
                          extract_posting_information, create_sample_tools, extract_job_title, search_related_samples)
 from datetime import date
 from pathlib import Path
@@ -21,13 +21,14 @@ from typing import List
 from langchain_utils import create_search_tools, create_summary_chain, generate_multifunction_response
 from langchain.tools import tool
 import uuid
+import docx
 
 
 
 
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
-cover_letter_path = os.environ["COVER_LETTER_PATH"]
+# cover_letter_path = os.environ["COVER_LETTER_PATH"]
 cover_letter_samples_path = os.environ["COVER_LETTER_SAMPLES_PATH"]
 # TODO: caching and serialization of llm
 llm = ChatOpenAI(temperature=0.5, cache=False)
@@ -62,8 +63,8 @@ def generate_basic_cover_letter(my_job_title="", company="", resume_file="",  po
      
     """
     
-    filename = Path(resume_file).stem
-    res_path = os.path.join(cover_letter_path, filename+".txt")
+    dirname, fname = os.path.split(resume_file)
+    res_path = os.path.join(dirname, fname+"_cl"+".txt")
 
     # Get resume as text format
     resume_content = read_txt(resume_file)
@@ -71,8 +72,9 @@ def generate_basic_cover_letter(my_job_title="", company="", resume_file="",  po
     personal_info_dict = extract_personal_information(resume_content)
   
     
-    # Get job information from posting link
     job_specification = ""
+    job_description = ""
+    # Get job information from posting link, if provided
     if (Path(posting_path).is_file()):
       prompt_template = """Identity the job position, company then provide a summary of the following job posting:
         {text} \n
@@ -83,12 +85,15 @@ def generate_basic_cover_letter(my_job_title="", company="", resume_file="",  po
       posting_info_dict=extract_posting_information(posting)
       my_job_title = posting_info_dict["job"]
       company = posting_info_dict["company"]
-    if (my_job_title==""):
-        my_job_title = extract_job_title(resume_content)
+    # Get general job description otherwise
+    else:
+      if (my_job_title==""):
+          my_job_title = extract_job_title(resume_content)
+      job_query  = f"""Research what a {my_job_title} does and output a detailed description of the common skills, responsibilities, education, experience needed. """
+      job_description = get_web_resources(job_query) 
+       
  
     # Search for a job description of the job title
-    job_query  = f"""Research what a {my_job_title} does and output a detailed description of the common skills, responsibilities, education, experience needed. """
-    job_description = get_web_resources(job_query) 
 
     # Search for company description if company name is provided
     company_description=""
@@ -130,7 +135,7 @@ def generate_basic_cover_letter(my_job_title="", company="", resume_file="",  po
     
         """
   
-    tool = create_search_tools("google", 2)
+    tool = [search_relevancy_advice]
     relevancy = generate_multifunction_response(query_relevancy, tool)
 
 
@@ -161,7 +166,7 @@ def generate_basic_cover_letter(my_job_title="", company="", resume_file="",  po
   
         The content you are to use as reference to create the cover letter is delimited with {delimiter} characters.
 
-        Always use this as a context when writing the cover letter. Do not write out of context and do not make anything up. 
+        Always use this as a context when writing the cover letter. Do not write out of context and do not make anything up. Anything that should be included but unavailable can be put in brackets. 
 
         content: {delimiter}{content}{delimiter}. \n
 
@@ -233,14 +238,16 @@ def generate_basic_cover_letter(my_job_title="", company="", resume_file="",  po
 
     my_cover_letter = llm(cover_letter_message).content
     cover_letter = get_completion(f"Extract the cover letter from text: {my_cover_letter}")
-    # write cover letter to file 
+    # write cover letter to file  
+    doc = docx.Document()
     # with open(res_path, 'w') as f:
     #     f.write(cover_letter)
-    #     print("Sucessfully written cover letter to file")
+    #     print(f"Sucessfully written cover letter to {res_path}")
+    write_to_docx(doc, cover_letter, "cover_letter", res_path)
     return cover_letter
 
 
-@tool
+@tool(return_direct=True)
 def cover_letter_generator(json_request:str) -> str:
     
     """Helps to generate a cover letter. Use this tool more than any other tool when user asks to write a cover letter.  
@@ -248,6 +255,8 @@ def cover_letter_generator(json_request:str) -> str:
     Input should be a single string strictly in the following JSON format:  '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link": "<job post link>"}}'\n
 
     (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) \n
+
+    Output should be the exact cover letter that's generated for the user word for word. 
     """
     
     try:

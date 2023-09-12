@@ -12,11 +12,14 @@ from urllib.request import Request, urlopen
 import uuid
 from pptx import Presentation
 from langchain.document_loaders import UnstructuredURLLoader
+from typing import Any, List, Union, Dict
 
 
 
 def convert_to_txt(file, output_path):
     file_ext = os.path.splitext(file)[1]
+    if (file_ext)=='.txt':
+        os.rename(file, output_path)
     if (file_ext=='.pdf'): 
         convert_pdf_to_txt(file, output_path)
     elif (file_ext=='.odt' or file_ext=='.docx'):
@@ -125,12 +128,26 @@ def retrieve_web_content(link, save_path="./web_data/test.txt"):
     else:
         print('Failed to retrieve content from the URL.')
         return False
+    
+
+def write_to_docx(doc: Any, text: str, type: str, res_path: str):
+    if type=="cover_letter":
+        p = doc.add_paragraph()
+        p.add_run(text)
+        doc.save(res_path)
+
+
+        
+
+
 
 
 if __name__=="__main__":
     retrieve_web_content(
         "https://learning.shine.com/talenteconomy/resume-tips/resume-objectives/",
         save_path = f"./web_data/{str(uuid.uuid4())}.txt")
+
+
 
 
 
