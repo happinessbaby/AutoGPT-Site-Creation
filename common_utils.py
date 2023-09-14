@@ -3,7 +3,7 @@ from openai_api import get_completion
 from openai_api import get_completion, get_completion_from_messages
 from langchain.chat_models import ChatOpenAI
 from langchain.embeddings import OpenAIEmbeddings
-from langchain.prompts import ChatPromptTemplate
+from langchain.prompts import ChatPromptTemplate,  StringPromptTemplate
 from langchain.output_parsers import ResponseSchema
 from langchain.output_parsers import StructuredOutputParser
 from langchain.agents import load_tools, initialize_agent, Tool, AgentExecutor
@@ -13,7 +13,7 @@ from langchain.tools.python.tool import PythonREPLTool
 from langchain.agents import AgentType
 from langchain.chains import RetrievalQA,  LLMChain
 from pathlib import Path
-from basic_utils import read_txt, convert_to_txt
+from basic_utils import read_txt, convert_to_txt, write_to_docx
 from langchain_utils import ( create_wiki_tools, create_search_tools, create_retriever_tools, create_compression_retriever, create_ensemble_retriever, retrieve_redis_vectorstore, create_vectorstore, merge_faiss_vectorstore, create_vs_retriever_tools,
                               split_doc, handle_tool_error, retrieve_faiss_vectorstore, split_doc_file_size, reorder_docs, create_summary_chain)
 from langchain import PromptTemplate
@@ -49,6 +49,7 @@ from langchain.tools import tool
 from langchain.output_parsers import PydanticOutputParser
 from langchain.tools.file_management.move import MoveFileTool
 from pydantic import BaseModel, Field, validator
+from langchain.document_loaders import UnstructuredWordDocumentLoader
 import os
 import sys
 import re
@@ -59,7 +60,9 @@ from json import JSONDecodeError
 import faiss
 import asyncio
 import random
+import base64
 from datetime import date
+from feast import FeatureStore
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
 
@@ -67,8 +70,9 @@ delimiter = "####"
 delimiter2 = "'''"
 delimiter3 = '---'
 delimiter4 = '////'
-categories = ["resume", "cover letter", "job posting", "resume evaluation"]
-upload_file_path = os.environ["UPLOAD_FILE_PATH"]
+feast_repo_path = "/home/tebblespc/Auto-GPT/autogpt/auto_gpt_workspace/my_feature_repo/feature_repo/"
+store = FeatureStore(repo_path = feast_repo_path)
+
 
 def extract_personal_information(resume: str,  llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> Any:
 
@@ -201,7 +205,7 @@ def extract_education_level(resume: str) -> str:
                               
                               Ouput the highest level of education the applicant holds, including any major, minor, area of study that's part of the degree.
 
-                              If any part of the information is unavaible, do not make it up. 
+                              If any part of the information is unavaible, do not make it up.
 
                               Also, do not count any certifications.
                               
@@ -314,8 +318,6 @@ def extract_resume_fields(resume: str,  llm=OpenAI(temperature=0,  max_tokens=10
 
 
 
-
-
 #TODO: once there's enough samples, education level and work experience level could also be included in searching criteria
 def search_related_samples(job_title: str, directory: str) -> List[str]:
 
@@ -344,6 +346,8 @@ def search_related_samples(job_title: str, directory: str) -> List[str]:
 		"""
     related_files = []
     for path in  Path(directory).glob('**/*.txt'):
+        if len(related_files)==3:
+            break
         file = str(path)
         content = read_txt(file)
         # print(file, len(content))
@@ -448,7 +452,7 @@ def get_web_resources(query: str, llm = ChatOpenAI(temperature=0.8, model="gpt-3
         response = qa_chain.run(query)
         print(f"Successfully retreived web resources using Web Research Retriever: {response}")
     except Exception:
-        tools = create_search_tools("google", top=10)
+        tools = create_search_tools("google", 3)
         agent= initialize_agent(
             tools, 
             llm, 
@@ -546,10 +550,88 @@ def create_sample_tools(related_samples: List[str], sample_type: str,) -> Union[
     return tools, tool_names
 
 
+def get_generated_responses(resume_content:str, my_job_title:str, company:str, posting_path:str,): 
+
+    # Get personal information from resume
+    generated_responses={}
+    personal_info_dict = extract_personal_information(resume_content)
+    generated_responses.update(personal_info_dict)
+
+    field_names, field_content = extract_resume_fields(resume_content)
+    generated_responses.update({"field names":field_names})
+    generated_responses.update(field_content)
+
+    job_specification = ""
+    job_description = ""
+    # Get job information from posting link, if provided
+    if (Path(posting_path).is_file()):
+      prompt_template = """Identity the job position, company then provide a summary of the following job posting:
+        {text} \n
+        Focus on roles and skills involved for this job. Do not include information irrelevant to this specific position.
+      """
+      job_specification = create_summary_chain(posting_path, prompt_template)
+      posting = read_txt(posting_path)
+      posting_info_dict=extract_posting_information(posting)
+      my_job_title = posting_info_dict["job"]
+      company = posting_info_dict["company"]
+    else:
+      # if job title is not provided anywhere else, extract from resume
+      if (my_job_title==""):
+          my_job_title = extract_job_title(resume_content)
+    # Search for a job description of the job title
+      job_query  = f"""Research what a {my_job_title} does and output a detailed description of the common skills, responsibilities, education, experience needed. """
+      job_description = get_web_resources(job_query)  
+    generated_responses.update({"job title": my_job_title})
+    generated_responses.update({"company name": company})
+    generated_responses.update({"job specification": job_specification})
+    generated_responses.update({"job description": job_description})
+
+    # Search for company description if company name is provided
+    company_description=""
+    if (company!=""):
+      company_query = f""" Research what kind of company {company} is, such as its culture, mission, and values.                       
+                          Look up the exact name of the company. If it doesn't exist or the search result does not return a company, output -1."""
+      company_description = get_web_resources(company_query)
+    generated_responses.update({"company description": company_description})
+
+    # get highest education level and relevant work experience level
+    education_level = extract_education_level(resume_content)
+    work_experience = extract_work_experience_level(resume_content, my_job_title)
+    generated_responses.update({"highest education level": education_level})
+    generated_responses.update({"work experience level": work_experience})
+
+    return generated_responses
+
+    
+class FeastPromptTemplate(StringPromptTemplate):
+    def format(self, **kwargs) -> str:
+        userid = kwargs.pop("userid")
+        feature_vector = store.get_online_features(
+            features=[
+                "resume_info:name",
+                "resume_info:email",
+                "resume_info:phone",
+                "resume_info:address",
+                "resume_info:job_title", 
+                "resume_info:highest_education_level",
+                "resume_info:work_experience_level",
+            ],
+            entity_rows=[{"userid": userid}],
+        ).to_dict()
+        kwargs["name"] = feature_vector["name"][0]
+        kwargs["email"] = feature_vector["email"][0]
+        kwargs["phone"] = feature_vector["phone"][0]
+        kwargs["address"] = feature_vector["address"][0]
+        kwargs["job_title"] = feature_vector["job_title"][0]
+        kwargs["highest_education_level"] = feature_vector["highest_education_level"][0]
+        kwargs["work_experience_level"] = feature_vector["work_experience_level"][0]
+        return prompt.format(**kwargs)
+
+
 # @tool
 # def search_relevancy_advice(query: str) -> str:
 #     """Searches for general advice on relevant and irrelevant information in resume"""
-#     subquery_relevancy = ""
+#     subquery_relevancy = "how to determine what's relevant in resume"
 #     # option 1: compression retriever
 #     # retriever = create_compression_retriever()
 #     # option 2: ensemble retriever
@@ -565,11 +647,11 @@ def create_sample_tools(related_samples: List[str], sample_type: str,) -> Union[
 #     print(f"Successfully used relevancy tool to generate answer: {texts_merged}")
 #     return texts_merged
 
-@tool
+@tool(return_direct=True)
 def file_loader(json_request: str) -> str:
 
     """Outputs a file. Use this whenever you need to load a file. 
-    Do not use this for evaluation or generation purposes.
+    Do not use this for evaluation purposes.
     Input should be a single string in the following JSON format: '{{"file": "<file>"}}' \n """
 
     try:
@@ -577,146 +659,70 @@ def file_loader(json_request: str) -> str:
         args = json.loads(json_request)
         file = args["file"]
         file_content = read_txt(file)
-        if os.path.getsize(file)<2000:       
+        if os.path.getsize(file)<2000:    
+            print(file_content)   
             return file_content
         else:
             prompt_template = "summarize the follwing text. text: {text} \n in less than 100 words."
             return create_summary_chain(file, prompt_template=prompt_template)
     except Exception as e:
         return "file did not load successfully. try another tool"
-
-
-
-# @tool
-# def file_processor(directory: str) -> str:
-
-#     """ Use this tool to process files that user uploads. Input should be strictly a single string of the files directory. """
-
-#     for path in  Path(directory):
-#         file = str(path)
-#         read_path =  os.path.join(upload_file_path, Path(file).stem+'.txt')
-#         convert_to_txt(file, read_path)
-#         content_safe, content_type, content_topics = check_content(read_path)
-#         print(content_type, content_safe, content_topics) 
-#         if content_safe:
-#             if content_type != "other":
-#                 entity = f"""{content_type} file: {read_path}"""
-#                 self.update_entities(entity)
-#                 name = content_type.strip().replace(" ", "_")
-#                 vs_name = f"faiss_{name}_{self.userid}"
-#                 vs = create_vectorstore("faiss", read_path, "file", vs_name)
-#                 tool_name = vs_name.removeprefix("faiss_").removesuffix(f"_{self.userid}")
-#                 tool_description =  """Useful for generating personalized interview questions and answers. 
-#                     Use this tool more than any other tool during a mock interview session when there's a need to reference special content.
-#                     Do not use this tool to load any files or documents.  """ 
-#                 tools = create_vs_retriever_tools(vs, tool_name, tool_description)
-#                 # self.update_tools(tools, "interview")
-#             else:
-#                 if content_topics:
-#                     entity = f"""interview material topics: {str(content_topics)}"""
-#                     self.update_entities(entity)
-#                 interview_material = f"faiss_interview_material_{self.userid}"
-#                 vs = merge_faiss_vectorstore( interview_material, read_path)
-#                 tool_name = vs_name.removeprefix("faiss_").removesuffix(f"_{self.userid}")
-#                 tool_description =  """Useful for generating interview questions and answers. 
-#                     Use this tool more than any other tool during a mock interview session. This tool can also be used for questions about topics in the interview material topics. 
-#                     Do not use this tool to load any files or documents. This should be used only for searching and generating questions and answers of the relevant materials and topics. """
-#                 tools = create_vs_retriever_tools(vs, tool_name, tool_description)
-#                 # self.update_tools(tools, "interview")
-#         else:
-#             print("file content unsafe")
-
-# @tool
-# def function_loader(json_request:str) -> str:
-#     return None
-
-
-
-# def create_func_caller_tool() -> List(Tool):
-
-#     name = "function_caller"
-#     parameters = '{{"function name": "<function name>"}}'
-#     description = f"""Executes a functions whenever you use this tool. Use this tool only to call a function when needed.
-#                  Input should be JSON in the following format: {parameters}.
-#                 (remember to respond with a markdown code snippet of a json blob with a single action, and NOTHING else)
-#                 """
-#     tools = [
-#         Tool(
-#         name = name,
-#         func = calling_func,
-#         description = description,
-#         verbose = False,
-#         handle_tool_error=_handle_tool_error,
-#         )
-#     ]
-#     print("Successfully created function loader tool")
-#     return tools
-
-# def calling_func(json_request: str):
-
-#     print(json_request)
-#     try:
-#         args = json.loads(json_request)
-#     except JSONDecodeError:
-#         return "Format in JSON and try again." 
-#     func_name = args["function name"]
-#     #TODO: need to import function from other places
-#     function = locals()[func_name]
-#     function()
-
-
-#         return "file did not load successfully. try another tool"
-
-
-
     
-# def create_debug_tool() -> List[Tool]:
+@tool("get download link", return_direct=True)
+def binary_file_downloader_html(json_request: str):
 
-#     name = "chat_debug"
-#     parameters = '{{"error message":"<error message>"}}'
-#     description = f"""Useful when you need to debug the cuurent conversation. Use it when you encounter error messages.
-#      Input should be in the following format: {parameters} """
-#     tools = [
-#         Tool(
-#         name = name,
-#         func = debug_chat,
-#         description = description,
-#         handle_tool_error=handle_tool_error,
-#         )
-#     ]
-#     print("Successfully created deubg tool")
-#     return tools
-
-# def debug_chat(json_request: str) -> str:
-
-#     args = json.loads(json_request)
-#     error = args["error message"]
-#     if error.startswith("Could not parse LLM output: `"):
-#         return "Remember to format final answer in JSON."
-#     #TODO: if error is about prompt being too big, shorten the prompt
-#     return "shorten your prompt"
-
-
+    """ Gets the download link from file. 
     
+    Input should be a strictly single string in the following JSON format: '{{"file path": "<file path>"}}' """
 
-
-
+    try: 
+        args = json.loads(json_request)
+        file = args["file path"]
+    except JSONDecodeError:
+        return """ Format in the following JSON and try again: '{{"file path": "<file path>"}}' """
+    with open(file, 'rb') as f:
+        data = f.read()
+    bin_str = base64.b64encode(data).decode()
+    href = f'<a href="data:application/octet-stream;base64,{bin_str}" download="{os.path.basename(file)}">Download the cover letter</a>'
+    return href
     
-    
-    
+@tool
+def docx_writer():
+    """ Writes to a docx file. 
+    Input should be a single string in the following JSON format: '{{"file path": "<file path>", "field name":"<field name>", "content":"<content>"}}' \n"""
+
+# https://python.langchain.com/docs/modules/agents/agent_types/self_ask_with_search
+@tool("search chat history")
+def search_all_chat_history(query:str)-> str:
+
+    """ Used when there's miscommunication in the current conversation and agent needs to reference chat history for a solution. """
+
+    try:
+        db = retrieve_faiss_vectorstore("chat_debug")
+        retriever=db.as_retriever(search_type="similarity_score_threshold", search_kwargs={"score_threshold": .5, "k":1})
+        # docs = retriever.get_relevant_documents(query)
+        # texts = [doc.page_content for doc in docs]
+        # #TODO: locate solution 
+        # return "\n\n".join(texts)
+        tools = create_retriever_tools(retriever, "Intermediate Answer", "useful for when you need to ask with search")
+        llm = OpenAI(temperature=0)
+        self_ask_with_search = initialize_agent(
+            tools, llm, agent=AgentType.SELF_ASK_WITH_SEARCH, verbose=True
+        )
+        response = self_ask_with_search.run(query)
+        return response
+    except Exception:
+        return ""
+
+#TODO: conceptually, search chat history is self-search, debug error is manual error handling 
+@tool
+def debug_error(self, error_message: str) -> str:
+
+    """Useful when you need to debug the cuurent conversation. Use it when you encounter error messages. Input should be in the following format: {error_messages} """
+
+    return "shorten your prompt"
 
 
-
-
-
-# # TODO: need to test the effective of this debugging tool
-# def create_search_all_chat_history_tool()-> List[Tool]:
-  
-#     db = retrieve_faiss_vectorstore("chat_debug")
-#     name = "search_all_chat_history"
-#     description = """Useful when you want to debug the cuurent conversation referencing historical conversations. Use it especially when debugging error messages. """
-#     tools = create_retriever_tools(db.as_retriever(), name, description)
-#     return tools
 
 
 def check_content(txt_path: str) -> Union[bool, str, set] :

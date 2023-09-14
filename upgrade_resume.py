@@ -7,7 +7,7 @@ from langchain.output_parsers import CommaSeparatedListOutputParser
 from langchain import PromptTemplate
 from langchain.agents import AgentType, Tool, initialize_agent, create_json_agent
 from basic_utils import read_txt
-from common_utils import (get_web_resources, retrieve_from_db, extract_posting_information, extract_education_level, extract_work_experience_level, search_relevancy_advice,
+from common_utils import (get_web_resources, retrieve_from_db, extract_posting_information, extract_education_level, extract_work_experience_level, get_generated_responses,
                            extract_resume_fields, extract_job_title,  search_related_samples, create_sample_tools, extract_personal_information)
 from langchain_utils import create_search_tools, create_mapreduce_chain, create_summary_chain, generate_multifunction_response, create_refine_chain, handle_tool_error
 from pathlib import Path
@@ -49,98 +49,52 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
 
     dirname, fname = os.path.split(resume_file)
     res_path = os.path.join(dirname, Path(fname).stem +"_re"+".txt")
-    # stores basic extracted responses, like education level, in a dictionary
-    generated_responses = {}
 
-    # get resume
-    resume = read_txt(resume_file)
-    # extract personal information
-    personal_info_dict = extract_personal_information(resume)
-    generated_responses.update(personal_info_dict)
-    # get resume field names and field content
-    field_names, field_content = extract_resume_fields(resume)
-    generated_responses.update(field_content)
+    # get resume info
+    resume_content = read_txt(resume_file)
+    info_dict=get_generated_responses(resume_content, my_job_title, company, posting_path)
+    highest_education_level = info_dict["highest education level"]
+    work_experience_level = info_dict["work experience level"]
+    field_names = info_dict["field names"]
 
-    # get job specification and company name from job posting link, if provided
-    job_specification = ""
-    job_description = ""
-    if (Path(posting_path).is_file()):
-      prompt_template = """Identity the job position, company then provide a summary of the following job posting:
-        {text} \n
-        Focus on roles and skills involved for this job. Do not include information irrelevant to this specific position.
-      """
-      job_specification = create_summary_chain(posting_path, prompt_template)
-      posting = read_txt(posting_path)
-      posting_info_dict=extract_posting_information(posting)
-      my_job_title = posting_info_dict["job"]
-      company = posting_info_dict["company"]
-    else:
-      # if job title is not provided anywhere else, extract from the resume
-      if (my_job_title==""):
-        my_job_title = extract_job_title(resume)
-      # get general job description if no job specification is provided
-      query_job  = f"""Research what a {my_job_title} does, including details of the common skills, responsibilities, education, experience needed for the job."""
-      job_description = get_web_resources(query_job)
 
-    generated_responses.update({"job title": my_job_title})
-    generated_responses.update({"company name": company})
-    generated_responses.update({"job specification": job_specification})
-    generated_responses.update({"job description": job_description})
-
-    # get company description, if provided
-    company_description=""
-    if (company!=""):
-      company_query = f""" Research what kind of company {company} is, such as its culture, mission, and values.                         
-                          Look up the exact name of the company. If it doesn't exist or the search result does not return a company, output you don't know"""
-      company_description = get_web_resources(company_query)
-    generated_responses.update({"company description": company_description})
-
-    # get highest level of education
-    education_level = extract_education_level(resume)
-    # get work experience level wrt the job position
-    # work_experience = extract_work_experience_level(resume, my_job_title)
-    work_experience = ""
-
+    # # Note: retrieval query works best if clear, concise, and detail-dense
+    advice_query = f"""what to include for resume with someone with {highest_education_level} and {work_experience_level} for {my_job_title}"""
+    advices = retrieve_from_db(advice_query)
     # samples query to find missing content from resume using document comparison
     # Note: document comparison benefits from a clear and simple prompt
     related_samples = search_related_samples(my_job_title, resume_samples_path)
     sample_tools, tool_names = create_sample_tools(related_samples, "resume")
-    query_sample = f"""  You are an expert resume advisor that specializes in comparing exemplary sample resume. 
+    query_missing = f"""  You are an expert resume field advisor that specializes in improvement content of resume delimited with {delimiter} characters. 
 
-    Sample resume are provided in your tools. Research {str(tool_names)} and answer the following question:
+        resume: {delimiter}{resume_content}{delimiter}. 
 
-       What field information do these resume share, or what content do they have in common? 
+    Step 1. Sample resume are provided in your tools. Research {str(tool_names)} and answer the following question:
 
-    Please do not list your answer but write in complete sentences as an expert resume advisor. 
+       List common things these resume have in common. 
 
-    Your answer should be general without losing details. For example, you should not compare company names but should compare shared work experiences.
+       Please be general with your answer and ignore any personal details, locations, names, dates, etc. 
 
-    """
-    commonality = generate_multifunction_response(query_sample, sample_tools)
-    # Note: retrieval query works best if clear, concise, and detail-dense
-    advice_query = f"""what to include for resume with someone with {education_level} and {work_experience} for {my_job_title}"""
-    advices = retrieve_from_db(advice_query)
+    Common Content: 
 
-    query_missing = f""" You are an expert resume advisor that specializes in finding missing fields and content. 
+    Step 2: Your job is to make a list of missing content in the resume delimited with {delimiter} characters using Common Content from Step 1 and  Expert Advice provided below. 
 
-        Your job is to find missing items in the resume delimiter with {delimiter} characters using expert suggestions. 
+        Expert Advice: {advices}
+     
+        Ignore all formatting advice and ignore any personal details, dates, school and company names, etc in Common Content. 
 
-        Ignore all formatting advices and any specific details such as personal details, dates, schools, companies, affiliations, hobbies, etc. 
-        
-        Your answer should be general enough to allow applicant to fill out the missing content with their own information. 
+        Your answer should be general enough to allow applicant to fill out the missing content with their own information. It is okay if there is nothing missing.
 
-        Please output only the missing field names and/or missing field content in a list. Do not provide the source. 
+        Missing Content:
 
-        expert suggestion: {advices} \n {commonality} \n
-
-        resume: {delimiter}{resume}{delimiter}. """
+        Remember to reference Common Content and Expert Advice when generating Missing Content. Be general enough for applicant to provide their own missing information. 
+     """
 
     missing_items = generate_multifunction_response(query_missing, sample_tools)
     # file_path = file_path = os.path.join(dirname, "missing.txt")
     # with open(res_path, "w") as f:
     #   f.write(missing_items)
 
-    tools = [search_relevancy_advice]
     working_directory=dirname
     write_tool = FileManagementToolkit(
           root_dir=working_directory, # ensures only the working directory is accessible 
@@ -150,8 +104,12 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
     # files = []
     for field in field_names:
       # file_path = os.path.join(dirname, f"{field}.txt")
-      strength_weakness, relevancy = improve_resume_fields(generated_responses, field, field_content.get(field, ""),  tools, res_path)
-      update_resume_field(strength_weakness, relevancy, field, field_content.get(field, ""), write_tool)
+      try: 
+        field_content = info_dict[field]
+        strength_weakness, relevancy = improve_resume_fields(info_dict, field, field_content,  sample_tools, res_path)
+        update_resume_field(strength_weakness, relevancy, field, field_content, write_tool)
+      except Exception as e:
+         raise e
 
       # files.append(file_path)
 
@@ -273,22 +231,22 @@ def update_resume_field(strength_weakness, relevancy, field, field_content, writ
   
   Your task is to rewrite the resume field content based on an evaluation on its strengths, weaknesses, and what should be and should not be included, which has been provided for you.
 
-   The original field is: {field_content}
+  The original field is: {field_content}
 
   Its strengths and weakness: {strength_weakness}
 
   What to include and what not to include: {relevancy}
 
-  Please use your "write_file" tool to write the revised version to file_path: "{field}.txt"
+  Rememeber, your task is to proof-read and rewrite, not reporting information to the user.
 
-  Do not output original field content unless there is nothing faulty about it. Rememeber, your task is to proof-read and rewrite, not reporting information to the user. 
+  Begin!
 
-  If the original field content is very flawed, consider providing a summary of improvemnt suggestions for the user. 
-
+  Revised version:  
   
    """
   
   response = generate_multifunction_response(query, write_tool)
+  
   
   return None
 
@@ -303,9 +261,7 @@ def resume_evaluator(json_request: str)-> str:
     Input should be  a single string strictly in the following JSON format:  '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link":"<job post link>"}}' \n
 
     (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) \n
-
-    Output should be calling the 'read_file' tool in the followng JSON format: '{{"file_path": "<file_path>"}}. The file_path is in the working directory. Output the content directly to user please.' \n 
-    
+     
     """
 
     try:

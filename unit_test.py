@@ -1,14 +1,15 @@
-from generate_cover_letter import cover_letter_generator
-from upgrade_resume import resume_evaluator
+from generate_cover_letter import cover_letter_generator, create_cover_letter_generator_tool
+from upgrade_resume import resume_evaluator, create_resume_evaluator_tool
 from langchain.chat_models import ChatOpenAI
 from langchain.agents import AgentType, Tool, initialize_agent
 from basic_utils import read_txt
-from common_utils import (get_web_resources,extract_education_level,file_loader,
+from common_utils import (get_web_resources,extract_education_level,file_loader, binary_file_downloader_html,
                           retrieve_from_db, search_related_samples, create_sample_tools, extract_work_experience_level,  extract_resume_fields)
 from langchain.tools import tool
 from langchain_utils import retrieve_faiss_vectorstore, create_search_tools, create_summary_chain, generate_multifunction_response, split_doc, split_doc_file_size, create_refine_chain, create_mapreduce_chain
 from openai_api import get_completion
 from langchain.chains.summarize import load_summarize_chain
+from langchain.agents.agent_toolkits import FileManagementToolkit
 import json
 from pathlib import Path
 
@@ -25,7 +26,8 @@ def test_coverletter_tool(resume_file=resume_file, job="data analyst", company="
 
     """ End-to-end testing of the cover letter generator without the UI. """
 
-    tools = [cover_letter_generator] 
+    # tools = [cover_letter_generator] + [binary_file_downloader_html]
+    tools = create_cover_letter_generator_tool() + [binary_file_downloader_html]
     agent= initialize_agent(
         tools, 
         llm=ChatOpenAI(cache=False), 
@@ -47,9 +49,14 @@ def test_resume_tool(resume_file="./resume_samples/test.txt", job="data analyst"
 
     """ End-to-end testing of the resume evaluator without the UI. """
     
-    tools = [resume_evaluator] + [file_loader]
+    # tools = [resume_evaluator]
+    tools = create_resume_evaluator_tool()
+    read_tool = FileManagementToolkit(
+        root_dir=f"./static/{Path(resume_file).stem}/",
+        selected_tools=["read_file"],
+    ).get_tools()
     agent= initialize_agent(
-        tools, 
+        tools + read_tool, 
         llm=ChatOpenAI(cache=False), 
         agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
         handle_parsing_errors=True,
@@ -84,7 +91,7 @@ def test_work_experience(resume_file="./resume_samples/sample6.txt", my_job_titl
     print(f"WORK EXPERIENCE LEVEL: {experience}")
 
 # Pass
-def test_education_level(resume_file="./resume_samples/sample4.txt"):
+def test_education_level(resume_file="./resume_samples/test.txt"):
     resume = read_txt(resume_file)
     education = extract_education_level(resume)
     print(f"EDUCATION: {education}")
@@ -195,6 +202,8 @@ def test_cl_samples_query(my_job_title= "Information Systems Technology Manager"
     response = generate_multifunction_response(query_samples, sample_tools)
     print(f"SAMPLES COMPARISON RESPONSE: {response}")
 
+
+
 # PASS  
 def test_field_retrieval(field="work history"):
 
@@ -202,45 +211,6 @@ def test_field_retrieval(field="work history"):
     advices = retrieve_from_db(advice_query)
     return advices
 
-# MISSING CONTENT PART STILL FAILING, REST PASS
-def test_field_samples_query(resume_file="./resume_samples/test.txt", my_job_title="accountant",  education_level="Bachelor's of Arts", work_experience="entry level"):
-
-    resume_samples_path = "./resume_samples/"
-    related_samples = search_related_samples(my_job_title, resume_samples_path)
-    print(related_samples)
-    resume = read_txt(resume_file)
-    sample_tools, tool_names = create_sample_tools(related_samples, "resume")
-    query_sample = f"""  You are an expert resume advisor that specializes in comparing exemplary sample resume. 
-
-    Sample resume are provided in your tools. Research {str(tool_names)} and answer the following question:
-
-       What field information do these resume share, or what content do they have in common? 
-
-    Please do not list your answer but write in complete sentences as an expert resume advisor. 
-
-    Your answer should be general without losing details. For example, you should not compare company names but should compare shared work experiences.
-
-    """  
-    commonality = generate_multifunction_response(query_sample, sample_tools)
-    advice_query = f"""what to include for resume with someone with {education_level} and {work_experience} for {my_job_title}"""
-    # stressing the level of detail in prompt is important
-    advices = retrieve_from_db(advice_query)
-    query_missing = f""" You are an expert resume advisor that specializes in finding missing fields and content. 
-    
-            Your job is to find missing items in the resume delimiter with {delimiter} characters using expert suggestions. 
-
-            Ignore all formatting advices and any specific details such as personal details, dates, schools, companies, affiliations, hobbies, etc. 
-            
-            Your answer should be general enough to allow applicant to fill out the missing content with their own information. 
-
-            Please output only the missing field names and/or missing field content in a list. Do not provide the source. 
-
-            expert suggestion: {advices} \n {commonality} \n
-
-            resume: {delimiter}{resume}{delimiter}. """ 
-    
-    missing_items = generate_multifunction_response(query_missing, sample_tools)
-    print(missing_items)
 
 # PASS
 def test_field_relevancy_query( my_job_title="customer service manager", field = "work history", posting_path=''):
@@ -377,11 +347,109 @@ def test_mapreduce_chain(directory = "./static/resume_evaluation/test/"):
         files.append(file)
     print(create_mapreduce_chain(files, map_template, reduce_template))
 
+# Pass
+def test_cl_combined(posting_path=""):
+        # Get sample comparisons
+    resume_content = read_txt(resume_file)
+    resume_samples_path = "./resume_samples/"
+    related_samples = search_related_samples(my_job_title, resume_samples_path)
+    sample_tools, tool_names = create_sample_tools(related_samples, "resume")
+
+    job_query  = f"""Research what a {my_job_title} does and output a detailed description of the common skills, responsibilities, education, experience needed."""
+    job_description = get_web_resources(job_query) 
+    if posting_path:
+        prompt_template = """Identity the job position, company then provide a summary of the following job posting:
+            {text} \n
+            Focus on roles and skills involved for this job. Do not include information irrelevant to this specific position.
+        """
+        job_specification = create_summary_chain(posting_path, prompt_template)
+    else:
+        job_specification = ""
+    # Get resume's relevant and irrelevant info for job: few-shot learning works great here
+    query_relevancy = f""" You are an expert resume advisor. 
+    
+     Step 1: Determine the relevant and irrelevant information contained in the resume document delimited with {delimiter} characters.
+
+      resume: {delimiter}{resume_content}{delimiter} \n
+
+      Generate a list of irrelevant information that should not be included in the cover letter and a list of relevant information that should be included in the cover letter.
+       
+      Remember to use either job specification or general job description as your guideline. 
+
+      job specification: {job_specification}
+
+      general job description: {job_description} \n
+
+        Your answer should be detailed and only from the resume. Please also provide your reasoning too. 
+        
+        For example, your answer may look like this:
+
+        Relevant information:
+
+        1. Experience as a Big Data Engineer: using Spark and Python are transferable skills to using Panda in data analysis
+
+        Irrelevant information:
+
+        1. Education in Management of Human Resources is not directly related to skills required for a data analyst 
+
+
+      Step 2:  Sample cover letters are provided in your tools. Research {str(tool_names)} and answer the following question: and answer the following question:
+
+           Make a list of common features these cover letters share. 
+
+        """
+    return generate_multifunction_response(query_relevancy, sample_tools)
+   
+# Pass
+def test_resume_missing(resume_file = "./resume_samples/resume2023.txt", highest_education_level="bachelors of science", work_experience_level="entry level"):
+
+    resume_content = read_txt(resume_file)
+    resume_samples_path = "./resume_samples/"
+    related_samples = search_related_samples(my_job_title, resume_samples_path)
+    sample_tools, tool_names = create_sample_tools(related_samples, "resume")
+    # # Note: retrieval query works best if clear, concise, and detail-dense
+    advice_query = f"""what to include for resume with someone with {highest_education_level} and {work_experience_level} for {my_job_title}"""
+    advices = retrieve_from_db(advice_query)
+
+    query_missing = f"""  You are an expert resume field advisor that specializes in improvement content of resume delimited with {delimiter} characters. 
+
+        resume: {delimiter}{resume_content}{delimiter}. 
+
+    Step 1. Sample resume are provided in your tools. Research {str(tool_names)} and answer the following question:
+
+       List common things these resume have in common. 
+
+       Please be general with your answer and ignore any personal details, locations, names, dates, etc. 
+
+    Common Content: 
+
+    Step 2: Your job is to make a list of missing content in the resume delimited with {delimiter} characters using Common Content from Step 1 and  Expert Advice provided below. 
+
+        Expert Advice: {advices}
+     
+        Ignore all formatting advice and ignore any personal details, dates, school and company names, etc in Common Content. 
+
+        Your answer should be general enough to allow applicant to fill out the missing content with their own information. It is okay if there is nothing missing.
+
+        Missing Content:
+
+        Remember to reference Common Content and Expert Advice when generating Missing Content. Be general enough for applicant to provide their own missing information. 
+     """
+        # Missing Field Content:
+        # - missing dates: the work experience do not have dates of employment
+        # - missing metrics: there is no metrics that showcases performance
+
+    # Your answer should be general without losing details. For example, you should not compare company names but should compare shared work experiences.
+
+
+    # Please output each Step's answer in list format. 
+
+    return generate_multifunction_response(query_missing, sample_tools)
 
 
 
 # test_coverletter_tool()
-# test_resume_tool()
+test_resume_tool()
 
 # test_general_job_description()
 # test_work_experience()
@@ -389,13 +457,14 @@ def test_mapreduce_chain(directory = "./static/resume_evaluation/test/"):
 
 # test_cl_revelancy_query()
 # test_cl_retrieval()
-test_cl_samples_query()
+# test_cl_samples_query()
+# test_cl_combined()
 
-# test_field_samples_query()
 # test_field_relevancy_query()
 # test_field_evaluation()
 # test_field_retrieval()
 # test_search_similar_resume()
 # test_extract_fields()
+# test_resume_missing()
 # test_refine_chain()
 # test_mapreduce_chain()
