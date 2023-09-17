@@ -8,7 +8,7 @@ from langchain.embeddings import OpenAIEmbeddings
 # from langchain.prompts import ChatPromptTemplate
 from langchain import PromptTemplate, LLMChain
 # from langchain.agents import ConversationalChatAgent, Tool, AgentExecutor
-from common_utils import file_loader, check_content
+from common_utils import file_loader, check_content, binary_file_downloader_html, search_all_chat_history
 from langchain_utils import (create_vectorstore, create_summary_chain,
                              retrieve_redis_vectorstore, split_doc, CustomOutputParser, CustomPromptTemplate, create_vs_retriever_tools,
                              create_retriever_tools, retrieve_faiss_vectorstore, merge_faiss_vectorstore, handle_tool_error, create_search_tools, create_wiki_tools)
@@ -63,8 +63,8 @@ from basic_utils import convert_to_txt, read_txt
 from openai_api import get_completion
 from langchain.schema import OutputParserException
 from multiprocessing import Process, Queue, Value
-from generate_cover_letter import cover_letter_generator
-from upgrade_resume import  resume_evaluator
+from generate_cover_letter import cover_letter_generator, create_cover_letter_generator_tool
+from upgrade_resume import  resume_evaluator, create_resume_evaluator_tool
 from langchain.agents.agent_toolkits import create_conversational_retrieval_agent
 from langchain.agents.agent_toolkits import create_retriever_tool
 from typing import List, Dict
@@ -108,7 +108,7 @@ memory_key="chat_history"
 
 class ChatController():
 
-    llm = ChatOpenAI(streaming=True, model_name="gpt-3.5-turbo-0613", callbacks=[StreamingStdOutCallbackHandler()], temperature=0)
+    llm = ChatOpenAI(streaming=True, model_name="gpt-3.5-turbo-0613", callbacks=[StreamingStdOutCallbackHandler()], temperature=0, cache = False)
     embeddings = OpenAIEmbeddings()
     chat_memory = ConversationBufferMemory(llm=llm, memory_key=memory_key, return_messages=True, input_key="input", output_key="output", max_token_limit=memory_max_token)
     # chat_memory = ReadOnlySharedMemory(memory=chat_memory)
@@ -131,48 +131,53 @@ class ChatController():
         """ Initializes main chat, a CHAT_CONVERSATIONAL_REACT_DESCRIPTION agent:  https://python.langchain.com/docs/modules/agents/agent_types/chat_conversation_agent#using-a-chat-model """
     
         # initialize tools
-        # cover_letter_tool = create_cover_letter_generator_tool()
+        cover_letter_tool = create_cover_letter_generator_tool()
         # cover letter generator tool
-        cover_letter_tool = [cover_letter_generator]
-        # resume_advice_tool = create_resume_evaluator_tool()
+        # cover_letter_tool = [cover_letter_generator]
+        resume_evaluator_tool = create_resume_evaluator_tool()
         # resume evaluator tool
-        resume_evaluator_tool = [resume_evaluator]
+        # resume_evaluator_tool = [resume_evaluator]
         # interview mode starter tool
         interview_tool = self.initiate_interview_tool()
         # file_loader_tool = create_file_loader_tool()
         # file loader tool
         working_directory = f"./static/{self.userid}/"
-        # file_loader_tool = [file_loader]
+        file_loader_tool = [file_loader]
         file_sys_tools = FileManagementToolkit(
             root_dir=working_directory, # ensures only the working directory is accessible 
             selected_tools=["read_file", "list_directory"],
         ).get_tools()
         file_sys_tools[0].return_direct = True
         file_sys_tools[1].return_direct = True
+        file_sys_tools[0].description = 'Read file from disk. DO NOT USE THIS TOOL UNLESS YOU ARE TOLD TO DO SO.'
+        file_sys_tools[1].description = 'List files and directories in a specified folder. DO NOT USE THIS TOOL UNLESS YOU ARE TOLD TO DO SO.'
+
+
+        link_download_tool = [binary_file_downloader_html]
         # general vector store tool
-        store = retrieve_faiss_vectorstore("faiss_web_data")
-        retriever = store.as_retriever()
-        general_tool_description = """This is a general purpose database. Use it to answer general job related questions. 
-        Prioritize other tools over this tool. """
-        general_tool= create_retriever_tools(retriever, "faiss_general", general_tool_description)
+        # store = retrieve_faiss_vectorstore("faiss_web_data")
+        # retriever = store.as_retriever()
+        # general_tool_description = """This is a general purpose tool. Use it to answer general job related questions through searching database.
+        # Prioritize other tools over this tool. """
+        # general_tool= create_retriever_tools(retriever, "search_general_database", general_tool_description)
         # web reserach: https://python.langchain.com/docs/modules/data_connection/retrievers/web_research
-        search = GoogleSearchAPIWrapper()
-        embedding_size = 1536  
-        index = faiss.IndexFlatL2(embedding_size)  
-        vectorstore = FAISS(self.embeddings.embed_query, index, InMemoryDocstore({}), {})
-        web_research_retriever = WebResearchRetriever.from_llm(
-            vectorstore=vectorstore,
-            llm=self.llm, 
-            search=search, 
-        )
-        web_tool_description="""This is a web research tool. Use it only when you cannot find answers elsewhere. Always return source information."""
-        web_tool = create_retriever_tools(web_research_retriever, "faiss_web", web_tool_description)
+        # search = GoogleSearchAPIWrapper()
+        # embedding_size = 1536  
+        # index = faiss.IndexFlatL2(embedding_size)  
+        # vectorstore = FAISS(self.embeddings.embed_query, index, InMemoryDocstore({}), {})
+        # web_research_retriever = WebResearchRetriever.from_llm(
+        #     vectorstore=vectorstore,
+        #     llm=self.llm, 
+        #     search=search, 
+        # )
+        # web_tool_description="""This is a web research tool. You should not use it unless you absolutely cannot find answers elsewhere. Always return source information."""
+        # web_tool = create_retriever_tools(web_research_retriever, "search_web", web_tool_description)
         # basic search tool 
         search_tool = create_search_tools("google", 5)
         # wiki tool
         wiki_tool = create_wiki_tools()
         # gather all the tools together
-        self.tools = general_tool + cover_letter_tool + resume_evaluator_tool + web_tool + interview_tool + search_tool + wiki_tool + [tool for tool in file_sys_tools]
+        self.tools =  cover_letter_tool + resume_evaluator_tool + interview_tool + search_tool + wiki_tool + link_download_tool + [tool for tool in file_sys_tools]
         tool_names = [tool.name for tool in self.tools]
 
 
@@ -187,33 +192,33 @@ class ChatController():
         # initialize chat history
         # self.chat_history=[]
         # initiate prompt template
+        # You are provided with information about entities the Human mentioned. If available, they are very important.
         template = """The following is a friendly conversation between a human and an AI. 
+
         The AI is talkative and provides lots of specific details from its context.
           
         If the AI does not know the answer to a question, it truthfully says it does not know. 
 
-        Instruction: {instruction}
+        Always check the relevant file paths before answering a question.
 
-        You are provided with information about entities the Human mentioned. If available, they are very important.
-
-        Always check the relevant entity information before answering a question.
-
-        Relevant entity information: {entities}
+        Relevant file paths: {entities}
 
         You are provided with the following tools, use them whenever possible:
 
+        If you encounter any problems communicating with Human, follow the Instruction below, if relevant. 
+
+        Instruction: {instruction}
         """
 
-        # previous conversation: 
-        # {chat_history}
 
         # Conversation:
         # Human: {input}
         # AI:
 
+
         # OPTION 1: agent = CHAT_CONVERSATIONAL_REACT_DESCRIPTION
         # initialize CHAT_CONVERSATIONAL_REACT_DESCRIPTION agent
-        self.chat_memory.output_key = "output"  
+        # self.chat_memory.output_key = "output"  
         self.chat_agent  = initialize_agent(self.tools, 
                                             self.llm, 
                                             agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION, 
@@ -261,7 +266,7 @@ class ChatController():
 
         # Option 4: agent = conversational retrieval agent
 
-        # template = f"""The following is a friendly conversation between a human and an AI. 
+        # template = """The following is a friendly conversation between a human and an AI. 
         # The AI is talkative and provides lots of specific details from its context.
         #   If the AI does not know the answer to a question, it truthfully says it does not know. 
 
@@ -273,8 +278,9 @@ class ChatController():
 
         #   You are provided with information about entities the Human mentions, if relevant.
 
-        # Relevant entity information:
-        # {self.entities}
+        # Relevant entity information: {entities}
+
+        # {instruction}
         # """
 
         # self.memory = AgentTokenBufferMemory(memory_key="chat_history", llm=self.llm, return_messages=True, input_key="input")
@@ -286,6 +292,7 @@ class ChatController():
         # self.prompt = OpenAIFunctionsAgent.create_prompt(
         #     system_message=system_message,
         #     extra_prompt_messages=[MessagesPlaceholder(variable_name="chat_history")],
+
         # )
         # agent = OpenAIFunctionsAgent(llm=self.llm, tools=self.tools, prompt=self.prompt)
         # self.chat_agent = AgentExecutor(agent=agent, tools=self.tools, memory=self.memory, verbose=True,
@@ -304,7 +311,7 @@ class ChatController():
  
         # It will all the logs as its tools for debugging new errors
         # tool = StructuredTool.from_function(self.debug_error)
-        debug_tools = [self.debug_error] + self.create_search_all_chat_history_tool()
+        debug_tools = [search_all_chat_history]
         # initiate instruct agent: ZERO_SHOT_REACT_DESCRIPTION
         # prefix =  """Your job is to provide the Instructions so that AI assistant would quickly and correctly respond in the future. 
         
@@ -329,14 +336,16 @@ class ChatController():
         # """
         # Your new Instruction will be relayed to the AI assistant so that assistant's goal, which is to satisfy the user in as few interactions as possible.
         # If there is anything that can be improved about the interactions, you should revise the Instructions so that AI Assistant would quickly and correctly respond in the future.
-        if self.mode == "chat":
-            memory = ReadOnlySharedMemory(memory=self.chat_memory)
-        elif self.mode == "interview":
-            memory = ReadOnlySharedMemory(memory=self.interview_memory)
+        memory = ReadOnlySharedMemory(memory=self.chat_memory)
 
+        # Whenver there's an error message, please use the "debug_error" tool.
         system_msg = """You are a meta AI whose job is to provide the Instructions so that your colleague, the AI assistant, would quickly and correctly respond to Humans.
+
+        You are provided with their Current Conversation. If the current conversation is going well, you don't need to provide any Instruction. 
         
-        Whenenver there is miscommunication between Human and your colleague, please provide a new Instruction for the AI assistant to follow so that it can satisfy the Human in as few interactions as possible."""
+        If the current conversation is not going well, please use you tool "search chat history" to search for similar occurences and the solution. 
+     
+        Remember, provide a new Instruction for the AI assistant to follow so that it can satisfy the Human in as few interactions as possible."""
 
 
         template = """Complete the objective as best you can. You have access to the following tools:
@@ -357,10 +366,11 @@ class ChatController():
 
         Begin!
 
-        Chat History: {chat_history}
+        Current Conversation: {chat_history}
 
-        Question: {input}
-        {agent_scratchpad}"""
+        Input: {input}
+        {agent_scratchpad}
+        """
 
 
         prompt = CustomPromptTemplate(
@@ -449,10 +459,12 @@ class ChatController():
 
         try:    
             # BELOW IS USED WITH CONVERSATIONAL RETRIEVAL AGENT (grader_agent and interviewer)
+            response = self.chat_agent({"input": user_input, "chat_history":[], "entities": self.entities, "instruction": self.instruction}, callbacks = [callbacks])
+            # convert dict to string for chat output
+            response = response.get("output", "sorry, something happened, try again.")
             if (update_instruction):
                 self.instruction = self.askMetaAgent()
                 print(self.instruction)
-            response = self.chat_agent({"input": user_input, "chat_history":[], "entities": self.entities, "instruction": self.instruction}, callbacks = [callbacks])
             # response = asyncio.run(self.chat_agent.arun({"input": user_input, "entities": self.entities}, callbacks = [callbacks]))
             # print(f"CHAT AGENT MEMORY: {self.chat_agent.memory.buffer}")
             # update chat history for instruct agent
@@ -469,8 +481,6 @@ class ChatController():
                 # add evaluation and instruction to log
                 self.update_meta_data(evaluation_result)
             
-            # convert dict to string for chat output
-            response = response.get("output", "sorry, something happened, try again.")
         # let instruct agent handle all exceptions with feedback loop
         except Exception as e:
             print(f"ERROR HAS OCCURED IN ASKAI: {e}")
@@ -479,7 +489,7 @@ class ChatController():
             if (update_instruction):
                 query = f""""Debug the error message and provide Instruction for the AI assistant: {error_msg}
                     """        
-                instruction = self.askMetaAgent(query)
+                self.instruction = self.askMetaAgent(query)
                 # self.update_instructions(feedback)
             if evaluate_result:
                 self.update_meta_data(error_msg)
@@ -492,7 +502,7 @@ class ChatController():
         return response
     
 
-    def askMetaAgent(self, query="") -> None:    
+    def askMetaAgent(self, query="Update the Instruction please.") -> None:    
 
         """ Evaluates conversation's effectiveness between AI and Human. Outputs instructions for AI to follow. 
         
@@ -548,20 +558,7 @@ class ChatController():
     #     self.chat_history = messages_to_dict(extracted_messages)
     
 
-    def update_tools(self, tools: List[Tool], agent_type: str) -> None:
 
-        """ Updates tools for different agents. """
-
-        if agent_type == "chat":
-            self.tools += tools
-        elif agent_type == "interview":
-            try:
-                self.interview_tools
-            except AttributeError:
-                self.interview_tools = tools
-            else:
-                self.interview_tools += tools
-        print(f"Succesfully updated tool for {agent_type}")
 
     
     # def create_retriever_tools(self, vectorstore: Any, vs_name: str) -> List[Tool]:   
@@ -603,7 +600,7 @@ class ChatController():
         """ Deletes entities of specific type. """
 
         starting_indices = [m.start() for m in re.finditer(type, self.entities)]
-        end_indices = [m.start() for m in re.finditer("$$$$", self.entities)]
+        end_indices = [m.start() for m in re.finditer("###", self.entities)]
         for i in range(len(starting_indices)):
             self.entities = self.entities.replace(self.entities[starting_indices[i]:end_indices[i]], "")
 
@@ -657,22 +654,9 @@ class ChatController():
         
 
     
-    @tool
-    def debug_error(self, error_message: str) -> str:
 
-        """Useful when you need to debug the cuurent conversation. Use it when you encounter error messages. Input should be in the following format: {error_messages} """
-    
-        return "shorten your prompt"
     
         
-    # TODO: need to test the effective of this debugging tool
-    def create_search_all_chat_history_tool()-> List[Tool]:
-    
-        db = retrieve_faiss_vectorstore("chat_debug")
-        name = "search_all_chat_history"
-        description = """Useful when you want to debug the cuurent conversation referencing historical conversations. Use it especially when debugging error messages. """
-        tools = create_retriever_tools(db.as_retriever(), name, description)
-        return tools
 
 
 

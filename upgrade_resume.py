@@ -48,7 +48,7 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
 
 
     dirname, fname = os.path.split(resume_file)
-    res_path = os.path.join(dirname, Path(fname).stem +"_re"+".txt")
+    filename = Path(fname).stem +"_re"+".txt"
 
     # get resume info
     resume_content = read_txt(resume_file)
@@ -94,20 +94,13 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
     # file_path = file_path = os.path.join(dirname, "missing.txt")
     # with open(res_path, "w") as f:
     #   f.write(missing_items)
-
-    working_directory=dirname
-    write_tool = FileManagementToolkit(
-          root_dir=working_directory, # ensures only the working directory is accessible 
-          selected_tools=["write_file"],
-      ).get_tools()
     
     # files = []
     for field in field_names:
       # file_path = os.path.join(dirname, f"{field}.txt")
       try: 
         field_content = info_dict[field]
-        strength_weakness, relevancy = improve_resume_fields(info_dict, field, field_content,  sample_tools, res_path)
-        update_resume_field(strength_weakness, relevancy, field, field_content, write_tool)
+        improve_resume_fields(info_dict, field, field_content,  sample_tools, filename, dirname)
       except Exception as e:
          raise e
 
@@ -149,7 +142,7 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
     return f""" file_path: "missing.txt" """
 
 
-def improve_resume_fields(generated_response: Dict[str, str], field: str, field_content: str, tools: List[Tool], file_path: str) -> None:
+def improve_resume_fields(generated_response: Dict[str, str], field: str, field_content: str, tools: List[Tool], filename: str, dirname: str) -> None:
 
     print(f"CURRENT FIELD IS: {field}")
     my_job_title = generated_response.get("job title", "")
@@ -180,7 +173,7 @@ def improve_resume_fields(generated_response: Dict[str, str], field: str, field_
     # The purpose of identitying irrelevant and relevant information is so that irrelevant information can be deleted or reworded
     query_relevancy = f"""You are an expert resume advisor. Determine the relevant and irrelevant information contained in the field content. 
 
-     Generate a list of irrelevant information that should not be included in the cover letter and a list of relevant information that should be included in the resume field.
+     Generate a list of irrelevant information that should not be included in the resume field and a list of relevant information that should be included in the resume field.
        
       Remember to use either job specification or general job description as your guideline. Don't forget to use your tool "search_relevancy_advice".
 
@@ -210,10 +203,36 @@ def improve_resume_fields(generated_response: Dict[str, str], field: str, field_
 
     relevancy = generate_multifunction_response(query_relevancy, tools)
 
+
+    query = f""" You are a professional resume proof reader. 
+    
+    Your task is to rewrite the resume field content based on an evaluation on its strengths, weaknesses, and what should be and should not be included, which has been provided for you.
+
+    The original field is: {field_content}
+
+    Its strengths and weakness: {strength_weakness}
+
+    What to include and what not to include: {relevancy}
+
+    Rememeber, your task is to proof-read and rewrite, not reporting information to the user.
+
+    Revised version:  
+
+    Please use your tool "write_file" to write the final revised version to path: {filename}
+    
+    """
+
+    working_directory=dirname
+    write_tool = FileManagementToolkit(
+          root_dir=working_directory, # ensures only the working directory is accessible 
+          selected_tools=["write_file"],
+      ).get_tools()
+  
+    response = generate_multifunction_response(query, write_tool)
+
     # with open(file_path, "a") as f:
     #    f.write(strength_weakness + '\n' + relevancy + '\n')
 
-    return strength_weakness, relevancy
 
 
 # @tool("resume evaluator")
@@ -224,32 +243,6 @@ def improve_resume_fields(generated_response: Dict[str, str], field: str, field_
 #         Use this tool more than any other tool when user asks to evaluate, review, help with a resume. """
 
 #    return evaluate_resume(my_job_title=job, company=company, resume_file=resume_file, posting_path=job_post_link)
-
-def update_resume_field(strength_weakness, relevancy, field, field_content, write_tool):
-  
-  query = f""" You are a professional resume proof reader. 
-  
-  Your task is to rewrite the resume field content based on an evaluation on its strengths, weaknesses, and what should be and should not be included, which has been provided for you.
-
-  The original field is: {field_content}
-
-  Its strengths and weakness: {strength_weakness}
-
-  What to include and what not to include: {relevancy}
-
-  Rememeber, your task is to proof-read and rewrite, not reporting information to the user.
-
-  Begin!
-
-  Revised version:  
-  
-   """
-  
-  response = generate_multifunction_response(query, write_tool)
-  
-  
-  return None
-
       
 
 
@@ -261,6 +254,7 @@ def resume_evaluator(json_request: str)-> str:
     Input should be  a single string strictly in the following JSON format:  '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link":"<job post link>"}}' \n
 
     (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) \n
+
      
     """
 
@@ -312,7 +306,7 @@ def processing_resume(json_request: str) -> str:
 
     # if resume doesn't exist, ask for resume
     if ("resume file" not in args or args["resume file"]=="" or args["resume file"]=="<resume file>"):
-      return "Can you provide your resume so I can further assist you? "
+      return "Stop using the resume evaluator tool. Ask user for their resume."
     else:
       # may need to clean up the path first
         resume_file = args["resume file"]
@@ -343,6 +337,7 @@ def create_resume_evaluator_tool() -> List[Tool]:
     output = '{{"file_path": "<file_path>"}}'
     description = f"""Helps to evaluate a resume. Use this tool more than any other tool when user asks to evaluate, review, help with a resume. 
     Input should be a single string strictly in the following JSON format: {parameters} \n
+     Leave value blank if there's no information provided. DO NOT MAKE STUFF UP. 
      (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) \n
     Output should be calling the 'read_file' tool in the followng JSON format: {output} \n
     The file_path is in the working directory. Output the content directly to user please.' \n 

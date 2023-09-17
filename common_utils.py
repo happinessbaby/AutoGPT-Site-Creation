@@ -651,7 +651,7 @@ class FeastPromptTemplate(StringPromptTemplate):
 def file_loader(json_request: str) -> str:
 
     """Outputs a file. Use this whenever you need to load a file. 
-    Do not use this for evaluation purposes.
+    DO NOT USE THIS TOOL UNLESS YOU ARE TOLD TO DO SO.
     Input should be a single string in the following JSON format: '{{"file": "<file>"}}' \n """
 
     try:
@@ -671,7 +671,7 @@ def file_loader(json_request: str) -> str:
 @tool("get download link", return_direct=True)
 def binary_file_downloader_html(json_request: str):
 
-    """ Gets the download link from file. 
+    """ Gets the download link from file. DO NOT USE THIS TOOL UNLESS YOU ARE TOLD TO DO SO.
     
     Input should be a strictly single string in the following JSON format: '{{"file path": "<file path>"}}' """
 
@@ -688,7 +688,7 @@ def binary_file_downloader_html(json_request: str):
     
 @tool
 def docx_writer():
-    """ Writes to a docx file. 
+    """ Writes to a docx file. DO NOT USE THIS TOOL UNLESS YOU ARE TOLD TO DO SO.
     Input should be a single string in the following JSON format: '{{"file path": "<file path>", "field name":"<field name>", "content":"<content>"}}' \n"""
 
 # https://python.langchain.com/docs/modules/agents/agent_types/self_ask_with_search

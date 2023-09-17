@@ -270,7 +270,7 @@ def processing_cover_letter(json_request: str) -> None:
 
     # if resume doesn't exist, ask for resume
     if ("resume file" not in args or args["resume file"]=="" or args["resume file"]=="<resume file>"):
-      return "Can you provide your resume so I can further assist you? "
+      return "Stop using the cover letter generator tool. Ask user for their resume."
     else:
       # may need to clean up the path first
         resume_file = args["resume file"]
@@ -301,18 +301,18 @@ def create_cover_letter_generator_tool() -> List[Tool]:
     name = "cover_letter_generator"
     parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link": "<job post link>"}}'
     output =  '{{"file_path": "<file_path>"}}'
-    description = f"""Helps to generate a cover letter. Use this tool more than any other tool when user asks to write a cover letter.  
+    description = f"""Helps to generate a cover letter. Use this tool more than any other tool when user asks to write a cover letter. 
      Input should be a single string strictly in the following JSON format: {parameters} \n
+     Leave value blank if there's no information provided. DO NOT MAKE STUFF UP. 
     (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) 
     Output should be using the "get download link" tool in the following single string JSON format: {output}
-
     """
     tools = [
         Tool(
         name = name,
         func =processing_cover_letter,
         description = description, 
-        verbose = False,
+        verbose = True,
         handle_tool_error=True,
         )
     ]
