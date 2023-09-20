@@ -98,15 +98,7 @@ class Chat():
                 self.new_chat = st.session_state.basechat
             except AttributeError as e:
                 raise e
-            
-            try: 
-                temp_dir = temp_path+st.session_state.userid
-                user_dir = save_path+st.session_state.userid
-                os.mkdir(temp_dir)
-                os.mkdir(user_dir)
-            except FileExistsError:
-                pass
-
+        
 
 
             # Initialize chat history
@@ -260,56 +252,64 @@ class Chat():
                     message(st.session_state['questions'][i], is_user=True, key=str(i) + '_user',  avatar_style="initials", seed="Yueqi", allow_html=True)
 
 
-    def mode_popup(self, mode):
-        if mode=="interview":
-            if "interview_state" not in st.session_state:
-                modal = Modal(key="form_popup",title="""Your interview session will start. 
-                              Please upload any interview material if you have not done so.""")
-                with modal.container():
-                    # with st.form( key='interview_form', clear_on_submit=True):
-                    #     st.file_uploader(label="Upload your file",
-                    #                                     type=["pdf","odt", "docx","txt", "zip", "pptx"], 
-                    #                                     key = "interview_files",
-                    #                                     accept_multiple_files=True)
-                    #     st.form_submit_button(label='Submit', on_click=self.interview_form_callback)
-                    #     # TODO: add links capability
-                    col1, buffer, col2= st.columns([5, 5, 5])
-                    with col1:
-                        back = st.button("take me back to main chat")
-                    with col2:
-                        confirm = st.button("okay, take me to it!")
-                    # with col3:
-                    # skip = st.button("skip")
-                    # if skip:
-                    #     st.session_state.mode = "interview"
-                    if back:
-                        print("back is pressed")
-                        st.session_state.mode = "chat"
-                    if confirm:
-                        print("confirm is pressed")          
-                        st.session_state.mode = "interview"
-                        st.experimental_rerun()
-                    #TODO right now close button mode is still interview, need to switch to chat
-                    # if modal.close():
-                    #     st.session_state.mode = "chat"
-        elif mode == "chat":
-            if "chat_state" not in st.session_state:
-                modal = Modal(key="popup_chat", title="Are you sure you want to go back to the main chat?")
-                with modal.container():
-                    col1, buffer, col2= st.columns([5, 5, 5])
-                    with col1:
-                        yes = st.button("yes")
-                    with col2:
-                        no = st.button("no")
-                    if yes:
-                        st.session_state.mode = "chat"
-                        st.experimental_rerun()
-                    if no:
-                        st.session_state.mode = "interview"
+    # def mode_popup(self, mode):
+    #     if mode=="interview":
+    #         if "interview_state" not in st.session_state:
+    #             modal = Modal(key="form_popup",title="""Your interview session will start. 
+    #                           Please upload any interview material if you have not done so.""")
+    #             with modal.container():
+    #                 # with st.form( key='interview_form', clear_on_submit=True):
+    #                 #     st.file_uploader(label="Upload your file",
+    #                 #                                     type=["pdf","odt", "docx","txt", "zip", "pptx"], 
+    #                 #                                     key = "interview_files",
+    #                 #                                     accept_multiple_files=True)
+    #                 #     st.form_submit_button(label='Submit', on_click=self.interview_form_callback)
+    #                 #     # TODO: add links capability
+    #                 col1, buffer, col2= st.columns([5, 5, 5])
+    #                 with col1:
+    #                     back = st.button("take me back to main chat")
+    #                 with col2:
+    #                     confirm = st.button("okay, take me to it!")
+    #                 # with col3:
+    #                 # skip = st.button("skip")
+    #                 # if skip:
+    #                 #     st.session_state.mode = "interview"
+    #                 if back:
+    #                     print("back is pressed")
+    #                     st.session_state.mode = "chat"
+    #                 if confirm:
+    #                     print("confirm is pressed")          
+    #                     st.session_state.mode = "interview"
+    #                     st.experimental_rerun()
+    #                 #TODO right now close button mode is still interview, need to switch to chat
+    #                 # if modal.close():
+    #                 #     st.session_state.mode = "chat"
+    #     elif mode == "chat":
+    #         if "chat_state" not in st.session_state:
+    #             modal = Modal(key="popup_chat", title="Are you sure you want to go back to the main chat?")
+    #             with modal.container():
+    #                 col1, buffer, col2= st.columns([5, 5, 5])
+    #                 with col1:
+    #                     yes = st.button("yes")
+    #                 with col2:
+    #                     no = st.button("no")
+    #                 if yes:
+    #                     st.session_state.mode = "chat"
+    #                     st.experimental_rerun()
+    #                 if no:
+    #                     st.session_state.mode = "interview"
 
 
     def form_callback(self):
-        
+
+        try: 
+            temp_dir = temp_path+st.session_state.userid
+            user_dir = save_path+st.session_state.userid
+            os.mkdir(temp_dir)
+            os.mkdir(user_dir)
+        except FileExistsError:
+            pass
+
         try:
             job = st.session_state.job
             self.new_chat.update_entities(f"job:{job} /n ###")
@@ -334,7 +334,7 @@ class Chat():
 
 
 
-
+    @st.cache()
     def process_file(self, uploaded_files: Any) -> None:
 
         """ Processes user uploaded files including converting all format to txt, checking content safety, and categorizing content type  """
@@ -388,26 +388,26 @@ class Chat():
         if content_type != "other":
             entity = f"""{content_type} file: {file_path} /n ###"""
             self.new_chat.update_entities(entity)
-            name = content_type.strip().replace(" ", "_")
-            vs_name = f"faiss_{name}_{st.session_state.userid}"
-            vs = create_vectorstore("faiss", file_path, "file", vs_name)
-            tool_name = "search_" + vs_name.removeprefix("faiss_").removesuffix(f"_{st.session_state.userid}")
-            tool_description =  f"""Useful for searching documents with respect to content type {content_type}.
-                Do not use this tool to load any files or documents.  """ 
-            tools = create_retriever_tools(vs.as_retriever(), tool_name, tool_description)
-            self.new_chat.update_tools(tool_name)
+            # name = content_type.strip().replace(" ", "_")
+            # vs_name = f"faiss_{name}_{st.session_state.userid}"
+            # vs = create_vectorstore("faiss", file_path, "file", vs_name)
+            # tool_name = "search_" + vs_name.removeprefix("faiss_").removesuffix(f"_{st.session_state.userid}")
+            # tool_description =  f"""Useful for searching documents with respect to content type {content_type}.
+            #     Do not use this tool to load any files or documents.  """ 
+            # tools = create_retriever_tools(vs.as_retriever(), tool_name, tool_description)
+            # self.new_chat.update_tools(tool_name)
    
         else:
             if content_topics: 
                 entity = f"""study material topics: {str(content_topics)} """
                 self.new_chat.update_entities(entity)
-            vs_name = f"faiss_study_material_{st.session_state.userid}"
-            vs = merge_faiss_vectorstore(vs_name, file_path)
-            tool_name = "search_" + vs_name.removeprefix("faiss_").removesuffix(f"_{st.session_state.userid}")
-            tool_description =  f"""Used for searching material with respect to content topics such as {content_topics}. 
-                Do not use this tool to load any files or documents. This should be used only for searching and generating questions and answers of the relevant materials and topics. """
-            tools = create_retriever_tools(vs.as_retriever(), tool_name, tool_description)
-            self.new_chat.update_tools(tools)
+            # vs_name = f"faiss_study_material_{st.session_state.userid}"
+            # vs = merge_faiss_vectorstore(vs_name, file_path)
+            # tool_name = "search_" + vs_name.removeprefix("faiss_").removesuffix(f"_{st.session_state.userid}")
+            # tool_description =  f"""Used for searching material with respect to content topics such as {content_topics}. 
+            #     Do not use this tool to load any files or documents. This should be used only for searching and generating questions and answers of the relevant materials and topics. """
+            # tools = create_retriever_tools(vs.as_retriever(), tool_name, tool_description)
+            # self.new_chat.update_tools(tools)
             
 
     

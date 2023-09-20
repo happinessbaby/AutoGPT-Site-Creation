@@ -118,23 +118,23 @@ class Interview():
                         add_vertical_space(1)
                         st.form_submit_button(label='Submit', on_click=self.form_callback)  
 
-                    col1, col2 = st.columns([8, 3])
-                    # with col1:
-                    #     okay = st.button("okay, I've done so.")
-                    with col2:
-                        skip = st.button("skip")
-                    if skip:
-                        # if "baseinterview" not in st.session_state:
-                        #     new_interview = InterviewController(st.session_state.userid)
-                        #     st.session_state["baseinterview"] = new_interview  
-                        st.experimental_rerun()
+                    # col1, col2 = st.columns([8, 3])
+                    # # with col1:
+                    # #     okay = st.button("okay, I've done so.")
+                    # with col2:
+                    #     skip = st.button("skip")
+                    # if skip:
+                    #     if "baseinterview" not in st.session_state:
+                    #         new_interview = InterviewController(st.session_state.userid)
+                    #         st.session_state["baseinterview"] = new_interview      
+
+                    #         st.experimental_rerun()
             
 
             else:  
                 if "baseinterview" not in st.session_state:
                     new_interview = InterviewController(st.session_state.userid)
-                    st.session_state["baseinterview"] = new_interview  
-                            # st.experimental_rerun() 
+                    st.session_state["baseinterview"] = new_interview      
                 try:
                     self.new_interview = st.session_state.baseinterview
                 except AttributeError as e:
@@ -248,6 +248,10 @@ class Interview():
 
         try: 
             vs_dir=f"./faiss/{st.session_state.userid}/"
+            temp_dir = temp_path+st.session_state.userid
+            user_dir = save_path+st.session_state.userid
+            os.mkdir(temp_dir)
+            os.mkdir(user_dir)
             os.mkdir(vs_dir)
         except FileExistsError:
             pass
@@ -260,18 +264,17 @@ class Interview():
             link = st.session_state.interview_links
             self.process_link(link)
         except Exception:
-            pass
+            pass 
 
         # if "baseinterview" not in st.session_state:
         #     new_interview = InterviewController(st.session_state.userid)
-        #     st.session_state["baseinterview"] = new_interview  
-
+        #     st.session_state["baseinterview"] = new_interview      
 
 
     def process_file(self, uploaded_files: Any) -> None:
 
         """ Processes user uploaded files including converting all format to txt, checking content safety, and categorizing content type  """
-
+    
         for uploaded_file in uploaded_files:
             file_ext = Path(uploaded_file.name).suffix
             filename = str(uuid.uuid4())+file_ext
@@ -284,15 +287,7 @@ class Interview():
             content_safe, content_type, content_topics = check_content(end_path)
             print(content_type, content_safe, content_topics) 
             if content_safe:
-                # self.add_to_chat(content_type, content_topics, end_path)
-                if content_type!="other":
-                    name = content_type.strip().replace(" ", "_")
-                    vs_name = f"faiss_{name}_{st.session_state.userid}"
-                    vs = create_vectorstore("faiss", end_path, "file", vs_name)
-                else:
-                    vs_name = f"faiss_interview_material_{st.session_state.userid}"
-                    vs = merge_faiss_vectorstore(vs_name, end_path)
-                vs.save_local(f"./faiss/{st.session_state.userid}/{vs_name}")
+                self.update_vectorstore(content_type, end_path)
             else:
                 print("file content unsafe")
                 os.remove(end_path)
@@ -306,17 +301,23 @@ class Interview():
         if (retrieve_web_content(posting, save_path = end_path)):
             content_safe, content_type, content_topics = check_content(end_path)
             if content_safe:
-                if content_type!="other":
-                    name = content_type.strip().replace(" ", "_")
-                    vs_name = f"faiss_{name}_{str(uuid.uuid4())}"
-                    vs = create_vectorstore("faiss", end_path, "file", vs_name)
-                else:
-                    vs_name = f"faiss_interview_material_{str(uuid.uuid4())}"
-                    vs = merge_faiss_vectorstore(vs_name, end_path)
-                vs.save_local(f"./faiss/{st.session_state.userid}/{vs_name}")
+                self.update_vectorstore(content_type, end_path)
             else:
                 print("link content unsafe")
                 os.remove(end_path)
+    
+    def update_vectorstore(self, content_type:str, end_path:str): 
+
+        if content_type!="other":
+            name = content_type.strip().replace(" ", "_")
+            vs_name = f"faiss_{name}_{st.session_state.userid}"
+            vs = create_vectorstore("faiss", end_path, "file", vs_name)
+        else:
+            vs_name = f"faiss_interview_material_{st.session_state.userid}"
+            vs = merge_faiss_vectorstore(vs_name, end_path)
+        vs.save_local(f"./faiss/{st.session_state.userid}/{vs_name}")
+
+
 
 
     # def add_to_chat(self, content_type: str, content_topics: set, file_path: str) -> None:
