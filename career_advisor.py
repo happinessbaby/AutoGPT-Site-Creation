@@ -108,7 +108,7 @@ memory_key="chat_history"
 
 class ChatController():
 
-    llm = ChatOpenAI(streaming=True, model_name="gpt-3.5-turbo-0613", callbacks=[StreamingStdOutCallbackHandler()], temperature=0, cache = False)
+    llm = ChatOpenAI(streaming=True, callbacks=[StreamingStdOutCallbackHandler()], temperature=0, cache = False)
     embeddings = OpenAIEmbeddings()
     chat_memory = ConversationBufferMemory(llm=llm, memory_key=memory_key, return_messages=True, input_key="input", output_key="output", max_token_limit=memory_max_token)
     # chat_memory = ReadOnlySharedMemory(memory=chat_memory)
@@ -138,7 +138,7 @@ class ChatController():
         # resume evaluator tool
         # resume_evaluator_tool = [resume_evaluator]
         # interview mode starter tool
-        interview_tool = self.initiate_interview_tool()
+        # interview_tool = self.initiate_interview_tool()
         # file_loader_tool = create_file_loader_tool()
         # file loader tool
         working_directory = f"./static/{self.userid}/"
@@ -177,7 +177,7 @@ class ChatController():
         # wiki tool
         wiki_tool = create_wiki_tools()
         # gather all the tools together
-        self.tools =  cover_letter_tool + resume_evaluator_tool + interview_tool + search_tool + wiki_tool + link_download_tool + [tool for tool in file_sys_tools]
+        self.tools =  cover_letter_tool + resume_evaluator_tool + search_tool + wiki_tool + link_download_tool + [tool for tool in file_sys_tools]
         tool_names = [tool.name for tool in self.tools]
 
 
@@ -459,6 +459,7 @@ class ChatController():
 
         try:    
             # BELOW IS USED WITH CONVERSATIONAL RETRIEVAL AGENT (grader_agent and interviewer)
+            print([tools.name for tools in self.tools])
             response = self.chat_agent({"input": user_input, "chat_history":[], "entities": self.entities, "instruction": self.instruction}, callbacks = [callbacks])
             # convert dict to string for chat output
             response = response.get("output", "sorry, something happened, try again.")
@@ -582,16 +583,21 @@ class ChatController():
     #     print(f"Succesfully created interview material tool: {tool_name}")
 
     #     return tool
+    def update_tools(self, tools:List[Tool]) -> None:
+
+        """ Update tools for chat agent."""
+
+        self.tools += tools
+        print(f"Succesfully updated tool {[t.name for t in tools]}for chat agent.")
 
 
     def update_entities(self,  text:str) -> None:
 
         """ Updates entities list for main chat agent. Entities are files user loads or topics of the files. """
 
-        if "resume" in text:
-            self.delete_entities("resume")
-        if "cover letter" in text:
-            self.delete_entities("cover letter")
+        entity_type = text.split(":")[0]
+        print(f"Entity type: {entity_type}")
+        self.delete_entities(entity_type)
         self.entities += f"\n{text}\n"
         print(f"Successfully added entities {self.entities}.")
 
@@ -599,10 +605,11 @@ class ChatController():
 
         """ Deletes entities of specific type. """
 
+        delimiter = "###"
         starting_indices = [m.start() for m in re.finditer(type, self.entities)]
-        end_indices = [m.start() for m in re.finditer("###", self.entities)]
+        end_indices = [m.start() for m in re.finditer(delimiter, self.entities)]
         for i in range(len(starting_indices)):
-            self.entities = self.entities.replace(self.entities[starting_indices[i]:end_indices[i]], "")
+            self.entities = self.entities.replace(self.entities[starting_indices[i]:end_indices[i]+len(delimiter)], "")
 
     # def update_instructions(self, meta_output:str) -> None:
     #     delimiter = "Instructions: "
@@ -620,37 +627,37 @@ class ChatController():
             print(f"Successfully updated meta data: {data}")
     
 
-    def initiate_interview_tool(self) -> List[Tool]:
+    # def initiate_interview_tool(self) -> List[Tool]:
 
-        """ Agent tool used to initialized the interview session."""
+    #     """ Agent tool used to initialized the interview session."""
         
-        name = "interview_starter"
-        parameters = '{{"interview topic": "<interview topic>"}}'
-        description = f"""Initiates the interview process.
-            Use this tool whenever Human wants to conduct a mock interview. Do not use this tool for study purposes or answering interview questions. 
-            Input should be a single string strictly in the following JSON format: {parameters} \n
-            Output should be asking user confirmation to proceed to the interview process and if they could upload any interview material if they have not already done so."""
-        tools = [
-            Tool(
-            name = name,
-            func = self.interview_starter,
-            description = description, 
-            verbose = False,
-            handle_tool_error=handle_tool_error,
-            )
-        ]
-        print("Succesfully created interview initiator tool.")
-        return tools
+    #     name = "interview_starter"
+    #     parameters = '{{"interview topic": "<interview topic>"}}'
+    #     description = f"""Initiates the interview process.
+    #         Use this tool whenever Human wants to conduct a mock interview. Do not use this tool for study purposes or answering interview questions. 
+    #         Input should be a single string strictly in the following JSON format: {parameters} \n
+    #         Output should be asking user to confirm that they wish to proceed to the interview process."""
+    #     tools = [
+    #         Tool(
+    #         name = name,
+    #         func = self.interview_starter,
+    #         description = description, 
+    #         verbose = False,
+    #         handle_tool_error=handle_tool_error,
+    #         )
+    #     ]
+    #     print("Succesfully created interview initiator tool.")
+    #     return tools
     
-    def interview_starter(self, json_request:str) -> str:
+    # def interview_starter(self, json_request:str) -> str:
 
-        self.topics = ""
-        try:
-            args = json.loads(json_request)
-            self.topics = args["interview topic"]
-        except Exception:
-            self.topics = ""
-        self.mode = "interview"
+    #     self.topics = ""
+    #     try:
+    #         args = json.loads(json_request)
+    #         self.topics = args["interview topic"]
+    #     except Exception:
+    #         self.topics = ""
+    #     self.mode = "interview"
         
 
     

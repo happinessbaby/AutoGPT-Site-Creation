@@ -19,20 +19,12 @@ from typing import Any
 from langchain.chat_models import ChatOpenAI
 from langchain.llms import OpenAI
 from langchain.embeddings import OpenAIEmbeddings
-# from langchain.prompts import ChatPromptTemplate
-from langchain import PromptTemplate, LLMChain
-# from langchain.agents import ConversationalChatAgent, Tool, AgentExecutor
 from common_utils import file_loader, check_content
 from langchain_utils import (create_vectorstore, create_summary_chain,
                              retrieve_redis_vectorstore, split_doc, CustomOutputParser, CustomPromptTemplate, create_vs_retriever_tools,
                              create_retriever_tools, retrieve_faiss_vectorstore, merge_faiss_vectorstore, handle_tool_error, create_search_tools, create_wiki_tools)
 # from langchain.prompts import BaseChatPromptTemplate
 from langchain.agents import Tool, AgentExecutor, LLMSingleActionAgent, AgentOutputParser
-# from langchain.experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
-# from langchain.schema import AgentAction, AgentFinish, HumanMessage
-# from typing import List, Union
-# import re
-# from langchain import LLMChain
 from langchain.memory import ConversationBufferMemory, ReadOnlySharedMemory
 from langchain.agents import initialize_agent
 from langchain.agents import AgentType, Tool, load_tools
@@ -63,8 +55,6 @@ from basic_utils import convert_to_txt, read_txt
 from openai_api import get_completion
 from langchain.schema import OutputParserException
 from multiprocessing import Process, Queue, Value
-from generate_cover_letter import cover_letter_generator
-from upgrade_resume import  resume_evaluator
 from langchain.agents.agent_toolkits import create_conversational_retrieval_agent
 from langchain.agents.agent_toolkits import create_retriever_tool
 from typing import List, Dict
@@ -85,11 +75,17 @@ _ = load_dotenv(find_dotenv()) # read local .env file
 memory_key="chat_history"
 memory_max_token = 500
 log_path = os.environ["LOG_PATH"]
+# set recording parameters
+duration = 5 # duration of each recording in seconds
+fs = 44100 # sample rate
+channels = 1 # number of channel
+# Code for audio part: https://github.com/VRSEN/langchain-agents-tutorial/blob/main/main.py
+
 
 class InterviewController():
 
-    llm = ChatOpenAI(streaming=True, model_name="gpt-3.5-turbo-0613", callbacks=[StreamingStdOutCallbackHandler()], temperature=0)
-    langchain.llm_cache = InMemoryCache()
+    llm = ChatOpenAI(streaming=True,  callbacks=[StreamingStdOutCallbackHandler()], temperature=0)
+    # langchain.llm_cache = InMemoryCache()
     embeddings = OpenAIEmbeddings()
     # chat_memory = ReadOnlySharedMemory(memory=chat_memory)
     # initialize new memory (shared betweeen interviewer and grader_agent)
@@ -133,36 +129,61 @@ class InterviewController():
         """
  
            
-        interview_stopper_tool = self.ends_interview_tool()
-        # if no study material uploaded, there's no interview tools to start with.
+        # interview_stopper_tool = self.ends_interview_tool()h.
+
+        wiki_tool = create_wiki_tools()
+        self.interview_tools = wiki_tool
+        # load vector store
+        vs_directory = f"./faiss/{self.userid}/"
         try:
-            self.interview_tools
-        except AttributeError:
-            self.interview_tools = interview_stopper_tool
-        else:
-            self.interview_tools += interview_stopper_tool
+            subfolders= [f.path for f in os.scandir(vs_directory) if f.is_dir()]
+            for dirname in list(subfolders):
+                vs = FAISS.load_local(dirname, self.embeddings)
+                # suffix = dirname.rfind("_")
+                # tool_name = "search_" + dirname[:suffix].removeprefix(vs_directory)
+                tool_name = "search_" + dirname.removeprefix(vs_directory).removesuffix(f"_{self.userid}")
+                tool_description =  """Useful for generating personalized interview questions and answers. 
+                    Use this tool more than any other tool during a mock interview session when asking personal questions such as work experience, personal projects, tell me about yourself.
+                    Do not use this tool to load any files or documents.  """ 
+                tools = create_vs_retriever_tools(vs, tool_name, tool_description)
+                self.interview_tools+=tools
+        except FileNotFoundError:
+            pass
+        
+        # try:
+        #     self.interview_tools
+        # except AttributeError:
+        #     self.interview_tools = wiki_tool
+        # else:
+        #     self.interview_tools += wiki_tool     
+
 
             # Human may also have asked for a specific interview topic: {topic}
         #initialize interviewer agent
         template =   f"""
-            You are an AI job interviewer who asks Human interview questions. 
+            You are an AI job interviewer. 
 
-            The specific interview content which you're to research for making personalized interview questions  is contained in the tool "search_interview_material", if available.
+            The interview content is contained in the tool "search_interview_material", if available.
 
+            Personal information about the applicant is contained in the tool "search_resume", if available.
 
-            If the Human is asking about other things instead of answering an interview question, steer them back to the interview process.
+            Job specific information is contained in the tool "search_job_posting", if available. 
 
             As an interviewer, you do not need to assess Human's response to your questions. Their response will be sent to a professional grader.         
 
-            Sometimes you will be provided with the professional grader's feedback. They will be handed out to the Human at the end of the session. You should ignore them unless Huamns wants some immediate feedbacks.  
+            Sometimes you will be provided with the professional grader's feedback. They will be handed out to the Human at the end of the session. You should ignore them. 
 
-            Always remember your role as an interviewer. Unless you're told to stop interviewing, you should not stop asking interview questions in the format: 
+            Always remember your role as an interviewer. Unless you're told to stop interviewing, you should not stop asking interview questions in the format:
 
             Question: <new interview question>
 
-            You should ask a few personal questions at the start of the interview. Therefore, you should research the candidate's resume, cover letter, or profile too, if the relevant tools are available. 
+            Remmeber to use all of your tools to your advantage when generating interview questions. Most of your questions should come from using the tools.
 
-            Sometimes you are also provided with the job position information and company information. Please do not stop asking questions until the end of the interview session. 
+            Please do not stop asking questions unless you are specifically told to do so. 
+
+            If the Human is asking about other things instead of answering an interview question, please steer them back to the interview process.
+
+            Also, if Human says they want to end the interview, you should use the tool "interview_stopper" to end the interview session. 
               
 
            """
@@ -177,6 +198,7 @@ class InterviewController():
             extra_prompt_messages=[MessagesPlaceholder(variable_name="chat_history")]
             )
 
+        print(f"XXXXXXXXXXXx{[tools.name for tools in self.interview_tools]}")
         agent = OpenAIFunctionsAgent(llm=self.llm, tools=self.interview_tools, prompt=prompt)
 
         # messages = chat_prompt.format_messages(
@@ -214,11 +236,19 @@ class InterviewController():
           
           Access your memory and retrieve the very last piece of the conversation, if available.
 
-          Determine if the AI has asked an interview questio. If it has, you are to grade the Human input based on how well it answers the question.
+          Determine if the AI has asked an interview question. If it has, you are to grade the Human input based on how well it answers the question.
 
-          You will need to use your tool "search_interview_material", if relevant, to search for the correct answer to the interview question.
+          Otherwise, respond with the phrase "skip" only.
+
+           The interview content is contained in the tool "search_interview_material", if available.
+
+            Personal information about the applicant is contained in the tool "search_resume", if available.
+
+            Job specific information is contained in the tool "search_job_posting", if available. 
         
-          If the answer is cannot be found in the your search, use other tools or answer to your best knowledge. 
+            Use these tools to search for the correct answer.
+
+          If the answer cannot be found in the your search, use other tools or answer to your best knowledge. 
 
           Remember, the Human may not know the answer or may have answered the question incorrectly. Therefore it is important that you provide an informative feedback to the Human's response in the format:
 
@@ -226,7 +256,7 @@ class InterviewController():
 
           Negative Feedback: <in which ways the Human failed to answer the question>
 
-          If to your best knowledge the very last piece of conversation does not contain an interview question, do not provide any feedback since you only grades interview questions. 
+          Also, if Human says they want to end the interview, you should use the tool "interview_stopper" to end the interview session. 
 
         
             """
@@ -251,7 +281,7 @@ class InterviewController():
         wait=wait_exponential(multiplier=1, min=4, max=10),  # Exponential backoff between retries
         stop=stop_after_attempt(5)  # Maximum number of retry attempts
     )
-    def askAI(self, userid:str, user_input:str, callbacks=None,) -> str:
+    def askAI(self, user_input: str, callbacks=None,) -> str:
 
         """ Main function that processes all agents' conversation with user.
          
@@ -275,10 +305,13 @@ class InterviewController():
             # BELOW IS USED WITH CONVERSATIONAL RETRIEVAL AGENT (grader_agent and interviewer)
             # if (update_instruction):
             #     instruction = self.askMetaAgent()
-            #     print(instruction)           
+            #     print(instruction) 
             grader_feedback = self.grader_agent({"input":user_input}).get("output", "")
-            print(f"GRADER FEEDBACK: {grader_feedback}")
-            response = self.interview_agent({"input":user_input})    
+            # print(f"GRADER FEEDBACK: {grader_feedback}")
+            print(f"User Voice Input: {user_input}")
+            response = self.interview_agent({"input":user_input})
+            response = response.get("output", "sorry, something happened, try again.")        
+            # response = self.interview_agent({"input":user_input})    
             # if (evaluate_result):
             #     evalagent_q = Queue()
             #     evalagent_p = Process(target = self.askEvalAgent, args=(response, evalagent_q, ))
@@ -289,7 +322,6 @@ class InterviewController():
             #     self.update_meta_data(evaluation_result)
             
             # convert dict to string for chat output
-            response = response.get("output", "sorry, something happened, try again.")
         # let instruct agent handle all exceptions with feedback loop
         except Exception as e:
             print(f"ERROR HAS OCCURED IN ASKAI: {e}")
@@ -302,7 +334,7 @@ class InterviewController():
                 # self.update_instructions(feedback)
             # if evaluate_result:
             #     self.update_meta_data(error_msg)
-            self.askAI(userid, user_input, callbacks)        
+            self.askAI(user_input, callbacks)        
 
         # pickle memory (sanity check)
         # with open('conv_memory/' + userid + '.pickle', 'wb') as handle:
@@ -310,36 +342,48 @@ class InterviewController():
             # print(f"Sucessfully pickled conversation: {chat_history}")
         return response
     
+    
+    def update_tools(self, tools: List[Tool]) -> None:
+
+        """ Updates interview tools, which are study material or resume converted to vectore store retriever as tools """
+        try:
+            self.interview_tools
+        except AttributeError:
+            self.interview_tools = tools
+        else:
+            self.interview_tools += tools
+        print(f"Succesfully updated tool {[t.name for t in tools]}for interview agent.")
+    
         
 
-    def ends_interview_tool(self) -> List[Tool]:
+    # def ends_interview_tool(self) -> List[Tool]:
 
-        """ Agent tool used to end the interview session."""
+    #     """ Agent tool used to end the interview session."""
         
-        name = "interview_stopper"
-        parameters = '{{"end interivew": "<end interview>"}}'
-        description = f"""Ends the interview process.Use this whenever user asks to end the interview session or asks help with other things.
-            If user asks for help with resume, job search, or cover letter, use this tool to end the interview.   
-            Input should be empty  \n
-             """
-        tools = [
-            Tool(
-            name = name,
-            func = self.interview_stopper,
-            description = description, 
-            verbose = False,
-            handle_tool_error=handle_tool_error,
-            )
-        ]
-        print("Succesfully created interview initiator tool.")
-        return tools
+    #     name = "interview_stopper"
+    #     parameters = '{{"end interivew": "<end interview>"}}'
+    #     description = f"""Ends the interview process.Use this whenever user asks to end the interview session or go back to the main chat. 
+    #         Do not use it in any other circumstances.  
+    #         Input should be empty  \n
+    #          """
+    #     tools = [
+    #         Tool(
+    #         name = name,
+    #         func = self.interview_stopper,
+    #         description = description, 
+    #         verbose = False,
+    #         handle_tool_error=handle_tool_error,
+    #         )
+    #     ]
+    #     print("Succesfully created interview initiator tool.")
+    #     return tools
 
 
-    def interview_stopper(self, json_request:str) -> str:
+    # def interview_stopper(self, json_request:str) -> str:
 
-        # try:
-        #     args = json.loads(json_request)
-        #     request = args["user request"]
-        # except Exception:
-        #     request = "please inform user that interivew session has ended"
-        self.mode = "chat"
+    #     # try:
+    #     #     args = json.loads(json_request)
+    #     #     request = args["user request"]
+    #     # except Exception:
+    #     #     request = "please inform user that interivew session has ended"
+    #     self.mode = "chat"

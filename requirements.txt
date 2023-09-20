@@ -34,3 +34,5 @@ soundfile
 keyboard
 elevenlabs
 pip-tools
+streamlit-modal
+st-pages
