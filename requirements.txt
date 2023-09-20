@@ -25,3 +25,14 @@ faiss-cpu
 tiktoken
 rank_bm25
 html2text
+python-pptx
+doctran
+tenacity
+flask-sqlalchemy
+sounddevice
+soundfile
+keyboard
+elevenlabs
+pip-tools
+streamlit-modal
+st-pages

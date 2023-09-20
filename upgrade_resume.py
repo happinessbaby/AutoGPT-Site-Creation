@@ -1,5 +1,4 @@
 import os
-from openai_api import check_content_safety
 from langchain.chat_models import ChatOpenAI
 from langchain.llms import OpenAI
 from langchain.embeddings import OpenAIEmbeddings
@@ -8,9 +7,9 @@ from langchain.output_parsers import CommaSeparatedListOutputParser
 from langchain import PromptTemplate
 from langchain.agents import AgentType, Tool, initialize_agent, create_json_agent
 from basic_utils import read_txt
-from common_utils import (get_web_resources, retrieve_from_db, extract_posting_information, get_summary, generate_multifunction_response, create_n_docs_tool,
-                           extract_fields, get_field_content, extract_job_title, expand_qa, search_related_samples, create_sample_tools)
-from langchain_utils import retrieve_faiss_vectorstore, create_vectorstore, merge_faiss_vectorstore, split_doc, create_compression_retriever
+from common_utils import (get_web_resources, retrieve_from_db, extract_posting_information, extract_education_level, extract_work_experience_level, get_generated_responses,
+                           extract_resume_fields, extract_job_title,  search_related_samples, create_sample_tools, extract_personal_information)
+from langchain_utils import create_search_tools, create_mapreduce_chain, create_summary_chain, generate_multifunction_response, create_refine_chain, handle_tool_error
 from pathlib import Path
 import json
 from json import JSONDecodeError
@@ -19,239 +18,260 @@ from langchain.tools.json.tool import JsonSpec
 from langchain.agents.agent_toolkits import JsonToolkit
 from langchain.agents.agent_toolkits import create_python_agent
 from langchain.tools.python.tool import PythonREPLTool
-from typing import Dict, List
+from typing import Dict, List, Optional
+from langchain.document_loaders import BSHTMLLoader
+from langchain.tools import tool
+from langchain.agents.agent_toolkits import FileManagementToolkit
+import docx
+import uuid
 
 
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
-
-# TBD: caching and serialization of llm
-llm = ChatOpenAI(temperature=0.0, cache=False)
+# resume_evaluation_path = os.environ["RESUME_EVALUATION_PATH"]
+resume_samples_path = os.environ["RESUME_SAMPLES_PATH"]
+# TODO: caching and serialization of llm
+llm = ChatOpenAI(temperature=0.0)
 # llm = OpenAI(temperature=0, top_p=0.2, presence_penalty=0.4, frequency_penalty=0.2)
 embeddings = OpenAIEmbeddings()
-# randomize delimiters from a delimiters list to prevent prompt injection
+# TODO: save these delimiters in json file to be loaded from .env
 delimiter = "####"
 delimiter1 = "````"
 delimiter2 = "////"
 delimiter3 = "<<<<"
 delimiter4 = "****"
 
-my_job_title = 'accountant'
-my_resume_file = 'resume_samples/sample1.txt'
-resume_samples_path = './resume_samples/'
-posting_path = "./uploads/posting/accountant.txt"
 
 
-    
-def evaluate_resume(my_job_title="", company="", read_path = my_resume_file, posting_path="") -> str:
-    
-    userid = Path(read_path).stem
-    res_path = os.path.join("./static/advice/", Path(read_path).stem + ".txt")
-    generated_responses = {}
 
-    # get resume
-    resume = read_txt(read_path)
+def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path="") -> str:
 
-    # get resume field names
-    resume_fields = extract_fields(resume)
-    resume_fields = resume_fields.split(",")
-    generated_responses.update({"resume fields": resume_fields})
 
-    job_specification = ""
-    # get job specification and company name from job posting link, if provided
-    if (Path(posting_path).is_file()):
-      job_specification = get_summary(posting_path)
-      posting = read_txt(posting_path)
-      posting_info_dict=extract_posting_information(posting)
-      my_job_title = posting_info_dict["job"]
-      company = posting_info_dict["company"]
+    dirname, fname = os.path.split(resume_file)
+    filename = Path(fname).stem +"_re"+".txt"
 
-    # if job title is not provided anywhere else, extract from the resume
-    if (my_job_title==""):
-      my_job_title = extract_job_title(resume)
-    generated_responses.update({"job title": my_job_title})
-    generated_responses.update({"company name": company})
-    generated_responses.update({"job specification": job_specification})
+    # get resume info
+    resume_content = read_txt(resume_file)
+    info_dict=get_generated_responses(resume_content, my_job_title, company, posting_path)
+    highest_education_level = info_dict["highest education level"]
+    work_experience_level = info_dict["work experience level"]
+    field_names = info_dict["field names"]
 
-    # get general job description
-    query_job  = f"""Research what a {my_job_title} does, including details of the common skills, responsibilities, education, experience needed for the job."""
-    job_description = get_web_resources(query_job)
-    generated_responses.update({"job description": job_description})
 
-    # get company description, if provided
-    company_description=""
-    if (company!=""):
-      company_query = f""" Research what kind of company {company} is, such as its culture, mission, and values.                         
-                          Look up the exact name of the company. If it doesn't exist or the search result does not return a company, output you don't know"""     
-      company_description = get_web_resources(company_query)
-    generated_responses.update({"company description": company_description})
-
+    # # Note: retrieval query works best if clear, concise, and detail-dense
+    advice_query = f"""what to include for resume with someone with {highest_education_level} and {work_experience_level} for {my_job_title}"""
+    advices = retrieve_from_db(advice_query)
+    # samples query to find missing content from resume using document comparison
+    # Note: document comparison benefits from a clear and simple prompt
     related_samples = search_related_samples(my_job_title, resume_samples_path)
-    sample_tools = create_sample_tools(related_samples, "resume")
-    relevancy_tools = [create_n_docs_tool]
+    sample_tools, tool_names = create_sample_tools(related_samples, "resume")
+    query_missing = f"""  You are an expert resume field advisor that specializes in improvement content of resume delimited with {delimiter} characters. 
+
+        resume: {delimiter}{resume_content}{delimiter}. 
+
+    Step 1. Sample resume are provided in your tools. Research {str(tool_names)} and answer the following question:
+
+       List common things these resume have in common. 
+
+       Please be general with your answer and ignore any personal details, locations, names, dates, etc. 
+
+    Common Content: 
+
+    Step 2: Your job is to make a list of missing content in the resume delimited with {delimiter} characters using Common Content from Step 1 and  Expert Advice provided below. 
+
+        Expert Advice: {advices}
+     
+        Ignore all formatting advice and ignore any personal details, dates, school and company names, etc in Common Content. 
+
+        Your answer should be general enough to allow applicant to fill out the missing content with their own information. It is okay if there is nothing missing.
+
+        Missing Content:
+
+        Remember to reference Common Content and Expert Advice when generating Missing Content. Be general enough for applicant to provide their own missing information. 
+     """
+
+    missing_items = generate_multifunction_response(query_missing, sample_tools)
+    # file_path = file_path = os.path.join(dirname, "missing.txt")
+    # with open(res_path, "w") as f:
+    #   f.write(missing_items)
+    
+    # files = []
+    for field in field_names:
+      # file_path = os.path.join(dirname, f"{field}.txt")
+      try: 
+        field_content = info_dict[field]
+        improve_resume_fields(info_dict, field, field_content,  sample_tools, filename, dirname)
+      except Exception as e:
+         raise e
+
+      # files.append(file_path)
+
+    # main_template = """Write a detailed summary of the following: {text}
+    #     DETAILED SUMMARY: """
+    # refine_template = (
+    #     "Your job is to produce a final summary\n"
+    #     "We have provided an existing summary up to a certain point: {existing_answer}\n"
+    #     "We have the opportunity to refine the existing summary"
+    #     "(only if needed) with some more context below.\n"
+    #     "------------\n"
+    #     "{text}\n"
+    #     "------------\n"
+    #     "Given the new context, refine the original summary."
+    #     "If the context isn't useful, return the original summary."
+    # )
+    # response = create_refine_chain(files, main_template, refine_template)
+    # return response
+    # return create_mapreduce_chain(files)
+
+
+
+
+
 
     # process all fields in parallel
-    processes = [Process(target = rewrite_resume_fields, args = (generated_responses, field, read_path, res_path, relevancy_tools, sample_tools)) for field in resume_fields]
+    # processes = [Process(target = improve_resume_fields, args = (generated_responses, field, resume, res_path, relevancy_tools, sample_tools)) for field in resume_fields]
 
     # start all processes
-    for p in processes:
-       p.start()
+    # for p in processes:
+    #    p.start()
 
-    for p in processes:
-       p.join()
-   
+    # for p in processes:
+    #    p.join()
+
     # return result to chat agent
-    return res_path
+    return f""" file_path: "missing.txt" """
 
 
-def rewrite_resume_fields(generated_response: Dict[str, str], field:str, read_path:str, res_path:str, relevancy_tools:List[Tool], sample_tools:List[Tool]) -> None:
-    # field_dict = { }
+def improve_resume_fields(generated_response: Dict[str, str], field: str, field_content: str, tools: List[Tool], filename: str, dirname: str) -> None:
+
     print(f"CURRENT FIELD IS: {field}")
-    # field_dict[field]= {}
-    resume = read_txt(read_path)
-    resume_field_content = get_field_content(resume, field)
     my_job_title = generated_response.get("job title", "")
     company_description = generated_response.get("company description", "")
     job_specification = generated_response.get("job specification", "")
     job_description = generated_response.get("job description", "")
+    # education_level = generated_response.get("education", "")
 
-    query_missing = f""" 
+    # The purpose of getting expert advices is to evaluate weaknesses in the current resume field content
+    advice_query =  f"""What are some dos and don'ts when writing resume field {field} to make it ATS-friendly?"""
+    advices = retrieve_from_db(advice_query)
+    query_evaluation = f""" You are an expert resume advisor. You are given some expert advices on writing {field} section of the resume.
+    
+    advices: {advices}
 
-        Use your tool, compare the {field} in the resume sample documents with the applicant's field content.
+    Use these advices to identity the strenghts and weaknesses of the resume content delimited with {delimiter} characters. 
+    
+    field content: {delimiter}{field_content}{delimiter}. \n
+    
+    Please provide proof of your reasoning. For example, if there is gap in work history, mark it as a weakness unless there is evidence it should not be considered so.
+    
+    Ignore all formatting. They should not be considered as weaknesses or strengths. 
 
-        The applicant's field content is delimited with {delimiter} characters.
-      
-        applicant's field content: {delimiter}{resume_field_content}{delimiter}
+    """
+    strength_weakness = generate_multifunction_response(query_evaluation, tools)
 
-        Generalize a list of missing items in the applicant's field content that should be included. 
+    # Get resume's relevant and irrelevant info for resume field: few-shot learning works great here
+    # The purpose of identitying irrelevant and relevant information is so that irrelevant information can be deleted or reworded
+    query_relevancy = f"""You are an expert resume advisor. Determine the relevant and irrelevant information contained in the field content. 
 
-        If the {field} does not exist in the resume samples, please output -1. 
-
-
-        """
-    missing_items = generate_multifunction_response(query_missing, sample_tools)
-            
-    query_relevancy = f"""Determine the relevant and irrelevant information contained in the field content. 
-
-      You are provided with job specification for an opening position. 
-      
-      Use it as a primarily guidelines when generating your answer. 
-
-      You are also provided with a general job decription of the requirement of {my_job_title}. 
-      
-      Use it as a secondary guideline when forming your answer.
-
-      If job specification is not provided, use general job description as your primarily guideline. 
+     Generate a list of irrelevant information that should not be included in the resume field and a list of relevant information that should be included in the resume field.
+       
+      Remember to use either job specification or general job description as your guideline. Don't forget to use your tool "search_relevancy_advice".
 
       field name: {field}
 
-      field content: {resume_field_content}\n
+      field content: {field_content}\n
 
       job specification: {job_specification}\n
 
       general job description: {job_description} \n
 
-      Generate a list of irrelevant information that should not be included in the field content and a list of relevant information that should be included. 
+      Your answer should be detailed and only from the resume. Please also provide your reasoning too. 
+        
+      For example, your answer may look like this:
 
-        """
+      Relevant information in the Experience field:
 
-    relevancy = generate_multifunction_response(query_relevancy, relevancy_tools)
+      1. Experience as a Big Data Engineer: skills and responsibilities of a Big Data Engineer are transferable to those of a data analyst
 
-    # Get expert advices 
-    advice_query = f"""What are some best practices when writing {field} field for a resume to  make it ATS-friendly?  """
-    advices = retrieve_from_db(advice_query)
-                                
+      Irrelevant information  in the Experience Field:
 
-    template_string = """" Your task is to analyze and help improve the content of resume field {field}. 
+      1. Experience as a front desk receptionist is not directly related to the role of a data analyst
 
-    The content of the field is delimiter with {delimiter} characters. Always use this as contenxt and do not make things up. 
+      You do not need to evaluate field that contains personal information. 
 
-    field content: {delimiter}{field_content}{delimiter} \n
+      """
+
+    relevancy = generate_multifunction_response(query_relevancy, tools)
+
+
+    query = f""" You are a professional resume proof reader. 
     
-    Step 1: You're given some expert advices on how to write {field} . Keep these advices in mind for the next steps.
+    Your task is to rewrite the resume field content based on an evaluation on its strengths, weaknesses, and what should be and should not be included, which has been provided for you.
 
-        expert advices: {advices} \n
+    The original field is: {field_content}
 
-    Step 2: You're provided with some company informtion, job specification, and job description.
+    Its strengths and weakness: {strength_weakness}
 
-      Try to make resume field cater to the compnay and job position, if possible. 
+    What to include and what not to include: {relevancy}
 
-      company information: {company_description}.  \n
+    Rememeber, your task is to proof-read and rewrite, not reporting information to the user.
 
-      job specification: {job_specification}.    \n
+    Revised version:  
 
-      job description: {job_description}
-
-    Step 3: You are given two lists of information delimited with {delimiter2} characters. One is content to be included in the {field} and the other is content to be rewritten. 
-
-        information list: {delimiter2}{relevancy}{delimiter2} \n
-
-    Step 4: Rewrite the list of irrelevant content in Step 3 to make them appear more relevant to job position. 
-
-    Step 5: Polish the list of relevant content in Step 3 to make them more ATS-friendly.
-
-
-    Use the following format:
-        Step 1:{delimiter4} <step 1 reasoning>
-        Step 2:{delimiter4} <step 2 reasoning>
-        Step 3:{delimiter4} <step 3 reasoning>
-        Step 4:{delimiter4} <rewrite the irrelevant content>
-        Step 5:{delimiter4} <polish the relevant content>
-
-
-      Make sure to include {delimiter4} to separate every step.
+    Please use your tool "write_file" to write the final revised version to path: {filename}
     
     """
 
-    prompt_template = ChatPromptTemplate.from_template(template_string)
-    upgrade_resume_message = prompt_template.format_messages(
-        field = field,
-        field_content = resume_field_content,
-        job = my_job_title,
-        advices=advices,
-        relevancy = relevancy,
-        company_description = company_description,
-        job_specification = job_specification, 
-        job_description = job_description,
-        delimiter = delimiter,
-        delimiter2 = delimiter2,
-        delimiter4 = delimiter4, 
-        
-    )
+    working_directory=dirname
+    write_tool = FileManagementToolkit(
+          root_dir=working_directory, # ensures only the working directory is accessible 
+          selected_tools=["write_file"],
+      ).get_tools()
+  
+    response = generate_multifunction_response(query, write_tool)
 
-    my_advice = llm(upgrade_resume_message).content
-    with open(res_path, 'a') as f:
-       f.write(my_advice + "\n" +"[" + missing_items +"]" +"\n")
-   
-
-
-# process response to be outputted to chatbot
-def postprocessing(res_path: str, userid:str) -> None:
-    # convert missing things to questions to ask the user 
-    questions = expand_qa(res_path)
-    print(questions)
+    # with open(file_path, "a") as f:
+    #    f.write(strength_weakness + '\n' + relevancy + '\n')
 
 
 
+# @tool("resume evaluator")
+# def resume_evaluator_tool(resume_file: str, job: Optional[str]="", company: Optional[str]="", job_post_link: Optional[str]="") -> str:
+
+#    """Evaluate a resume when provided with a resume file, job, company, and/or job post link.
+#         Note only the resume file is necessary. The rest are optional.
+#         Use this tool more than any other tool when user asks to evaluate, review, help with a resume. """
+
+#    return evaluate_resume(my_job_title=job, company=company, resume_file=resume_file, posting_path=job_post_link)
+      
 
 
+@tool(return_direct=True)
+def resume_evaluator(json_request: str)-> str:
 
+    """Helps to evaluate a resume. Use this tool more than any other tool when user asks to evaluate, review, help with a resume. 
 
-# receptionist
-def preprocessing(json_request: str) -> str:
-    
-    print(json_request)
+    Input should be  a single string strictly in the following JSON format:  '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link":"<job post link>"}}' \n
+
+    (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) \n
+
+     
+    """
+
     try:
+      json_request = json_request.strip("'<>() ").replace('\'', '\"')
       args = json.loads(json_request)
-    except JSONDecodeError:
-      return "Format in JSON and try again." 
-    args = json.loads(json_request)
+    except JSONDecodeError as e:
+      print(f"JSON DECODE ERROR: {e}")
+      return "Format in a single string JSON and try again."
+
+
     # if resume doesn't exist, ask for resume
     if ("resume file" not in args or args["resume file"]=="" or args["resume file"]=="<resume file>"):
       return "Can you provide your resume so I can further assist you? "
     else:
       # may need to clean up the path first
-        read_path = args["resume file"]
+        resume_file = args["resume file"]
     if ("job" not in args or args["job"] == "" or args["job"]=="<job>"):
         job = ""
     else:
@@ -264,61 +284,84 @@ def preprocessing(json_request: str) -> str:
         posting_path = ""
     else:
         posting_path = args["job post link"]
-    res = evaluate_resume(my_job_title=job, company=company, read_path=read_path, posting_path=posting_path)
-    postprocessing(res)
-    return res
+
+    return evaluate_resume(my_job_title=job, company=company, resume_file=resume_file, posting_path=posting_path)
+
+
+
+
+
+
+
+def processing_resume(json_request: str) -> str:
+
+    """ Input parser: input is LLM's action_input in JSON format. This function then processes the JSON data and feeds them to the resume evaluator. """
+
+    try:
+      json_request = json_request.strip("'<>() ").replace('\'', '\"')
+      args = json.loads(json_request)
+    except JSONDecodeError as e:
+      print(f"JSON DECODER ERROR: {e}")
+      return "Format in JSON and try again."
+
+    # if resume doesn't exist, ask for resume
+    if ("resume file" not in args or args["resume file"]=="" or args["resume file"]=="<resume file>"):
+      return "Stop using the resume evaluator tool. Ask user for their resume."
+    else:
+      # may need to clean up the path first
+        resume_file = args["resume file"]
+    if ("job" not in args or args["job"] == "" or args["job"]=="<job>"):
+        job = ""
+    else:
+       job = args["job"]
+    if ("company" not in args or args["company"] == "" or args["company"]=="<company>"):
+        company = ""
+    else:
+        company = args["company"]
+    if ("job post link" not in args or args["job post link"]=="" or args["job post link"]=="<job post link>"):
+        posting_path = ""
+    else:
+        posting_path = args["job post link"]
+
+    return evaluate_resume(my_job_title=job, company=company, resume_file=resume_file, posting_path=posting_path)
+
 
 def create_resume_evaluator_tool() -> List[Tool]:
+
+    """ Input parser: input is user's input as a string of text. This function takes in text and parses it into JSON format. 
     
+    Then it calls the processing_resume function to process the JSON data. """
+
     name = "resume_evaluator"
     parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link": "<job post link>"}}'
+    output = '{{"file_path": "<file_path>"}}'
     description = f"""Helps to evaluate a resume. Use this tool more than any other tool when user asks to evaluate, review, help with a resume. 
-    Do not use this tool if "faiss_resume_advice" tool exists. Use "faiss_resume_advice" instead. 
-    Input should be JSON in the following format: {parameters} \n
-    (remember to respond with a markdown code snippet of a json blob with a single action, and NOTHING else) 
+    Input should be a single string strictly in the following JSON format: {parameters} \n
+     Leave value blank if there's no information provided. DO NOT MAKE STUFF UP. 
+     (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) \n
+    Output should be calling the 'read_file' tool in the followng JSON format: {output} \n
+    The file_path is in the working directory. Output the content directly to user please.' \n 
     """
     tools = [
         Tool(
         name = name,
-        func = preprocessing,
-        description = description, 
+        func = processing_resume,
+        description = description,
         verbose = False,
+        handle_tool_error=True,
+
         )
     ]
     print("Succesfully created resume evaluator tool.")
     return tools
 
 
-# def add_resume_advice_doc_tool(userid:str, res_path:str) -> None:   
-        
-#     name = "faiss_resume_advice"
-#     description = """This is user's detailed resume advice. 
-#     Use this tool as a reference to give tailored resume advices. """
-#     create_vectorstore(embeddings, "faiss", res_path, "file",  f"{name}_{userid}")
 
-
-def test_resume_tool() -> str:
-    
-    tools = create_resume_evaluator_tool()
-    agent= initialize_agent(
-        tools, 
-        llm=ChatOpenAI(cache=False), 
-        agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-        handle_parsing_errors=True,
-        verbose = True,
-        )
-    response = agent.run(f"""evaluate a resume with following information:
-                              job:  \n
-                              company:  \n
-                              resume file: {my_resume_file} \n
-                              job post links: \n            
-                              """)
-    return response
-   
-   
 
 
 if __name__ == '__main__':
-    evaluate_resume()
-    # test_resume_tool()
- 
+    my_job_title = 'accountant'
+    my_resume_file = 'resume_samples/sample1.txt'
+    # evaluate_resume()
+
+

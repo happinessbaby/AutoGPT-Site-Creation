@@ -10,23 +10,31 @@ import bs4
 import urllib.request
 from urllib.request import Request, urlopen
 import uuid
+from pptx import Presentation
+from langchain.document_loaders import UnstructuredURLLoader
+from typing import Any, List, Union, Dict
 
 
 
 def convert_to_txt(file, output_path):
     file_ext = os.path.splitext(file)[1]
-    if (file_ext=='.pdf'):
-        try: 
-            convert_pdf_to_txt(file, output_path)
-        except Exception as e:
-            print(e)
+    if (file_ext)=='.txt':
+        os.rename(file, output_path)
+    if (file_ext=='.pdf'): 
+        convert_pdf_to_txt(file, output_path)
     elif (file_ext=='.odt' or file_ext=='.docx'):
-        try:
-            convert_doc_to_txt(file, output_path)
-        except Exception as e:
-            print(e)
+        convert_doc_to_txt(file, output_path)
     elif (file_ext==".log"):
         convert_log_to_txt(file, output_path)
+    elif (file_ext==".pptx"):
+        convert_pptx_to_txt(file, output_path)
+    elif (file_ext==".ipynb"):
+        convert_ipynb_to_txt(file, output_path)
+
+def convert_ipynb_to_txt(file, output_path):
+    os.rename(file, output_path)
+
+        
 
 def convert_log_to_txt(file, output_path):
     with open(file, "r") as f:
@@ -34,15 +42,26 @@ def convert_log_to_txt(file, output_path):
         print(content)
         with open(output_path, "w") as f:
             f.write(content)
+            f.close()
 
+def convert_pptx_to_txt(pptx_file, output_path):
+    prs = Presentation(pptx_file)
+    text = ""
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            if hasattr(shape, "text"):
+                text+=shape.text+'\n'
+    with open(output_path, 'w') as f:
+        f.write(text)
+        f.close()
 
 
 def convert_pdf_to_txt(pdf_file, output_path):
     pdf = fitz.open(pdf_file)
     text = ""
     for page in pdf:
-        text+=page.get_text()
-    with open(output_path, 'a') as f:
+        text+=page.get_text() + '\n'
+    with open(output_path, 'w') as f:
         f.write(text)
         f.close()
 
@@ -109,11 +128,26 @@ def retrieve_web_content(link, save_path="./web_data/test.txt"):
     else:
         print('Failed to retrieve content from the URL.')
         return False
+    
+
+def write_to_docx(doc: Any, text: str, type: str, res_path: str):
+    if type=="cover_letter":
+        p = doc.add_paragraph()
+        p.add_run(text)
+        doc.save(res_path)
+
+
+        
+
+
+
 
 if __name__=="__main__":
     retrieve_web_content(
-        "https://enhancv.com/blog/should-i-include-irrelevant-experience-on-a-resume/",
+        "https://learning.shine.com/talenteconomy/resume-tips/resume-objectives/",
         save_path = f"./web_data/{str(uuid.uuid4())}.txt")
+
+
 
 
 

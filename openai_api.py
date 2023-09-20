@@ -5,15 +5,72 @@ import os
 import json
 from dotenv import load_dotenv, find_dotenv
 from basic_utils import read_txt
-
+from openai.error import InvalidRequestError
+import tiktoken
+import math
 
 _ = load_dotenv(find_dotenv()) # read local .env file
 openai.api_key = os.environ['OPENAI_API_KEY']
-
-models = openai.Model.list()
+# models = openai.Model.list()
 delimiter = "####"
 
+# maximum token limit (4,096 for gpt-3.5-turbo or 8,192 for gpt-4)
+max_token_limit = 4000
+
+def num_tokens_from_text(text, model="gpt-3.5-turbo-0613"):
+	try:
+		encoding = tiktoken.encoding_for_model(model)
+	except KeyError:
+		print("Warning: model not found. Using cl100k_base encoding.")
+		encoding = tiktoken.get_encoding("cl100k_base")
+	return len(encoding.encode(text))
+	
+
+def num_tokens_from_messages(messages, model="gpt-3.5-turbo-0613"):
+    
+    """Return the number of tokens used by a list of messages."""
+    try:
+        encoding = tiktoken.encoding_for_model(model)
+    except KeyError:
+        print("Warning: model not found. Using cl100k_base encoding.")
+        encoding = tiktoken.get_encoding("cl100k_base")
+    if model in {
+        "gpt-3.5-turbo-0613",
+        "gpt-3.5-turbo-16k-0613",
+        "gpt-4-0314",
+        "gpt-4-32k-0314",
+        "gpt-4-0613",
+        "gpt-4-32k-0613",
+        }:
+        tokens_per_message = 3
+        tokens_per_name = 1
+    elif model == "gpt-3.5-turbo-0301":
+        tokens_per_message = 4  # every message follows <|start|>{role/name}\n{content}<|end|>\n
+        tokens_per_name = -1  # if there's a name, the role is omitted
+    elif "gpt-3.5-turbo" in model:
+        print("Warning: gpt-3.5-turbo may update over time. Returning num tokens assuming gpt-3.5-turbo-0613.")
+        return num_tokens_from_messages(messages, model="gpt-3.5-turbo-0613")
+    elif "gpt-4" in model:
+        print("Warning: gpt-4 may update over time. Returning num tokens assuming gpt-4-0613.")
+        return num_tokens_from_messages(messages, model="gpt-4-0613")
+    else:
+        raise NotImplementedError(
+            f"""num_tokens_from_messages() is not implemented for model {model}. See https://github.com/openai/openai-python/blob/main/chatml.md for information on how messages are converted to tokens."""
+        )
+    num_tokens = 0
+    for message in messages:
+        num_tokens += tokens_per_message
+        for key, value in message.items():
+            num_tokens += len(encoding.encode(value))
+            if key == "name":
+                num_tokens += tokens_per_name
+    num_tokens += 3  # every reply is primed with <|start|>assistant<|message|>
+    return num_tokens
+
+
+
 def get_moderation_flag(prompt):
+
 	response = openai.Moderation.create(
 		input = prompt
 	)
@@ -44,20 +101,6 @@ def get_completion_from_messages(messages,
     return response.choices[0].message["content"]
 
 
-def get_text_model():
-	for model in models['data']:
-		if model['id'].startswith('text-'):
-			try:
-				openai.Completion.create(
-					model=model['id'],
-					prompt='This is a test prompt.',
-					max_tokens=5
-				)
-				print(f"available text model: {model}")
-				return model
-			except:
-				pass
-	return ""
 
 def check_injection(message):
 	system_message = f"""
@@ -113,7 +156,7 @@ def evaluate_content(content, content_type):
 		  There may be other irrelevant content. Ignore them and ignore all formatting. 
 
 		Respond with a Y or N character, with no punctuation:
-		Y - if the content contains a {content_type}. it's okay if the content contains other things. 
+		Y - if the content contains a {content_type}. it's okay if it also contains other things. 
 		N - otherwise
 
 		Output a single letter only.
@@ -133,17 +176,32 @@ def evaluate_content(content, content_type):
 	else:
 		# return false for now, will have error handling here
 		return False
-	
+        
+def split_text(text):
+	# use an estimate token count for ease of control
+	total_token_count = num_tokens_from_text(text)
+	num_chunks = math.ceil(max_token_limit/total_token_count)
+	total_len = len(text)
+	n = math.floor(total_len/num_chunks)
+	parts = [text[i:i+n] for i in range(0, len(text), n)]
+	return parts
+      
 
 def check_content_safety(file=None, text_str=None):
-    if (file!=None):
-        text = read_txt(file)
-    elif (text_str!=None):
-        text = text_str
-    if (get_moderation_flag(text) or check_injection(text)):
-        return False
-    else:
-        return True
+	if (file!=None):
+		text = read_txt(file)
+	elif (text_str!=None):
+		text = text_str
+	try: 
+		immoderate = get_moderation_flag(text)
+		unsafe = check_injection(text)
+	except InvalidRequestError:
+			parts = split_text(text)
+			for text in parts:
+				check_content_safety(text_str=text)
+	if immoderate or unsafe:
+			return False
+	return True
 	
 
 	
