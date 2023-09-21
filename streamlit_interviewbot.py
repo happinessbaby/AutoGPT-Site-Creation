@@ -41,6 +41,13 @@ from time import gmtime, strftime
 from playsound import playsound
 from streamlit_modal import Modal
 import json
+from threading import Thread
+import threading
+from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
+
 
 
 _ = load_dotenv(find_dotenv()) # read local .env file
@@ -48,32 +55,16 @@ openai.api_key = os.environ['OPENAI_API_KEY']
 set_api_key(os.environ["11LABS_API_KEY"])
 save_path = os.environ["SAVE_PATH"]
 temp_path = os.environ["TEMP_PATH"]
-placeholder = st.empty()
+# placeholder = st.empty()
+# sd.default.samplerate=48000
+sd.default.channels = 1, 2
+sd.default.device = 1
 duration = 5 # duration of each recording in seconds
 fs = 44100 # sample rate
 channels = 1 # number of channel
-device = 4
+# COMBINATION = {keyboard.Key.r, keyboard.Key.ctrl}
+# device = 4
 # keyboard = Controller()
-
-# class Keyboard():
-#     def on_press(self, key):
-#     #print('{0} pressed'.format(
-#         #key))
-#         if key.char=="space":
-
-#         self.check_key(key)
-
-#     def on_release(self, key):
-#         #print('{0} release'.format(
-#         # key))
-#         if key == Key.esc:
-#             # Stop listener
-#             return False
-
-#     def check_key(self, key):
-#         if key in [Key.up, Key.down, Key.left, Key.right]: 
-#             print('YES')
-    
 # keyboard_event = Keyboard()
 
 
@@ -81,20 +72,51 @@ device = 4
 class Interview():
 
     userid: str=""
+    COMBINATION = [{keyboard.KeyCode.from_char('r'), keyboard.Key.space}, {keyboard.Key.shift, keyboard.Key.esc}]
+    currently_pressed = set()
+    placeholder = st.empty()
+    ctx = get_script_run_ctx()
 
     def __init__(self):
         self._create_interviewbot()
+        # self.thread_run()
+        # thread = threading.Thread(target=self._create_interviewbot)
+        # add_script_run_ctx(thread)
+        # thread.start()
+
+
+
+
+    # def thread_run(self):
+
+    #     with ThreadPoolExecutor(max_workers=60) as executor:
+    #         # ctx = get_script_run_ctx()
+    #         # futures = [executor.submit(self._create_interviewbot, ctx)]
+    #         # for future in as_completed(futures):
+    #         #     yield future.result()
+    #         future = executor.submit(self._create_interviewbot)
+    #         future.result()
 
 
     def _create_interviewbot(self):
 
-        with placeholder.container():
+
+        with self.placeholder.container():
 
             with st.sidebar:
                 
                 add_vertical_space(3)
-
-                st.markdown("How the mock interview works: ")
+        
+                st.markdown('''
+                            
+                How the mock interview works: 
+     
+                - refresh the page if you want to start a new session
+                - press Enter to start the session     
+                - press "r" + Spacebar to start recording
+                - press "Shift" + "Esc" to end the session
+                            
+                ''')
 
             if "userid" not in st.session_state:
                 st.session_state["userid"] = str(uuid.uuid4())
@@ -129,103 +151,153 @@ class Interview():
                     #         st.session_state["baseinterview"] = new_interview      
 
                     #         st.experimental_rerun()
-            
+    
 
             else:  
+
+                if "listener" not in st.session_state:
+                    new_listener = keyboard.Listener(
+                    on_press=self.on_press,
+                    on_release=self.on_release)
+
                 if "baseinterview" not in st.session_state:
                     new_interview = InterviewController(st.session_state.userid)
-                    st.session_state["baseinterview"] = new_interview      
+                    st.session_state["baseinterview"] = new_interview     
+                    welcome_msg = "Welcome to your mock interview session. I will begin conducting the interview now. Please review the sidebar for instructions. "
+                    message(welcome_msg, avatar_style="initials", seed="AI_Interviewer", allow_html=True)
+
                 try:
-                    self.new_interview = st.session_state.baseinterview
+                    self.new_interview = st.session_state.baseinterview  
+                    self.listener = new_listener
+                    self.listener.start()  
                 except AttributeError as e:
                     # if for some reason session ended in the middle, may need to do something different from raise exception
                     raise e
                 
                 try: 
-                    audio_dir =  f"./tmp_recording/{st.session_state.userid}/"
+                    audio_dir =  f"./tmp_recording/{st.session_state.interview_session_id}/"
                     os.mkdir(audio_dir)
                 except FileExistsError:
                     pass
 
-                
-                if 'interview_responses' not in st.session_state:
-                    st.session_state['interview_responses'] = list()
-                if 'interview_questions' not in st.session_state:
-                    st.session_state['interview_questions'] = list()
-                    welcome_msg = "Welcome to your mock interview session. I will begin conducting the interview now. "
-                    message(welcome_msg, avatar_style="initials", seed="AI_Interviewer", allow_html=True)
+                self.listener.join()
+
+                # if 'interview_responses' not in st.session_state:
+                #     st.session_state['interview_responses'] = list()
+                # if 'interview_questions' not in st.session_state:
+                #     st.session_state['interview_questions'] = list()
                     # self.play_generated_audio(welcome_msg)
+                # self.listener = keyboard.Listener(
+                #             on_press=self.on_press,
+                #             on_release=self.on_release)
+                # self.listener.start()
 
-                question_container = st.container()
-                response_container = st.container()
+                # else:
+                # try:     
+                #     while True:
+                #         with keyboard.Listener(
+                #             on_press=self.on_press,
+                #             on_release=self.on_release) as listener:
+                #             listener.join()
+                # except Exception as e:
+                #     raise e
                 
-                # while True:
-                #     with keyboard.Listener(
-                #         on_press=self.on_press,
-                #         on_release=self.on_release) as listener:
-                #         listener.join()
-        
+    
+
             
-
+  
                 # CODE BELOW IS FOR TESTING W/ TEXT INPUT 
+                # question_container = st.container()
+                # response_container = st.container()
                 # hack to clear text after user input
-                if 'responseInput' not in st.session_state:
-                    st.session_state.responseInput = ''
-                def submit():
-                    st.session_state.responseInput = st.session_state.interview_input
-                    st.session_state.interview_input = ''    
-                # User input
-                ## Function for taking user provided prompt as input
-                def get_text():
-                    st.text_input("Your response: ", "", key="interview_input", on_change = submit)
-                    return st.session_state.responseInput
-                ## Applying the user input box
-                with response_container:
-                    user_input = get_text()
-                    response_container = st.empty()
-                    st.session_state.responseInput='' 
+                # if 'responseInput' not in st.session_state:
+                #     st.session_state.responseInput = ''
+                # def submit():
+                #     st.session_state.responseInput = st.session_state.interview_input
+                #     st.session_state.interview_input = ''    
+                # # User input
+                # ## Function for taking user provided prompt as input
+                # def get_text():
+                #     st.text_input("Your response: ", "", key="interview_input", on_change = submit)
+                #     return st.session_state.responseInput
+                # ## Applying the user input box
+                # with response_container:
+                #     user_input = get_text()
+                #     response_container = st.empty()
+                #     st.session_state.responseInput='' 
 
 
-                if user_input:
-                    res = question_container.container()
-                    streamlit_handler = StreamlitCallbackHandler(
-                        parent_container=res,
-                        # max_thought_containers=int(max_thought_containers),
-                        # expand_new_thoughts=expand_new_thoughts,
-                        # collapse_completed_thoughts=collapse_completed_thoughts,
-                    )
-                    user_answer = user_input
-                    # answer = chat_agent.run(mrkl_input, callbacks=[streamlit_handler])
-                    ai_question = self.new_interview.askAI(user_answer, callbacks = streamlit_handler)
-                    st.session_state.interview_questions.append(ai_question)
-                    st.session_state.interview_responses.append(user_answer)
-                    if st.session_state['interview_responses']:
-                        for i in range(len(st.session_state['interview_responses'])-1, -1, -1):
-                            message(st.session_state['interview_questions'][i], key=str(i), avatar_style="initials", seed="AI_Interviewer", allow_html=True)
-                            message(st.session_state['interview_responses'][i], is_user=True, key=str(i) + '_user',  avatar_style="initials", seed="Yueqi", allow_html=True)
+                # if user_input:
+                #     res = question_container.container()
+                #     streamlit_handler = StreamlitCallbackHandler(
+                #         parent_container=res,
+                #         # max_thought_containers=int(max_thought_containers),
+                #         # expand_new_thoughts=expand_new_thoughts,
+                #         # collapse_completed_thoughts=collapse_completed_thoughts,
+                #     )
+                #     user_answer = user_input
+                #     # answer = chat_agent.run(mrkl_input, callbacks=[streamlit_handler])
+                #     ai_question = self.new_interview.askAI(user_answer, callbacks = streamlit_handler)
+                #     st.session_state.interview_questions.append(ai_question)
+                #     st.session_state.interview_responses.append(user_answer)
+                #     if st.session_state['interview_responses']:
+                #         for i in range(len(st.session_state['interview_responses'])-1, -1, -1):
+                #             message(st.session_state['interview_questions'][i], key=str(i), avatar_style="initials", seed="AI_Interviewer", allow_html=True)
+                #  
+                #            message(st.session_state['interview_responses'][i], is_user=True, key=str(i) + '_user',  avatar_style="initials", seed="Yueqi", allow_html=True)
+
+
 
     def on_press(self, key):
-        if key==Key.space:
+
+        if any([key in comb for comb in self.COMBINATION]):
+            self.currently_pressed.add(key)
+        if self.currently_pressed == self.COMBINATION[0]:
+            print("on press: recording")
             recorded_audio = self.record_audio(duration, fs, channels)
             user_input = self.transcribe_audio(recorded_audio, fs)
             response = self.new_interview.askAI(user_input)
-            self.play_generated_audio(response)
+            print(response)
+        if self.currently_pressed == self.COMBINATION[1]:
+            self.listener.stop()
+            print("on press: quitting")
+            thread = threading.Thread(target=self.feedback)
+            add_script_run_ctx(thread, self.ctx)
+            thread.start()
+
+
+    def feedback(self):
+
+        with self.placeholder.container():
+            modal = Modal(key="feedback_popup", title="Thank you for your participation in the interview session! I value your feedback.")
+            with modal.container():
+                with st.form(key="feedback_form", clear_on_submit=True):
+                    st.form_submit_button()
+
 
     def on_release(self, key):
         #print('{0} release'.format(             
         # key))
-        if key == Key.esc:
-            # Stop listener
-            return False
+        try:
+            self.currently_pressed.remove(key)
+        except KeyError:
+            pass
+
         
     def record_audio(self, duration, fs, channels):
+
+        """ Records user voice input """
+
         print("Recording...")
-        recording = sd.rec(int(duration * fs), samplerate=fs, channels=channels, device=device)
+        recording = sd.rec(int(duration * fs), samplerate=fs, channels=channels)
         sd.wait()
-        print("Finished recording.")
+        print(f"Finished recording: {recording}")
         return recording
 
     def transcribe_audio(self, recording, fs):
+
+        """ Sends audio file to OpenAI's Whisper model for trasncription and response """
+
         filename = strftime("%Y-%m-%d %H:%M:%S", gmtime())
         temp_file = f"./tmp_recording/{self.userid}/{filename}.wav"
         with open(temp_file, "wb") as temp_audio:
@@ -241,6 +313,9 @@ class Interview():
         return transcript["text"].strip()
     
     def play_generated_audio(self, text, voice="Bella", model="eleven_monolingual_v1"):
+
+        """ Deploys Eleven Labs for AI generated voice playback """
+
         audio = generate(text=text, voice=voice, model=model)
         play(audio)
 
@@ -310,10 +385,10 @@ class Interview():
 
         if content_type!="other":
             name = content_type.strip().replace(" ", "_")
-            vs_name = f"faiss_{name}_{st.session_state.userid}"
+            vs_name = f"{name}_{st.session_state.userid}"
             vs = create_vectorstore("faiss", end_path, "file", vs_name)
         else:
-            vs_name = f"faiss_interview_material_{st.session_state.userid}"
+            vs_name = f"interview_material_{st.session_state.userid}"
             vs = merge_faiss_vectorstore(vs_name, end_path)
         vs.save_local(f"./faiss/{st.session_state.userid}/{vs_name}")
 
@@ -356,7 +431,9 @@ class Interview():
     #         self.new_interview.update_tools(tools)
 
 
+    
 
 if __name__ == '__main__':
 
     advisor = Interview()
+  
