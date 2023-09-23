@@ -13,16 +13,19 @@ from langchain.agents.agent_toolkits import FileManagementToolkit
 import json
 from pathlib import Path
 
-resume_file = "resume_samples/sample6.txt"
+resume_file = "resume_samples/resume2023v2.txt"
 def generate_random_info(type):
     return None
 job = generate_random_info("job")
 company = generate_random_info("company")
 my_job_title = "software engineer"
+cover_letter_samples_path = "./sample_cover_letters/"
+resume_samples_path = "./resume_samples/"
+posting_link = "./uploads/file/data_analyst_SC.txt"
 delimiter = "####"
 
 # Passed (8/30)
-def test_coverletter_tool(resume_file=resume_file, job="data analyst", company="", posting_link="") -> str:
+def test_coverletter_tool(resume_file=resume_file, job="data analyst", company="", posting_link=posting_link) -> str:
 
     """ End-to-end testing of the cover letter generator without the UI. """
 
@@ -45,7 +48,7 @@ def test_coverletter_tool(resume_file=resume_file, job="data analyst", company="
 
 
 
-def test_resume_tool(resume_file="./resume_samples/test.txt", job="data analyst", company="", posting_link="") -> str:
+def test_resume_tool(resume_file="./resume_samples/sample1.txt", job="data analyst", company="", posting_link=posting_link) -> str:
 
     """ End-to-end testing of the resume evaluator without the UI. """
     
@@ -75,26 +78,33 @@ def test_general_job_description(my_job_title="data analyst"):
     job_query  = f"""Research what a {my_job_title} does and output a detailed description of the common skills, responsibilities, education, experience needed. 
    \Keep your answer under 200 words if possible. """
     job_description = get_web_resources(job_query) 
-    print(f"JOB DESCRIPTION: {job_description}")
 
 
-def test_company_description(company="Indeed"):
+def test_job_specification(my_job_title="data analyst", posting_path=posting_link):
+    prompt_template = """Identity the job position, company then provide a summary of the following job posting:
+            {text} \n
+            Focus on roles and skills involved for this job. Do not include information irrelevant to this specific position.
+        """
+    job_specification = create_summary_chain(posting_path, prompt_template)
+
+
+
+def test_company_description(company="Southern Company"):
     company_query = f""" Research what kind of company {company} is, such as its culture, mission, and values.                       
                           Look up the exact name of the company. If it doesn't exist or the search result does not return a company, output -1."""
     company_description = get_web_resources(company_query)
-    print(f"COMPANY DESCRIPTION: {company_description}")
+
 
 # FAIL
 def test_work_experience(resume_file="./resume_samples/sample6.txt", my_job_title="software engineer"):
     resume = read_txt(resume_file)
     experience = extract_work_experience_level(resume, my_job_title)
-    print(f"WORK EXPERIENCE LEVEL: {experience}")
 
 # Pass
 def test_education_level(resume_file="./resume_samples/test.txt"):
     resume = read_txt(resume_file)
     education = extract_education_level(resume)
-    print(f"EDUCATION: {education}")
+
 
 # PASS
 def test_search_similar_resume(my_job_title = "software engineer"):
@@ -110,55 +120,56 @@ def test_extract_fields(resume_file="./resume_samples/test.txt"):
     assert isinstance(field_content, dict), "field content not a dictionary!"
     print(f"RESUME FIELD NAMES: {field_names}")
     print(f"RESUME FIELD CONTENT: {field_content}")
+
    
 
 
 # This part really seems to test LLM's reasoning ability
 # PASS
-def test_cl_revelancy_query(resume_file=resume_file, my_job_title="data analyst", posting_path=""):
+# def test_cl_revelancy_query(resume_file=resume_file, my_job_title="data analyst", posting_path=""):
 
-    resume_content = read_txt(resume_file)
-    # Search for a job description of the job title
-    job_query  = f"""Research what a {my_job_title} does and output a detailed description of the common skills, responsibilities, education, experience needed."""
-    job_description = get_web_resources(job_query) 
-    if posting_path:
-        prompt_template = """Identity the job position, company then provide a summary of the following job posting:
-            {text} \n
-            Focus on roles and skills involved for this job. Do not include information irrelevant to this specific position.
-        """
-        job_specification = create_summary_chain(posting_path, prompt_template)
-    else:
-        job_specification = ""
+#     resume_content = read_txt(resume_file)
+#     # Search for a job description of the job title
+#     job_query  = f"""Research what a {my_job_title} does and output a detailed description of the common skills, responsibilities, education, experience needed."""
+#     job_description = get_web_resources(job_query) 
+#     if posting_path:
+#         prompt_template = """Identity the job position, company then provide a summary of the following job posting:
+#             {text} \n
+#             Focus on roles and skills involved for this job. Do not include information irrelevant to this specific position.
+#         """
+#         job_specification = create_summary_chain(posting_path, prompt_template)
+#     else:
+#         job_specification = ""
 
-     # Get resume's relevant and irrelevant info for job
-    query_relevancy = f"""Determine the relevant and irrelevant information contained in the resume document delimited with {delimiter} characters.
+#      # Get resume's relevant and irrelevant info for job
+#     query_relevancy = f"""Determine the relevant and irrelevant information contained in the resume document delimited with {delimiter} characters.
 
-      resume: {delimiter}{resume_content}{delimiter} \n
+#       resume: {delimiter}{resume_content}{delimiter} \n
 
-      Generate a list of irrelevant information that should not be included in the cover letter and a list of relevant information that should be included in the cover letter.
+#       Generate a list of irrelevant information that should not be included in the cover letter and a list of relevant information that should be included in the cover letter.
        
-      Remember to use either job specification or general job description as your guideline. Don't forget to use your tool "search_cover_letter_advice".
+#       Remember to use either job specification or general job description as your guideline. Don't forget to use your tool "search_cover_letter_advice".
 
-      job specification: {job_specification}
+#       job specification: {job_specification}
 
-      general job description: {job_description} \n
+#       general job description: {job_description} \n
 
-        Your answer should be detailed and only from the resume. Please also provide your reasoning too. 
+#         Your answer should be detailed and only from the resume. Please also provide your reasoning too. 
         
-        For example, your answer may look like this:
+#         For example, your answer may look like this:
 
-        Relevant information:
+#         Relevant information:
 
-        1. Experience as a Big Data Engineer: using Spark and Python are transferable skills to using Panda in data analysis
+#         1. Experience as a Big Data Engineer: using Spark and Python are transferable skills to using Panda in data analysis
 
-        Irrelevant information:
+#         Irrelevant information:
 
-        1. Education in Management of Human Resources is not directly related to skills required for a data analyst 
+#         1. Education in Management of Human Resources is not directly related to skills required for a data analyst 
     
-        """  
-    tools = create_search_tools("google", 3)
-    response = generate_multifunction_response(query_relevancy, tools)
-    print(f"RELEVANCY RESPONSE: {response}")
+#         """  
+#     tools = create_search_tools("google", 3)
+#     response = generate_multifunction_response(query_relevancy, tools)
+
 
 
 # This part tests the ability to retrieve information from vector stores
@@ -181,26 +192,25 @@ def test_cl_retrieval(my_job_title="data analyst", education_level="bachelors of
     
     # generate_multifunction_response(advice_query, [search_cover_letter_advice])
     response = retrieve_from_db(advice_query)
-    print(f"RETRIEVAL FROM DB RESPONSE: {response}")
+
 
 
 # This seems to test tool using ability and reasoning ability
 # BARELY PASSING
-def test_cl_samples_query(my_job_title= "Information Systems Technology Manager"):
+# def test_cl_samples_query(my_job_title= "Information Systems Technology Manager"):
 
-    cover_letter_samples_path = "./sample_cover_letters/"
-        # Get sample comparisons
-    related_samples = search_related_samples(my_job_title, cover_letter_samples_path)
-    sample_tools, tool_names = create_sample_tools(related_samples, "cover_letter")
-    query_samples = f""" 
+#         # Get sample comparisons
+#     related_samples = search_related_samples(my_job_title, cover_letter_samples_path)
+#     sample_tools, tool_names = create_sample_tools(related_samples, "cover_letter")
+#     query_samples = f""" 
 
-    Sample cover letters are provided in your tools. Research {str(tool_names)} and answer the following question: and answer the following question:
+#     Sample cover letters are provided in your tools. Research {str(tool_names)} and answer the following question: and answer the following question:
 
-      1. What common features these cover letters share?
+#       1. What common features these cover letters share?
 
-      """
-    response = generate_multifunction_response(query_samples, sample_tools)
-    print(f"SAMPLES COMPARISON RESPONSE: {response}")
+#       """
+#     response = generate_multifunction_response(query_samples, sample_tools)
+
 
 
 
@@ -209,23 +219,31 @@ def test_field_retrieval(field="work history"):
 
     advice_query = f"""What are some dos and don'ts when writing resume field {field} to make it ATS-friendly?"""
     advices = retrieve_from_db(advice_query)
-    return advices
+
 
 
 # PASS
-def test_field_relevancy_query( my_job_title="customer service manager", field = "work history", posting_path=''):
+def test_field_relevancy( my_job_title="data analyst", field = "skills", posting_path=posting_link):
 
     # relevancy_tools = [search_relevancy_advice]
-    tools = create_search_tools("google", 3)
+    related_samples = search_related_samples(my_job_title, resume_samples_path)
+    sample_tools, tool_names = create_sample_tools(related_samples, "resume")
 
-    resume_field_content = """Various Positions of Increasing Responsibility and Leadership
-            United States Air Force (2018 to present)
-             Currently serving as Squadron Operation Superintendent.
-             Scheduled to leave the Air Force in September 2021."""
+    field_content = """Walmart, remote contractor, full-time					2022-05 – 2022-10
+Big Data Engineer 
+    • Coordinated across teams to evaluate and improve low level deign of new back-end features that involved upstream streaming and downstream API calls to data analysis sectors
+    • Tested methodology with writing and execution of test plans, debugging and testing scripts and tools, which included revamping old code bases to modern development standards
+    • Completed all assigned tasks within a timely manner and took on extra responsibilities to meet team goals
 
-    job_query  = f"""Research what a {my_job_title} does and output a detailed description of the common skills, responsibilities, education, experience needed."""
-    job_description = get_web_resources(job_query) 
 
+Revature									2022-01 - 2022-12
+Big Data Engineer
+    • Implemented Big Data platforms and tools on the complete ETL process from data ingestion and data query to data storage and data analytic using tools such as Spark, Hadoop, and SQL"""
+
+
+
+    job_specification = ""
+    job_description = ""
     if posting_path:
         prompt_template = """Identity the job position, company then provide a summary of the following job posting:
             {text} \n
@@ -233,80 +251,141 @@ def test_field_relevancy_query( my_job_title="customer service manager", field =
         """
         job_specification = create_summary_chain(posting_path, prompt_template)
     else:
-        job_specification = ""
+        job_query  = f"""Research what a {my_job_title} does and output a detailed description of the common skills, responsibilities, education, experience needed."""
+        job_description = get_web_resources(job_query) 
 
 
-    query_relevancy = f"""Determine the relevant and irrelevant information contained in the field content. 
+    query_relevancy = f"""You are an expert resume advisor. 
 
-     Generate a list of irrelevant information that should not be included in the cover letter and a list of relevant information that should be included in the resume field.
+     Generate a list of irrelevant information that should not be included in the resume field and a list of relevant information that should be included in the resume field.
        
-      Remember to use either job specification or general job description as your guideline.
+      Remember to use either job specification or general job description as your guideline. 
 
       field name: {field}
 
-      field content: {resume_field_content}\n
+      field content: {field_content}\n
 
       job specification: {job_specification}\n
 
       general job description: {job_description} \n
 
-      Your answer should be detailed and only from the resume. Please also provide your reasoning too. 
+      Your answer should be detailed and only from the field content. Please also provide your reasoning too as in the following example:
         
-      For example, your answer may look like this:
+            Relevant information in the Experience field:
 
-      Relevant information in the Experience field:
+            1. Experience as a Big Data Engineer: skills and responsibilities of a Big Data Engineer are transferable to those of a data analyst
 
-      1. Experience as a Big Data Engineer: skills and responsibilities of a Big Data Engineer are transferable to those of a data analyst
+            Irrelevant information  in the Experience Field:
 
-      Irrelevant information  in the Experience Field:
-
-      1. Experience as a front desk receptionist is not directly related to the role of a data analyst
-
-      Please do not do anything and output -1 if field name is personal informaion or contains personal information such as name and links. These do not need any evaluation on relevancy
+            1. Experience as a front desk receptionist is not directly related to the role of a data analyst
 
       """
-    relevancy = generate_multifunction_response(query_relevancy, tools)
-    return relevancy
+    relevancy = generate_multifunction_response(query_relevancy, sample_tools)
+
+def test_field_missing(field="Certification", posting_path=posting_link, company="Southern Company"):
+
+    job_specification = ""
+    job_description = ""
+    if posting_path:
+        prompt_template = """Identity the job position, company then provide a summary of the following job posting:
+            {text} \n
+            Focus on roles and skills involved for this job. Do not include information irrelevant to this specific position.
+        """
+        job_specification = create_summary_chain(posting_path, prompt_template)
+    else:
+        job_query  = f"""Research what a {my_job_title} does and output a detailed description of the common skills, responsibilities, education, experience needed."""
+        job_description = get_web_resources(job_query) 
+
+    company_query = f""" Research what kind of company {company} is, such as its culture, mission, and values.                       
+                          Look up the exact name of the company. If it doesn't exist or the search result does not return a company, output -1."""
+    company_description = get_web_resources(company_query)
+
+    related_samples = search_related_samples(my_job_title, resume_samples_path)
+    sample_tools, tool_names = create_sample_tools(related_samples, "resume")
+    advice_query = f"""ATS-friendly way of writing {field}"""
+    advice = retrieve_from_db(advice_query)
+
+    field_content = """  FOURTHBRAIN 2022-12 – 2023-04
+
+Machine Learning Engineer Program
+
+-   Learned EDA, feature engineering, and classic data modeling
+    techniques; built, trained, and evaluated neural networks, including
+    CNN, LSTM, and transformers on different data sets and developed
+    automated pipeline for deployment on AWS
+
+"""
+    
+    query_missing_field = f"""  You are an expert resume field advisor. 
+
+     Generate a list of missing information that should be included in the resume field content. 
+       
+     Remember to use either job specification or general job description and comany description as your guideline. 
+
+      field name: {field}
+
+      field content: {field_content}\n
+
+      job specification: {job_specification}\n
+
+      general job description: {job_description} \n
+
+      company description: {company_description}
+
+      Your answer should be detailed and only from the field content. Please also provide your reasoning too as in the following examples:
+
+            Missing Field Content for Work Experience:
+
+            1. Quantative achievement in project management: no measurable metrics or KPIs to highlight any past achievements. 
+
+     """
+            # Missing Field Content for Skills:
+
+            # 1. Technical skills such as SQL and PowerBI to showcase qualification: SQL and PowerBI are listed in the job specification but not in the field content
+
+    relevancy = generate_multifunction_response(query_missing_field, sample_tools)
+
 
 #DECENT, WILL NEED TO UPDATE ADVICE QUERY TO IMPROVE OUTPUT
 def test_field_evaluation( field="work history"):
 
     general_tools = create_search_tools("google", 3)
-    resume_field_content = """WALMART, remote contractor, full-time 2022-05 – 2022-10
-    BIG DATA ENGINEER
--   Coordinated with other engineers to evaluate and improve low level
-    deign of back-end features.
+    resume_field_content = """Walmart    					                                           2022-05 – 2022-10
+Big Data Engineer 
+    • Collaborated with cross-functional teams in evaluating and improving low level deign of new back-end features that included streaming services and data analytic
+    • Tested methodology with writing and execution of test plans, debugging and testing scripts and tools, and revamped old code bases to modern development standards for improved error handling and data handling to meet the functional programming paradigm 
+    • Completed all assigned tasks within a timely manner, aided other team members, and took on extra responsibilities to meet team goals, which helped the team achieve bi-weekly goals more satisfyingly 
 
--   Tested methodology with writing and execution of test plans,
-    debugging and testing scripts and tools.
 
--   Updated old code bases to modern development standards, improving
-    functionality.
-
-    WALMART, Tuscaloosa, Alabama, full-time 2018-01 – 2018-06
-
-    STORE ASSOCIATE
-
--   Offered assistance for increased customer satisfaction.
-
--   Prioritized tasks to meet tight deadlines, pitching in to assist
-    others with project duties."""
+Revature									2022-01 - 2022-12
+Big Data Engineer
+    • Implemented Big Data platforms and tools on the complete ETL process from data ingestion and data query to data storage and data analytic using tools such as Scala, Spark, Hadoop, and SQL
+    • Collaborated with other members on Big Data related projects, distributed assignments to team members, and presented results of data analysis to showcase their business values"""
     advice_query = f"""ATS-friendly way of writing {field}"""
     advices = retrieve_from_db(advice_query)
-    query_evaluation = f"""You are given some expert advices on writing {field} section of the resume.
+    query_evaluation = f"""You are given some expert advices on writing {field} section of the resume most ATS-friendly.
     
-    advices: {advices}
+    expert advices: {advices}
 
-    Use these advices to identity the strenghts and weaknesses of the resume content delimited with {delimiter} characters. 
+    Use these advices to generate a list of weaknesses of the field content and a list of the strengths. 
     
-    field content: {delimiter}{resume_field_content}{delimiter}. \n
+    field content: {resume_field_content}. \n
+
+    Your answer should be detailed and only from the field content. Please also provide your reasoning too as in the following examples:
     
-    Please provide proof of your reasoning. For example, if there is gap in work history, mark it as a weakness unless there is evidence it should not be considered so.
+        Weaknesses of Objective:
+
+        1. Weak nouns: you wrote  “LSW” but if the ATS might be checking for “Licensed Social Worker,”
+
+        Strengths of Objective:
+
+        1. Strong adjectives: "Dedicated" and "empathetic" qualities make a good social worker
+
+    Please ignore all formatting advices as formatting should not be part of the assessment.
 
     """
     strength_weakness = generate_multifunction_response(query_evaluation, general_tools)
-    # strength_weakness = get_completion(query_evaluation)
-    return strength_weakness
+
     
 
 
@@ -401,70 +480,53 @@ def test_cl_combined(posting_path=""):
     return generate_multifunction_response(query_relevancy, sample_tools)
    
 # Pass
-def test_resume_missing(resume_file = "./resume_samples/resume2023.txt", highest_education_level="bachelors of science", work_experience_level="entry level"):
+def test_resume_missing(my_job_title = "Professor of Geography", highest_education_level="PhD in history", work_experience_level="senior level"):
 
-    resume_content = read_txt(resume_file)
-    resume_samples_path = "./resume_samples/"
     related_samples = search_related_samples(my_job_title, resume_samples_path)
     sample_tools, tool_names = create_sample_tools(related_samples, "resume")
     # # Note: retrieval query works best if clear, concise, and detail-dense
-    advice_query = f"""what to include for resume with someone with {highest_education_level} and {work_experience_level} for {my_job_title}"""
-    advices = retrieve_from_db(advice_query)
+    advice_query = f"""what fields to include for resume with someone with {highest_education_level} and {work_experience_level} for {my_job_title}"""
+    advice = retrieve_from_db(advice_query)
+    resume_fields = ["work experience", "education", "personal information"]
 
-    query_missing = f"""  You are an expert resume field advisor that specializes in improvement content of resume delimited with {delimiter} characters. 
+    query_missing = f"""  
+  
+    Generate a list of missing resume fields suggestions in the job applicant's resume fields given the expert advice. 
 
-        resume: {delimiter}{resume_content}{delimiter}. 
+    expert advice: {advice}
 
-    Step 1. Sample resume are provided in your tools. Research {str(tool_names)} and answer the following question:
+    job applicant's resume fields: {str(resume_fields)}
 
-       List common things these resume have in common. 
+    If you believe the applicant's resume fields are enough, output -1. 
 
-       Please be general with your answer and ignore any personal details, locations, names, dates, etc. 
+    Use your tool if you ever need additional information.
 
-    Common Content: 
-
-    Step 2: Your job is to make a list of missing content in the resume delimited with {delimiter} characters using Common Content from Step 1 and  Expert Advice provided below. 
-
-        Expert Advice: {advices}
-     
-        Ignore all formatting advice and ignore any personal details, dates, school and company names, etc in Common Content. 
-
-        Your answer should be general enough to allow applicant to fill out the missing content with their own information. It is okay if there is nothing missing.
-
-        Missing Content:
-
-        Remember to reference Common Content and Expert Advice when generating Missing Content. Be general enough for applicant to provide their own missing information. 
-     """
-        # Missing Field Content:
-        # - missing dates: the work experience do not have dates of employment
-        # - missing metrics: there is no metrics that showcases performance
-
-    # Your answer should be general without losing details. For example, you should not compare company names but should compare shared work experiences.
-
-
-    # Please output each Step's answer in list format. 
+     """ 
 
     return generate_multifunction_response(query_missing, sample_tools)
 
 
 
 # test_coverletter_tool()
-test_resume_tool()
+# test_resume_tool()
 
 # test_general_job_description()
 # test_work_experience()
+# test_company_description()
 # test_education_level()
+# test_job_specification()
 
 # test_cl_revelancy_query()
 # test_cl_retrieval()
 # test_cl_samples_query()
 # test_cl_combined()
 
-# test_field_relevancy_query()
+# test_field_relevancy()
+# test_field_missing()
 # test_field_evaluation()
 # test_field_retrieval()
 # test_search_similar_resume()
 # test_extract_fields()
-# test_resume_missing()
+test_resume_missing()
 # test_refine_chain()
 # test_mapreduce_chain()

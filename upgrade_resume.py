@@ -6,7 +6,7 @@ from langchain.prompts import ChatPromptTemplate
 from langchain.output_parsers import CommaSeparatedListOutputParser
 from langchain import PromptTemplate
 from langchain.agents import AgentType, Tool, initialize_agent, create_json_agent
-from basic_utils import read_txt
+from basic_utils import read_txt, write_to_docx_template
 from common_utils import (get_web_resources, retrieve_from_db, extract_posting_information, extract_education_level, extract_work_experience_level, get_generated_responses,
                            extract_resume_fields, extract_job_title,  search_related_samples, create_sample_tools, extract_personal_information)
 from langchain_utils import create_search_tools, create_mapreduce_chain, create_summary_chain, generate_multifunction_response, create_refine_chain, handle_tool_error
@@ -24,6 +24,9 @@ from langchain.tools import tool
 from langchain.agents.agent_toolkits import FileManagementToolkit
 import docx
 import uuid
+from docxtpl import DocxTemplate	
+from docx import Document
+from docx.shared import Inches
 
 
 from dotenv import load_dotenv, find_dotenv
@@ -41,68 +44,69 @@ delimiter2 = "////"
 delimiter3 = "<<<<"
 delimiter4 = "****"
 
-
+# these are resume template file and template field names
+# doc = DocxTemplate("./resume_templates/template3.docx")
+# personal_info = ["Name", "Phone", "Email", "LinkedIn", "Website", "JobTitle"]
+document = Document()
+document.add_heading('Resume Evaluation', 0)
 
 
 def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path="") -> str:
 
 
     dirname, fname = os.path.split(resume_file)
-    filename = Path(fname).stem +"_re"+".txt"
-
+    filename = Path(fname).stem 
+    docx_filename = Path(fname).stem + "_evaluation"+".docx"
     # get resume info
     resume_content = read_txt(resume_file)
     info_dict=get_generated_responses(resume_content, my_job_title, company, posting_path)
     highest_education_level = info_dict["highest education level"]
     work_experience_level = info_dict["work experience level"]
     field_names = info_dict["field names"]
-
+    name = info_dict["name"]
+    phone = info_dict["phone"]
+    email = info_dict["email"]
+    linkedin = info_dict["linkedin"]
+    website = info_dict["website"]
+    job_title = info_dict["job title"]
+    personal_info_dict = {"Name":name, "Phone":phone, "Email":email, "LinkedIn": linkedin, "Website": website, "JobTitle":job_title}
+    print(personal_info_dict)
+  
+    # write_to_docx_template(doc, personal_info, personal_info_dict, docx_filename)
 
     # # Note: retrieval query works best if clear, concise, and detail-dense
-    advice_query = f"""what to include for resume with someone with {highest_education_level} and {work_experience_level} for {my_job_title}"""
-    advices = retrieve_from_db(advice_query)
+    advice_query = f"""what fields to include for resume with someone with {highest_education_level} and {work_experience_level} for {my_job_title}"""
+    advice = retrieve_from_db(advice_query)
     # samples query to find missing content from resume using document comparison
     # Note: document comparison benefits from a clear and simple prompt
     related_samples = search_related_samples(my_job_title, resume_samples_path)
     sample_tools, tool_names = create_sample_tools(related_samples, "resume")
-    query_missing = f"""  You are an expert resume field advisor that specializes in improvement content of resume delimited with {delimiter} characters. 
+    query_missing = f"""  
+  
+    Generate a list of missing resume fields suggestions in the job applicant's resume fields given the expert advice. 
 
-        resume: {delimiter}{resume_content}{delimiter}. 
+    expert advice: {advice}
 
-    Step 1. Sample resume are provided in your tools. Research {str(tool_names)} and answer the following question:
+    job applicant's resume fields: {str(field_names)}
 
-       List common things these resume have in common. 
+    If you believe the applicant's resume fields are enough, output -1. 
 
-       Please be general with your answer and ignore any personal details, locations, names, dates, etc. 
+    Use your tool if you ever need additional information.
 
-    Common Content: 
-
-    Step 2: Your job is to make a list of missing content in the resume delimited with {delimiter} characters using Common Content from Step 1 and  Expert Advice provided below. 
-
-        Expert Advice: {advices}
-     
-        Ignore all formatting advice and ignore any personal details, dates, school and company names, etc in Common Content. 
-
-        Your answer should be general enough to allow applicant to fill out the missing content with their own information. It is okay if there is nothing missing.
-
-        Missing Content:
-
-        Remember to reference Common Content and Expert Advice when generating Missing Content. Be general enough for applicant to provide their own missing information. 
      """
+    missing_fields = generate_multifunction_response(query_missing, sample_tools)
+    document.add_heading(f"Possible Missing Fields", level=1)
+    document.add_paragraph(missing_fields)
+    document.add_page_break()
 
-    missing_items = generate_multifunction_response(query_missing, sample_tools)
-    # file_path = file_path = os.path.join(dirname, "missing.txt")
-    # with open(res_path, "w") as f:
-    #   f.write(missing_items)
-    
-    # files = []
     for field in field_names:
-      # file_path = os.path.join(dirname, f"{field}.txt")
       try: 
         field_content = info_dict[field]
-        improve_resume_fields(info_dict, field, field_content,  sample_tools, filename, dirname)
+        improve_resume_fields(info_dict, field, field_content,  sample_tools, filename+field+'.txt', dirname)
       except Exception as e:
          raise e
+      
+    document.save(docx_filename)
 
       # files.append(file_path)
 
@@ -139,13 +143,12 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
     #    p.join()
 
     # return result to chat agent
-    return f""" file_path: "missing.txt" """
+    return f""" file_path: {docx_filename} """
 
 
 def improve_resume_fields(generated_response: Dict[str, str], field: str, field_content: str, tools: List[Tool], filename: str, dirname: str) -> None:
 
     print(f"CURRENT FIELD IS: {field}")
-    my_job_title = generated_response.get("job title", "")
     company_description = generated_response.get("company description", "")
     job_specification = generated_response.get("job specification", "")
     job_description = generated_response.get("job description", "")
@@ -154,20 +157,28 @@ def improve_resume_fields(generated_response: Dict[str, str], field: str, field_
     # The purpose of getting expert advices is to evaluate weaknesses in the current resume field content
     advice_query =  f"""What are some dos and don'ts when writing resume field {field} to make it ATS-friendly?"""
     advices = retrieve_from_db(advice_query)
-    query_evaluation = f""" You are an expert resume advisor. You are given some expert advices on writing {field} section of the resume.
+    query_evaluation = f"""You are given some expert advices on writing {field} section of the resume most ATS-friendly.
     
-    advices: {advices}
+    expert advices: {advices}
 
-    Use these advices to identity the strenghts and weaknesses of the resume content delimited with {delimiter} characters. 
+    Use these advices to generate a list of weaknesses of the field content and a list of the strengths.
     
-    field content: {delimiter}{field_content}{delimiter}. \n
+    field content: {field_content}. \n
+
+    Your answer should be detailed and only from the field content. Please also provide your reasoning too as in the following examples:
     
-    Please provide proof of your reasoning. For example, if there is gap in work history, mark it as a weakness unless there is evidence it should not be considered so.
-    
-    Ignore all formatting. They should not be considered as weaknesses or strengths. 
+        Weaknesses of Objective:
+
+        1. Weak nouns: you wrote  “LSW” but if the ATS might be checking for “Licensed Social Worker,”
+
+        Strengths of Objective:
+
+        1. Strong adjectives: "Dedicated" and "empathetic" qualities make a good social worker
+
+    Please ignore all formatting advices as formatting should not be part of the assessment.
 
     """
-    strength_weakness = generate_multifunction_response(query_evaluation, tools)
+    vulnerability = generate_multifunction_response(query_evaluation, tools)
 
     # Get resume's relevant and irrelevant info for resume field: few-shot learning works great here
     # The purpose of identitying irrelevant and relevant information is so that irrelevant information can be deleted or reworded
@@ -185,53 +196,55 @@ def improve_resume_fields(generated_response: Dict[str, str], field: str, field_
 
       general job description: {job_description} \n
 
-      Your answer should be detailed and only from the resume. Please also provide your reasoning too. 
-        
-      For example, your answer may look like this:
+      Your answer should be detailed and only from the resume. Please also provide your reasoning too as in the following example:
 
-      Relevant information in the Experience field:
+          Relevant information in the Experience field:
 
-      1. Experience as a Big Data Engineer: skills and responsibilities of a Big Data Engineer are transferable to those of a data analyst
+          1. Experience as a Big Data Engineer: skills and responsibilities of a Big Data Engineer are transferable to those of a data analyst
 
-      Irrelevant information  in the Experience Field:
+          Irrelevant information  in the Experience Field:
 
-      1. Experience as a front desk receptionist is not directly related to the role of a data analyst
+          1. Experience as a front desk receptionist is not directly related to the role of a data analyst
 
-      You do not need to evaluate field that contains personal information. 
 
       """
-
+    
     relevancy = generate_multifunction_response(query_relevancy, tools)
+        
+    query_missing_field = f"""  You are an expert resume field advisor. 
+
+     Generate a list of missing information that should be included in the resume field content. 
+       
+     Remember to use either job specification or general job description and comany description as your guideline. 
+
+      field name: {field}
+
+      field content: {field_content}\n
+
+      job specification: {job_specification}\n
+
+      general job description: {job_description} \n
+
+      company description: {company_description}
+
+      Your answer should be detailed and only from the field content. Please also provide your reasoning too as in the following examples:
+
+            Missing Field Content for Work Experience:
+
+            1. Quantative achievement in project management: no measurable metrics or KPIs to highlight any past achievements. 
+
+     """
+    missing = generate_multifunction_response(query_missing_field, tools)
+
+    evaluation = vulnerability + '\n' + relevancy + '\n' + missing
+    document.add_heading(f"{field}", level=1)
+    document.add_paragraph(evaluation)
+    document.add_page_break()
 
 
-    query = f""" You are a professional resume proof reader. 
-    
-    Your task is to rewrite the resume field content based on an evaluation on its strengths, weaknesses, and what should be and should not be included, which has been provided for you.
 
-    The original field is: {field_content}
 
-    Its strengths and weakness: {strength_weakness}
 
-    What to include and what not to include: {relevancy}
-
-    Rememeber, your task is to proof-read and rewrite, not reporting information to the user.
-
-    Revised version:  
-
-    Please use your tool "write_file" to write the final revised version to path: {filename}
-    
-    """
-
-    working_directory=dirname
-    write_tool = FileManagementToolkit(
-          root_dir=working_directory, # ensures only the working directory is accessible 
-          selected_tools=["write_file"],
-      ).get_tools()
-  
-    response = generate_multifunction_response(query, write_tool)
-
-    # with open(file_path, "a") as f:
-    #    f.write(strength_weakness + '\n' + relevancy + '\n')
 
 
 
@@ -339,8 +352,7 @@ def create_resume_evaluator_tool() -> List[Tool]:
     Input should be a single string strictly in the following JSON format: {parameters} \n
      Leave value blank if there's no information provided. DO NOT MAKE STUFF UP. 
      (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) \n
-    Output should be calling the 'read_file' tool in the followng JSON format: {output} \n
-    The file_path is in the working directory. Output the content directly to user please.' \n 
+     Output should be using the "get download link" tool in the following single string JSON format: {output}
     """
     tools = [
         Tool(
@@ -360,8 +372,10 @@ def create_resume_evaluator_tool() -> List[Tool]:
 
 
 if __name__ == '__main__':
-    my_job_title = 'accountant'
-    my_resume_file = 'resume_samples/sample1.txt'
-    # evaluate_resume()
+    my_job_title = 'Data Analyst'
+    my_resume_file = './resume_samples/resume2023v2.txt'
+    job_posting = "./uploads/file/data_analyst_SC.txt"
+    company = "Southern Company"
+    evaluate_resume(my_job_title =my_job_title, company = company, resume_file=my_resume_file, posting_path = job_posting)
 
 
