@@ -13,8 +13,9 @@ import uuid
 from pptx import Presentation
 from langchain.document_loaders import UnstructuredURLLoader
 from typing import Any, List, Union, Dict
+from docxtpl import DocxTemplate
 
-
+    
 
 def convert_to_txt(file, output_path):
     file_ext = os.path.splitext(file)[1]
@@ -55,7 +56,7 @@ def convert_pptx_to_txt(pptx_file, output_path):
         f.write(text)
         f.close()
 
-
+#TODO: needs to find the best pdf to txt converter that takes care of special characters best (such as the dash between dates)
 def convert_pdf_to_txt(pdf_file, output_path):
     pdf = fitz.open(pdf_file)
     text = ""
@@ -65,7 +66,7 @@ def convert_pdf_to_txt(pdf_file, output_path):
         f.write(text)
         f.close()
 
-
+#TODO: needs to find the best docx to txt converter that takes care of special characters best
 def convert_doc_to_txt(doc_file, output_path):
     pypandoc.convert_file(doc_file, 'plain', outputfile=output_path)
 
@@ -130,11 +131,23 @@ def retrieve_web_content(link, save_path="./web_data/test.txt"):
         return False
     
 
-def write_to_docx(doc: Any, text: str, type: str, res_path: str):
-    if type=="cover_letter":
-        p = doc.add_paragraph()
-        p.add_run(text)
-        doc.save(res_path)
+# def write_to_docx(doc: Any, text: str, type: str, res_path: str):
+#     if type=="cover_letter":
+#         p = doc.add_paragraph()
+#         p.add_run(text)
+#         doc.save(res_path)  
+#         print(f"Succesfully writte cover letter to {res_path}")
+
+
+
+def write_to_docx_template(doc: Any, field_name: List[str], field_content: Dict[str, str], res_path) -> None:
+    context = {key: None for key in field_name}
+    for field in field_name:
+        if field_content[field] != -1:
+            context[field] = field_content[field]
+    doc.render(context)
+    doc.save(res_path)
+    print(f"Succesfully written {field_name} to {res_path}.")
 
 
         
@@ -144,8 +157,9 @@ def write_to_docx(doc: Any, text: str, type: str, res_path: str):
 
 if __name__=="__main__":
     retrieve_web_content(
-        "https://learning.shine.com/talenteconomy/resume-tips/resume-objectives/",
+        "https://www.zippia.com/advice/resume-objectives-entry-level/",
         save_path = f"./web_data/{str(uuid.uuid4())}.txt")
+    convert_to_txt("./resume_samples/college-student-resume-example.pdf", "./resume_samples/college-student-resume-example.txt")
 
 
 

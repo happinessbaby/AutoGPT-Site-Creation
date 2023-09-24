@@ -13,7 +13,7 @@ from langchain.tools.python.tool import PythonREPLTool
 from langchain.agents import AgentType
 from langchain.chains import RetrievalQA,  LLMChain
 from pathlib import Path
-from basic_utils import read_txt, convert_to_txt, write_to_docx
+from basic_utils import read_txt, convert_to_txt
 from langchain_utils import ( create_wiki_tools, create_search_tools, create_retriever_tools, create_compression_retriever, create_ensemble_retriever, retrieve_redis_vectorstore, create_vectorstore, merge_faiss_vectorstore, create_vs_retriever_tools,
                               split_doc, handle_tool_error, retrieve_faiss_vectorstore, split_doc_file_size, reorder_docs, create_summary_chain)
 from langchain import PromptTemplate
@@ -102,15 +102,20 @@ def extract_personal_information(resume: str,  llm = ChatOpenAI(temperature=0, m
                                         description="Extract the phone number of the applicant. If this information is not found, output -1")
     address_schema = ResponseSchema(name="address",
                                         description="Extract the home address of the applicant. If this information is not found, output -1")
-    # education_schema = ResponseSchema(name="education",
-    #                                   description = "Extract the highest level of education of the applicant. If this information is not found, output-1.")
+    linkedin_schema = ResponseSchema(name="linkedin", 
+                                 description="Extract the LinkedIn html in the resume. If this information is not found, output -1")
+    website_schema = ResponseSchema(name="website", 
+                                   description="Extract website html in the personal information section of the resume that is not a LinkedIn html.  If this information is not found, output -1")
+
+     
 
 
     response_schemas = [name_schema, 
                         email_schema,
                         phone_schema, 
                         address_schema, 
-                        # education_schema,
+                        linkedin_schema,
+                        website_schema,
                         ]
 
     output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
@@ -121,15 +126,18 @@ def extract_personal_information(resume: str,  llm = ChatOpenAI(temperature=0, m
 
     email: Extract the email address of the applicant. If this information is not found, output -1\
 
-    phone number: Extract the phone number of the applicant. If this information is not found, output -1\
+    phone: Extract the phone number of the applicant. If this information is not found, output -1\
     
-    address: Extract the home address of the applicant. If this information is not found, output -1\  
+    address: Extract the home address of the applicant. If this information is not found, output -1\
+
+    linkedin: Extract the LinkedIn html in the resume. If this information is not found, output -1\
+
+    website: Extract website html in the personal information section of the resume that is not a LinkedIn html.  If this information is not found, output -1\
 
     text: {delimiter}{text}{delimiter}
 
     {format_instructions}
     """
-    # education: Extract the highest level of education the applicant. If this information is not found, output -1\
 
     prompt = ChatPromptTemplate.from_template(template=template_string)
     messages = prompt.format_messages(text=resume, 
@@ -235,10 +243,11 @@ def extract_job_title(resume: str) -> str:
     print(f"Successfull extracted job title: {response}")
     return response
 
+
 # class ResumeField(BaseModel):
 #     field_name: str=Field(description="field name")
 #     field_content: str=Field(description="content of the field")
-def extract_resume_fields(resume: str,  llm=OpenAI(temperature=0,  max_tokens=1024)) -> Union[List[str], Dict[str, str]]:
+def extract_resume_fields(resume: str,  llm=OpenAI(temperature=0,  max_tokens=2048)) -> Dict[str, str]:
 
     """ Extracts resume field names and field content.
 
@@ -254,18 +263,18 @@ def extract_resume_fields(resume: str,  llm=OpenAI(temperature=0,  max_tokens=10
 
     Returns:
 
-        a list of field names along with a dictionary of field names and their respective content
+        a dictionary of field names and their respective content
     
     
     """
 
-
+    # First chain: get resume field names
     field_name_query =  """Search and extract names of fields contained in the resume delimited with {delimiter} characters. A field name must has content contained in it for it to be considered a field name. 
 
         Some common resume field names include but not limited to personal information, objective, education, work experience, awards and honors, area of expertise, professional highlights, skills, etc. 
          
          
-        If there are no obvious field name but some information belong together, like name, phone number, address, please generate a field name for this group of information, such as Personal Information.    
+        If there are no obvious field name but some information belong together, like name, phone number, address, please generate a field name for this group of information, such as Personal Information.   
 
          resume: {delimiter}{resume}{delimiter} \n
          
@@ -279,43 +288,67 @@ def extract_resume_fields(resume: str,  llm=OpenAI(temperature=0,  max_tokens=10
     )
     field_name_chain = LLMChain(llm=llm, prompt=field_name_prompt, output_key="field_names")
 
-    query = """For each field name in {field_names}, check if there is valid content within it in the resume. 
+    field_content_query = """For each field name in {field_names}, check if there is valid content within it in the resume. 
 
-    If the field name is valid, output in JSON with field name as key and content as value. 
+    If the field name is valid, output in JSON with field name as key and content as value. DO NOT LOSE ANY INFORMATION OF THE CONTENT WHEN YOU SAVE IT AS THE VALUE.
 
       resume: {delimiter}{resume}{delimiter} \n
  
     """
+
     # {format_instructions}
     
     # output_parser = PydanticOutputParser(pydantic_object=ResumeField)
 
-    format_instructions = output_parser.get_format_instructions()
+    # Chain two: get resume field content associated with each names
     format_instructions = output_parser.get_format_instructions()
     prompt = PromptTemplate(
-        template=query,
+        template=field_content_query,
         input_variables=["delimiter", "resume", "field_names"],
         # partial_variables={"format_instructions": format_instructions}
     )
-    chain = LLMChain(llm=llm, prompt=prompt, output_key="field_content")
+    field_content_chain = LLMChain(llm=llm, prompt=prompt, output_key="field_content")
+
+    # Chain three: trim the dictionary for further resume evaluation
+    dict_trim_query = """ For the field content in the JSON string format below, delete all the JSON keys that have an empty value.
+
+    If there are two keys with the same value, delete one of the keys. 
+
+    Output the same JSON string with the above things deleted. MAKE SURE YOUR OUTPUT IS IN JSON FORMAT.
+
+    field content: {field_content}
+
+    """
+    format_instructions = output_parser.get_format_instructions()
+    prompt = PromptTemplate(
+        template=dict_trim_query,
+        input_variables=["field_content"],
+        # partial_variables={"format_instructions": format_instructions}
+    )
+    content_trim_chain = LLMChain(llm=llm, prompt=prompt, output_key="trimmed_field_content")
+
     overall_chain = SequentialChain(
         memory=SimpleMemory(memories={"resume":resume}),
-        chains=[field_name_chain, chain],
+        chains=[field_name_chain, field_content_chain, content_trim_chain],
         # input_variables=["delimiter", "resume"],
         input_variables=["delimiter"],
     # Here we return multiple variables
-        output_variables=["field_names",  "field_content"],
+        output_variables=["field_names",  "field_content", "trimmed_field_content"],
         verbose=True)
     # response = overall_chain({"delimiter":"####", "resume":resume})
     response = overall_chain({"delimiter": "####"})
     field_names = output_parser.parse(response.get("field_names", ""))
     # sometimes, not always, there's an annoying text "Output: " in front of json that needs to be stripped
-    field_content = '{' + response.get("field_content", "").split('{', 1)[-1]
-    print(field_content)
-    field_content = json.loads(field_content)
+    # field_content = '{' + response.get("field_content", "").split('{', 1)[-1]
+    trimmed_field_content = '{' + response.get("trimmed_field_content", "").split('{', 1)[-1]
+    print(trimmed_field_content)
+    try:
+        field_content = json.loads(trimmed_field_content)
+    except JSONDecodeError as e:
+        field_content = get_completion(f""" Correct the misformatted JSON string below and output a valid JSON string:
+                       {trimmed_field_content} """)
     # output_parser.parse(field_content)
-    return field_names, field_content
-
+    return field_content
 
 
 #TODO: once there's enough samples, education level and work experience level could also be included in searching criteria
@@ -361,7 +394,7 @@ def search_related_samples(job_title: str, directory: str) -> List[str]:
             related_files.append(file)
     #TODO: if no match, a general template will be used
     if len(related_files)==0:
-        related_files.append(directory + "software_developer.txt")
+        related_files.append(file)
     return related_files
 
 # This is actually a hard one for LLM to get
@@ -429,6 +462,7 @@ def extract_work_experience_level(content: str, job_title:str, llm=OpenAI()) -> 
     except Exception:
         response = ""
     # response = generate_multifunction_response(query, tools, max_iter=5)
+    print(f"Sucessfully retriever work experience level: {response}")
     return response
 
 
@@ -483,7 +517,7 @@ def retrieve_from_db(query: str, llm=OpenAI(temperature=0.8, cache=False)) -> st
   
     """
 
-    compression_retriever = create_compression_retriever()
+    compression_retriever = create_compression_retriever(vectorstore="faiss_web_data")
     docs = compression_retriever.get_relevant_documents(query)
     reordered_docs = reorder_docs(docs)
 
@@ -550,15 +584,16 @@ def create_sample_tools(related_samples: List[str], sample_type: str,) -> Union[
     return tools, tool_names
 
 
+
 def get_generated_responses(resume_content:str, my_job_title:str, company:str, posting_path:str,): 
 
     # Get personal information from resume
     generated_responses={}
     personal_info_dict = extract_personal_information(resume_content)
     generated_responses.update(personal_info_dict)
-
-    field_names, field_content = extract_resume_fields(resume_content)
-    generated_responses.update({"field names":field_names})
+    field_content = extract_resume_fields(resume_content)
+    field_names = list(field_content.keys())
+    generated_responses.update({"field names": field_names})
     generated_responses.update(field_content)
 
     job_specification = ""

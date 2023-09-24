@@ -3,7 +3,7 @@ from upgrade_resume import resume_evaluator, create_resume_evaluator_tool
 from langchain.chat_models import ChatOpenAI
 from langchain.agents import AgentType, Tool, initialize_agent
 from basic_utils import read_txt
-from common_utils import (get_web_resources,extract_education_level,file_loader, binary_file_downloader_html,
+from common_utils import (get_web_resources,extract_education_level,file_loader, binary_file_downloader_html, 
                           retrieve_from_db, search_related_samples, create_sample_tools, extract_work_experience_level,  extract_resume_fields)
 from langchain.tools import tool
 from langchain_utils import retrieve_faiss_vectorstore, create_search_tools, create_summary_chain, generate_multifunction_response, split_doc, split_doc_file_size, create_refine_chain, create_mapreduce_chain
@@ -113,7 +113,7 @@ def test_search_similar_resume(my_job_title = "software engineer"):
     print(f"SIMILAR RESUME FILES WRT {my_job_title}: {similar_files}")
 
 # PASS
-def test_extract_fields(resume_file="./resume_samples/test.txt"):
+def test_extract_fields(resume_file="./resume_samples/college-student-resume-example.txt"):
     # fields = extract_fields(read_txt(resume_file))
     field_names, field_content = extract_resume_fields(read_txt(resume_file))
     assert isinstance(field_names, list), "field names not a list!"
@@ -229,16 +229,9 @@ def test_field_relevancy( my_job_title="data analyst", field = "skills", posting
     related_samples = search_related_samples(my_job_title, resume_samples_path)
     sample_tools, tool_names = create_sample_tools(related_samples, "resume")
 
-    field_content = """Walmart, remote contractor, full-time					2022-05 – 2022-10
-Big Data Engineer 
-    • Coordinated across teams to evaluate and improve low level deign of new back-end features that involved upstream streaming and downstream API calls to data analysis sectors
-    • Tested methodology with writing and execution of test plans, debugging and testing scripts and tools, which included revamping old code bases to modern development standards
-    • Completed all assigned tasks within a timely manner and took on extra responsibilities to meet team goals
-
-
-Revature									2022-01 - 2022-12
-Big Data Engineer
-    • Implemented Big Data platforms and tools on the complete ETL process from data ingestion and data query to data storage and data analytic using tools such as Spark, Hadoop, and SQL"""
+    field_content = """University of Chicago, Chicago, IL
+Bachelors of Arts: Mathematics						  	2009 -  2013
+"""
 
 
 
@@ -278,6 +271,8 @@ Big Data Engineer
             Irrelevant information  in the Experience Field:
 
             1. Experience as a front desk receptionist is not directly related to the role of a data analyst
+            
+    Please ignore all formatting advices as formatting should not be part of the assessment.
 
       """
     relevancy = generate_multifunction_response(query_relevancy, sample_tools)
@@ -338,6 +333,8 @@ Machine Learning Engineer Program
 
             1. Quantative achievement in project management: no measurable metrics or KPIs to highlight any past achievements. 
 
+    Please ignore all formatting advices as formatting should not be part of the assessment.
+
      """
             # Missing Field Content for Skills:
 
@@ -347,20 +344,12 @@ Machine Learning Engineer Program
 
 
 #DECENT, WILL NEED TO UPDATE ADVICE QUERY TO IMPROVE OUTPUT
-def test_field_evaluation( field="work history"):
+def test_field_evaluation( field="education"):
 
-    general_tools = create_search_tools("google", 3)
-    resume_field_content = """Walmart    					                                           2022-05 – 2022-10
-Big Data Engineer 
-    • Collaborated with cross-functional teams in evaluating and improving low level deign of new back-end features that included streaming services and data analytic
-    • Tested methodology with writing and execution of test plans, debugging and testing scripts and tools, and revamped old code bases to modern development standards for improved error handling and data handling to meet the functional programming paradigm 
-    • Completed all assigned tasks within a timely manner, aided other team members, and took on extra responsibilities to meet team goals, which helped the team achieve bi-weekly goals more satisfyingly 
-
-
-Revature									2022-01 - 2022-12
-Big Data Engineer
-    • Implemented Big Data platforms and tools on the complete ETL process from data ingestion and data query to data storage and data analytic using tools such as Scala, Spark, Hadoop, and SQL
-    • Collaborated with other members on Big Data related projects, distributed assignments to team members, and presented results of data analysis to showcase their business values"""
+    search_tools = create_search_tools("google", 3)
+    resume_field_content = """University of Chicago, Chicago, IL
+Bachelors of Arts: Mathematics						  09/2009 - 06/2013
+"""
     advice_query = f"""ATS-friendly way of writing {field}"""
     advices = retrieve_from_db(advice_query)
     query_evaluation = f"""You are given some expert advices on writing {field} section of the resume most ATS-friendly.
@@ -384,9 +373,53 @@ Big Data Engineer
     Please ignore all formatting advices as formatting should not be part of the assessment.
 
     """
-    strength_weakness = generate_multifunction_response(query_evaluation, general_tools)
 
+    # query_evaluation = f"""Search for the most ATS-friendly way of writing {field}.
+
+    # Use your search result as a reference,  generate a list of weaknesses of the field content below and a list of the strengths.
     
+    # field content: {resume_field_content}. \n
+
+    # Your answer should be detailed and only from the field content. Please also provide your reasoning too as in the following examples:
+    
+    #     Weaknesses of Objective:
+
+    #     1. Weak nouns: you wrote  “LSW” but if the ATS might be checking for “Licensed Social Worker,”
+
+    #     Strengths of Objective:
+
+    #     1. Strong adjectives: "Dedicated" and "empathetic" qualities make a good social worker
+
+    # Please ignore all formatting advices as formatting should not be part of the assessment.
+
+    # """
+
+    strength_weakness = generate_multifunction_response(query_evaluation, search_tools)
+
+
+def test_resume_impression(resume_file="./resume_samples/test.txt"):
+    resume_content = read_txt(resume_file)
+    related_samples = search_related_samples(my_job_title, resume_samples_path)
+    sample_tools, tool_names = create_sample_tools(related_samples, "resume")
+    # impression_query = f""" You are an expert resume evaluator.
+
+    # Research each sample resume in your tools {str(tool_names)} and answer the following question: 
+
+    #         what is your overall impression of the applicant's resume delimiter with {delimiter} characters below. 
+                              
+    # applicant's resume: {delimiter}{resume_content}{delimiter} \n
+
+    # Please generate your impression for the applicant's resume only and write it in one paragraph."""
+    impression_query = f""" You are an expert resume critic who assesses the quality of a resume. 
+
+    Answer the following question: 
+
+            what is your overall impression of the applicant's resume delimiter with {delimiter} characters below? 
+                              
+    applicant's resume: {delimiter}{resume_content}{delimiter} \n
+
+   Please generate your impression for the applicant's resume only and write it in one paragraph."""
+    impression = generate_multifunction_response(impression_query, sample_tools)
 
 
 def test_refine_chain(directory = "./static/resume_evaluation/test/"):
@@ -502,6 +535,8 @@ def test_resume_missing(my_job_title = "Professor of Geography", highest_educati
     Use your tool if you ever need additional information.
 
      """ 
+    
+    
 
     return generate_multifunction_response(query_missing, sample_tools)
 
@@ -526,7 +561,10 @@ def test_resume_missing(my_job_title = "Professor of Geography", highest_educati
 # test_field_evaluation()
 # test_field_retrieval()
 # test_search_similar_resume()
-# test_extract_fields()
-test_resume_missing()
+test_extract_fields()
+# test_resume_missing()
+# test_resume_impression()
+
+
 # test_refine_chain()
 # test_mapreduce_chain()

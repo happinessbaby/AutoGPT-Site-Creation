@@ -56,21 +56,23 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
 
     dirname, fname = os.path.split(resume_file)
     filename = Path(fname).stem 
-    docx_filename = Path(fname).stem + "_evaluation"+".docx"
+    docx_filename = filename + "_evaluation"+".docx"
     # get resume info
     resume_content = read_txt(resume_file)
     info_dict=get_generated_responses(resume_content, my_job_title, company, posting_path)
     highest_education_level = info_dict["highest education level"]
     work_experience_level = info_dict["work experience level"]
-    field_names = info_dict["field names"]
     name = info_dict["name"]
     phone = info_dict["phone"]
     email = info_dict["email"]
     linkedin = info_dict["linkedin"]
     website = info_dict["website"]
     job_title = info_dict["job title"]
+    field_names = info_dict["field names"]
     personal_info_dict = {"Name":name, "Phone":phone, "Email":email, "LinkedIn": linkedin, "Website": website, "JobTitle":job_title}
     print(personal_info_dict)
+
+
   
     # write_to_docx_template(doc, personal_info, personal_info_dict, docx_filename)
 
@@ -81,6 +83,25 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
     # Note: document comparison benefits from a clear and simple prompt
     related_samples = search_related_samples(my_job_title, resume_samples_path)
     sample_tools, tool_names = create_sample_tools(related_samples, "resume")
+
+    impression_query = f""" You are an expert resume critic who assesses the quality of a resume. 
+
+    Answer the following question: 
+
+        what is your overall impression of the applicant's resume delimiter with {delimiter} characters below? 
+                              
+    applicant's resume: {delimiter}{resume_content}{delimiter} \n
+
+   Please generate your impression for the applicant's resume only and write it in one paragraph.
+   
+   Use your tools if you need to reference other resume.
+
+   """
+    impression = generate_multifunction_response(impression_query, sample_tools)
+    document.add_heading(f"Overall Impression", level=2)
+    document.add_paragraph(impression)
+    document.add_page_break()
+
     query_missing = f"""  
   
     Generate a list of missing resume fields suggestions in the job applicant's resume fields given the expert advice. 
@@ -91,22 +112,25 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
 
     If you believe the applicant's resume fields are enough, output -1. 
 
-    Use your tool if you ever need additional information.
+    Use your tools if you need to reference other resume.
 
-     """
+    """
     missing_fields = generate_multifunction_response(query_missing, sample_tools)
-    document.add_heading(f"Possible Missing Fields", level=1)
+    document.add_heading(f"Possible Missing Fields", level=2)
     document.add_paragraph(missing_fields)
     document.add_page_break()
+    document.save(docx_filename)
 
     for field in field_names:
-      try: 
-        field_content = info_dict[field]
-        improve_resume_fields(info_dict, field, field_content,  sample_tools, filename+field+'.txt', dirname)
-      except Exception as e:
-         raise e
+      if field != "Personal Information":
+        try: 
+          field_content = info_dict[field]
+          improve_resume_fields(info_dict, field, field_content,  sample_tools, docx_filename)
+        except Exception as e:
+          raise e
       
     document.save(docx_filename)
+    print("Successfully saved resume evaluation.")
 
       # files.append(file_path)
 
@@ -146,7 +170,7 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
     return f""" file_path: {docx_filename} """
 
 
-def improve_resume_fields(generated_response: Dict[str, str], field: str, field_content: str, tools: List[Tool], filename: str, dirname: str) -> None:
+def improve_resume_fields(generated_response: Dict[str, str], field: str, field_content: str, tools: List[Tool], docx_filename: str) -> None:
 
     print(f"CURRENT FIELD IS: {field}")
     company_description = generated_response.get("company description", "")
@@ -177,6 +201,8 @@ def improve_resume_fields(generated_response: Dict[str, str], field: str, field_
 
     Please ignore all formatting advices as formatting should not be part of the assessment.
 
+    Use your tools if you need to reference other resume.
+
     """
     vulnerability = generate_multifunction_response(query_evaluation, tools)
 
@@ -205,7 +231,10 @@ def improve_resume_fields(generated_response: Dict[str, str], field: str, field_
           Irrelevant information  in the Experience Field:
 
           1. Experience as a front desk receptionist is not directly related to the role of a data analyst
+    
+      Please ignore all formatting advices as formatting should not be part of the assessment.
 
+      Use your tools if you need to reference other resume.
 
       """
     
@@ -233,6 +262,10 @@ def improve_resume_fields(generated_response: Dict[str, str], field: str, field_
 
             1. Quantative achievement in project management: no measurable metrics or KPIs to highlight any past achievements. 
 
+      Please ignore all formatting advices as formatting should not be part of the assessment.
+
+      Use your tools if you need to reference other resume.
+
      """
     missing = generate_multifunction_response(query_missing_field, tools)
 
@@ -240,6 +273,7 @@ def improve_resume_fields(generated_response: Dict[str, str], field: str, field_
     document.add_heading(f"{field}", level=1)
     document.add_paragraph(evaluation)
     document.add_page_break()
+    document.save(docx_filename)
 
 
 
@@ -372,10 +406,12 @@ def create_resume_evaluator_tool() -> List[Tool]:
 
 
 if __name__ == '__main__':
-    my_job_title = 'Data Analyst'
-    my_resume_file = './resume_samples/resume2023v2.txt'
-    job_posting = "./uploads/file/data_analyst_SC.txt"
-    company = "Southern Company"
-    evaluate_resume(my_job_title =my_job_title, company = company, resume_file=my_resume_file, posting_path = job_posting)
+    # my_job_title = 'Data Analyst'
+    # my_resume_file = './resume_samples/resume2023v3.txt'
+    # job_posting = "./uploads/file/data_analyst_SC.txt"
+    # company = "Southern Company"
+    # evaluate_resume(my_job_title =my_job_title, company = company, resume_file=my_resume_file, posting_path = job_posting)
+    my_resume_file = "./resume_samples/college-student-resume-example.txt"
+    evaluate_resume(resume_file=my_resume_file)
 
 

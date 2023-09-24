@@ -6,7 +6,7 @@ from langchain.llms import OpenAI
 from langchain import PromptTemplate
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
-from basic_utils import read_txt, write_to_docx
+from basic_utils import read_txt
 from common_utils import (extract_personal_information, get_web_resources,  retrieve_from_db,extract_education_level, extract_work_experience_level, get_generated_responses,
                          extract_posting_information, create_sample_tools, extract_job_title, search_related_samples)
 from datetime import date
@@ -23,6 +23,7 @@ from langchain.tools import tool
 import uuid
 import docx
 import base64
+from docx import Document
 
 
 
@@ -42,7 +43,8 @@ delimiter3 = '---'
 delimiter4 = '////'
 delimiter5 = '~~~~'
 
-
+document = Document()
+document.add_heading('Cover Letter', 0)
       
 def generate_basic_cover_letter(my_job_title="", company="", resume_file="",  posting_path="") -> str:
     
@@ -65,7 +67,8 @@ def generate_basic_cover_letter(my_job_title="", company="", resume_file="",  po
     """
     
     dirname, fname = os.path.split(resume_file)
-    res_path = os.path.join(dirname, "cover_letter"+".docx")
+    filename = Path(fname).stem 
+    docx_filename = filename + "_cover_letter"+".docx"
 
     # Get resume info
     resume_content = read_txt(resume_file)
@@ -207,9 +210,12 @@ def generate_basic_cover_letter(my_job_title="", company="", resume_file="",  po
     my_cover_letter = llm(cover_letter_message).content
     cover_letter = get_completion(f"Extract the cover letter from text: {my_cover_letter}")
     # write cover letter to file  
-    doc = docx.Document()
-    write_to_docx(doc, cover_letter, "cover_letter", res_path)
-    return f"""file_path:{res_path}"""
+    # doc = docx.Document()
+    # write_to_docx(doc, cover_letter, "cover_letter", res_path)
+    document.add_paragraph(cover_letter)
+    document.save(docx_filename)
+    print("Successfully saved cover letter.")
+    return f"""file_path:{docx_filename}"""
     return cover_letter
 
 
@@ -324,9 +330,11 @@ def create_cover_letter_generator_tool() -> List[Tool]:
  
 if __name__ == '__main__':
     # test run defaults, change for yours (only resume_file cannot be left empty)
-    my_job_title = 'data analyst'
-    my_resume_file = 'resume_samples/resume2023v2.txt'
-    generate_basic_cover_letter(resume_file = my_resume_file)
+    my_job_title = 'Data Analyst'
+    my_resume_file = './resume_samples/resume2023v3.txt'
+    job_posting = "./uploads/file/data_analyst_SC.txt"
+    company = "Southern Company"
+    generate_basic_cover_letter(resume_file = my_resume_file, my_job_title=my_job_title, posting_path=job_posting, company=company)
 
 
 
