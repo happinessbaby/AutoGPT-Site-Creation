@@ -174,25 +174,26 @@ class Chat():
                 #             ''')
                 with st.form( key='my_form', clear_on_submit=True):
 
-                    col1, col2= st.columns([5, 5])
+                    # col1, col2= st.columns([5, 5])
 
-                    with col1:
-                        job = st.text_input(
-                            "job title",
-                            "",
-                            key="job",
-                        )
+                    # with col1:
+                    #     job = st.text_input(
+                    #         "job title",
+                    #         "",
+                    #         key="job",
+                    #     )
                     
-                    with col2:
-                        company = st.text_input(
-                            "company name",
-                            "",
-                            key = "company"
-                        )
+                    # with col2:
+                    #     company = st.text_input(
+                    #         "company/institution name",
+                    #         "",
+                    #         key = "company"
+                    #     )
+
+                    about_me = st.text_area(label="tell me about yourself", value="For example, you can say, I want to pursue a developer job at ABC company, or I want to apply for the MBA program at ABC University")
                         
                     add_vertical_space(1)
                     link = st.text_input("job posting link", "", key = "link")
-
 
                     uploaded_files = st.file_uploader(label="Upload your file",
                                                     type=["pdf","odt", "docx","txt", "zip", "pptx"], 
@@ -310,14 +311,14 @@ class Chat():
         except FileExistsError:
             pass
 
-        try:
-            job = st.session_state.job
-            self.new_chat.update_entities(f"job:{job} /n ###")
-        except Exception:
-            pass
-        try: 
-            company = st.session_state.company
-            self.new_chat.update_entities(f"company:{company} /n ###")
+        # try:
+        #     job = st.session_state.job
+        #     self.new_chat.update_entities(f"job:{job} /n ###")
+        # except Exception:
+        #     pass
+        # try: 
+        #     company = st.session_state.company
+        #     self.new_chat.update_entities(f"company:{company} /n ###")
         except Exception:
             pass
         try:
@@ -330,11 +331,19 @@ class Chat():
             self.process_link(link)
         except Exception:
             pass
+        try:
+            about_me = st.session_state.about_me
+            self.process_about_me(about_me)
+        except Exception:
+            pass
+
+    
+    def process_about_me(self) -> None:
+        #TODO: extract job, company, institution, program, 
+        
+        return None
 
 
-
-
-    @st.cache()
     def process_file(self, uploaded_files: Any) -> None:
 
         """ Processes user uploaded files including converting all format to txt, checking content safety, and categorizing content type  """

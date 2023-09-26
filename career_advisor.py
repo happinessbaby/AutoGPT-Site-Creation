@@ -65,6 +65,7 @@ from langchain.schema import OutputParserException
 from multiprocessing import Process, Queue, Value
 from generate_cover_letter import cover_letter_generator, create_cover_letter_generator_tool
 from upgrade_resume import  resume_evaluator, create_resume_evaluator_tool
+from improve_personal_statement import create_personal_statement_writer_tool
 from langchain.agents.agent_toolkits import create_conversational_retrieval_agent
 from langchain.agents.agent_toolkits import create_retriever_tool
 from typing import List, Dict
@@ -137,6 +138,7 @@ class ChatController():
         resume_evaluator_tool = create_resume_evaluator_tool()
         # resume evaluator tool
         # resume_evaluator_tool = [resume_evaluator]
+        personal_statement_writer_tool = create_personal_statement_writer_tool()
         # interview mode starter tool
         # interview_tool = self.initiate_interview_tool()
         # file_loader_tool = create_file_loader_tool()
@@ -155,11 +157,11 @@ class ChatController():
 
         link_download_tool = [binary_file_downloader_html]
         # general vector store tool
-        # store = retrieve_faiss_vectorstore("faiss_web_data")
-        # retriever = store.as_retriever()
-        # general_tool_description = """This is a general purpose tool. Use it to answer general job related questions through searching database.
-        # Prioritize other tools over this tool. """
-        # general_tool= create_retriever_tools(retriever, "search_general_database", general_tool_description)
+        store = retrieve_faiss_vectorstore("faiss_web_data")
+        retriever = store.as_retriever()
+        general_tool_description = """This is a general purpose tool. Use it to answer general job related questions through searching database.
+        Prioritize other tools over this tool. """
+        general_tool= create_retriever_tools(retriever, "search_general_database", general_tool_description)
         # web reserach: https://python.langchain.com/docs/modules/data_connection/retrievers/web_research
         # search = GoogleSearchAPIWrapper()
         # embedding_size = 1536  
@@ -177,7 +179,7 @@ class ChatController():
         # wiki tool
         wiki_tool = create_wiki_tools()
         # gather all the tools together
-        self.tools =  cover_letter_tool + resume_evaluator_tool + search_tool + wiki_tool + link_download_tool + [tool for tool in file_sys_tools]
+        self.tools =  cover_letter_tool + resume_evaluator_tool + search_tool + wiki_tool + link_download_tool + [tool for tool in file_sys_tools] + general_tool + personal_statement_writer_tool
         tool_names = [tool.name for tool in self.tools]
 
 
@@ -583,12 +585,12 @@ class ChatController():
     #     print(f"Succesfully created interview material tool: {tool_name}")
 
     #     return tool
-    def update_tools(self, tools:List[Tool]) -> None:
+    # def update_tools(self, tools:List[Tool]) -> None:
 
-        """ Update tools for chat agent."""
+    #     """ Update tools for chat agent."""
 
-        self.tools += tools
-        print(f"Succesfully updated tool {[t.name for t in tools]}for chat agent.")
+    #     self.tools += tools
+    #     print(f"Succesfully updated tool {[t.name for t in tools]}for chat agent.")
 
 
     def update_entities(self,  text:str) -> None:
@@ -625,6 +627,9 @@ class ChatController():
         with open(log_path+f"{self.userid}.log", "a") as f:
             f.write(str(data))
             print(f"Successfully updated meta data: {data}")
+
+
+
     
 
     # def initiate_interview_tool(self) -> List[Tool]:

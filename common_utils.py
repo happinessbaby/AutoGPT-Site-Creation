@@ -14,7 +14,7 @@ from langchain.agents import AgentType
 from langchain.chains import RetrievalQA,  LLMChain
 from pathlib import Path
 from basic_utils import read_txt, convert_to_txt
-from langchain_utils import ( create_wiki_tools, create_search_tools, create_retriever_tools, create_compression_retriever, create_ensemble_retriever, retrieve_redis_vectorstore, create_vectorstore, merge_faiss_vectorstore, create_vs_retriever_tools,
+from langchain_utils import ( create_wiki_tools, create_search_tools, create_retriever_tools, create_compression_retriever, create_ensemble_retriever, generate_multifunction_response,
                               split_doc, handle_tool_error, retrieve_faiss_vectorstore, split_doc_file_size, reorder_docs, create_summary_chain)
 from langchain import PromptTemplate
 # from langchain.experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
@@ -150,12 +150,63 @@ def extract_personal_information(resume: str,  llm = ChatOpenAI(temperature=0, m
     print(f"Successfully extracted personal info: {personal_info_dict}")
     return personal_info_dict
 
+def extract_personal_statement_information(personal_statement:str, llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
+
+
+    """ Extracts institution name, area of study, and degree of pursuit from personal statement. 
+
+    See: https://python.langchain.com/docs/modules/model_io/output_parsers/structured
+
+    Args: 
+
+        personal_statement (str)
+
+    Keyword Args:
+
+        llm (BaseModel): ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False) by default
+
+    Returns:
+
+        a dictionary containing the extracted information; if a field does not exist, its dictionary value will be -1.
+     
+    """
+
+    institution_schema = ResponseSchema(name="institution",
+                             description="Extract the institution name the applicant is applying to in the personal statement. If this information is not found, output -1")
+    program_schema = ResponseSchema(name="study",
+                                        description="Extract the degree program the applicant is pursuing in the personal statement. If this information is not found, output -1")
+    
+    response_schemas = [institution_schema, 
+                        program_schema]
+
+    output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
+    format_instructions = output_parser.get_format_instructions()
+    template_string = """For the following text, delimited with {delimiter} chracters, extract the following information:
+
+    institution: Extract the institution name the applicant is applying to in the personal statement. If this information is not found, output -1\
+
+    program: Extract the degree program the applicant is pursuing in the personal statement. If this information is not found, output -1\
+    
+    text: {delimiter}{text}{delimiter}
+
+    {format_instructions}
+    """
+
+    prompt = ChatPromptTemplate.from_template(template=template_string)
+    messages = prompt.format_messages(text=personal_statement, 
+                                format_instructions=format_instructions,
+                                delimiter=delimiter)
+ 
+    response = llm(messages)
+    personal_statement_dict = output_parser.parse(response.content)
+    print(f"Successfully extracted posting info: {personal_statement_dict}")
+    return personal_statement_dict
 
 
 
 def extract_posting_information(posting: str, llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> Any:
 
-    """" Extracts job title and company name from job posting. 
+    """ Extracts job title and company name from job posting. 
 
     See: https://python.langchain.com/docs/modules/model_io/output_parsers/structured
 
@@ -204,6 +255,7 @@ def extract_posting_information(posting: str, llm = ChatOpenAI(temperature=0, mo
     posting_info_dict = output_parser.parse(response.content)
     print(f"Successfully extracted posting info: {posting_info_dict}")
     return posting_info_dict
+
 
 def extract_education_level(resume: str) -> str:
 
@@ -388,10 +440,13 @@ def search_related_samples(job_title: str, directory: str) -> List[str]:
         {'role': 'system', 'content': system_message},
         {'role': 'user', 'content': content}
         ]	
-        
-        response = get_completion_from_messages(messages, max_tokens=1)
-        if (response=="Y"):
-            related_files.append(file)
+        try:
+            response = get_completion_from_messages(messages, max_tokens=1)
+            if (response=="Y"):
+                related_files.append(file)
+        #TODO: the resume file may be too long and cause openai.error.InvalidRequestError: This model's maximum context length is 4097 tokens.
+        except Exception:
+            pass
     #TODO: if no match, a general template will be used
     if len(related_files)==0:
         related_files.append(file)
@@ -682,6 +737,7 @@ class FeastPromptTemplate(StringPromptTemplate):
 #     print(f"Successfully used relevancy tool to generate answer: {texts_merged}")
 #     return texts_merged
 
+
 @tool(return_direct=True)
 def file_loader(json_request: str) -> str:
 
@@ -721,10 +777,7 @@ def binary_file_downloader_html(json_request: str):
     href = f'<a href="data:application/octet-stream;base64,{bin_str}" download="{os.path.basename(file)}">Download the cover letter</a>'
     return href
     
-@tool
-def docx_writer():
-    """ Writes to a docx file. DO NOT USE THIS TOOL UNLESS YOU ARE TOLD TO DO SO.
-    Input should be a single string in the following JSON format: '{{"file path": "<file path>", "field name":"<field name>", "content":"<content>"}}' \n"""
+
 
 # https://python.langchain.com/docs/modules/agents/agent_types/self_ask_with_search
 @tool("search chat history")
@@ -785,7 +838,7 @@ def check_content(txt_path: str) -> Union[bool, str, set] :
         {
             "name": "category",
             "type": "string",
-            "enum": ["resume", "cover letter", "user profile", "job posting", "other"],
+            "enum": ["resume", "cover letter", "user profile", "job posting", "personal statement", "other"],
             "description": "categorizes content into the provided categories",
             "required":True,
         },
