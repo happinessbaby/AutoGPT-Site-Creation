@@ -118,7 +118,8 @@ class Chat():
                 "":"",
                 "help me write a cover letter": "coverletter",
                 "help  evaluate my my resume": "resume",
-                "I want to do a mock interview": "interview"
+                "I want to do a mock interview": "interview",
+                "polish my personal statement, thanks": "personalstatement"
             }
 
 
@@ -159,7 +160,7 @@ class Chat():
                 st.markdown('''
                 Hi, I'm Acai, your AI career advisor. I can: 
                             
-                - improve your resume
+                - improve your resume and personal statement
                 - write a cover letter
                 - conduct a mock interview 
                             
@@ -190,7 +191,7 @@ class Chat():
                     #         key = "company"
                     #     )
 
-                    about_me = st.text_area(label="tell me about yourself", value="For example, you can say, I want to pursue a developer job at ABC company, or I want to apply for the MBA program at ABC University")
+                    about_me = st.text_area(label="tell me about yourself", value="For example, you can say, I want to pursue a developer job at ABC company, or I want to apply for the MBA program at ABC University", key="about_me")
                         
                     add_vertical_space(1)
                     link = st.text_input("job posting link", "", key = "link")
@@ -333,15 +334,16 @@ class Chat():
             pass
         try:
             about_me = st.session_state.about_me
-            self.process_about_me(about_me)
+            # self.process_about_me(about_me)
+            self.new_chat.update_entities(f"about me:{about_me} /n ###")
         except Exception:
             pass
 
     
-    def process_about_me(self) -> None:
-        #TODO: extract job, company, institution, program, 
-        
-        return None
+    # def process_about_me(self) -> None:
+    #     #TODO: extract job, company, institution, program, 
+
+    #     return None
 
 
     def process_file(self, uploaded_files: Any) -> None:

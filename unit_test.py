@@ -3,7 +3,7 @@ from upgrade_resume import resume_evaluator, create_resume_evaluator_tool
 from langchain.chat_models import ChatOpenAI
 from langchain.agents import AgentType, Tool, initialize_agent
 from basic_utils import read_txt
-from common_utils import (get_web_resources,extract_education_level,file_loader, binary_file_downloader_html, 
+from common_utils import (get_web_resources,extract_education_level,file_loader, binary_file_downloader_html, extract_pursuit_information, get_generated_responses,
                           retrieve_from_db, search_related_samples, create_sample_tools, extract_work_experience_level,  extract_resume_fields)
 from langchain.tools import tool
 from langchain_utils import retrieve_faiss_vectorstore, create_search_tools, create_summary_chain, generate_multifunction_response, split_doc, split_doc_file_size, create_refine_chain, create_mapreduce_chain
@@ -13,7 +13,7 @@ from langchain.agents.agent_toolkits import FileManagementToolkit
 import json
 from pathlib import Path
 
-resume_file = "resume_samples/resume2023v2.txt"
+resume_file = "resume_samples/resume2023v3.txt"
 def generate_random_info(type):
     return None
 job = generate_random_info("job")
@@ -21,11 +21,12 @@ company = generate_random_info("company")
 my_job_title = "software engineer"
 cover_letter_samples_path = "./sample_cover_letters/"
 resume_samples_path = "./resume_samples/"
-posting_link = "./uploads/file/data_analyst_SC.txt"
+posting_link = "./uploads/link/patternedlearning.txt"
+about_me = "I want to apply for a python developer job at Patterned Learning AI"
 delimiter = "####"
 
 # Passed (8/30)
-def test_coverletter_tool(resume_file=resume_file, job="data analyst", company="", posting_link=posting_link) -> str:
+def test_coverletter_tool(resume_file=resume_file, about_me=about_me, posting_link=posting_link) -> str:
 
     """ End-to-end testing of the cover letter generator without the UI. """
 
@@ -39,8 +40,7 @@ def test_coverletter_tool(resume_file=resume_file, job="data analyst", company="
         verbose = True,
         )
     cover_letter = agent.run(f"""generate a cover letter with following information:
-                              job: {job} \n
-                              company: {company} \n
+                              about me: {about_me} \n
                               resume file: {resume_file} \n
                               job post links: {posting_link} \n                          
                               """)
@@ -48,7 +48,7 @@ def test_coverletter_tool(resume_file=resume_file, job="data analyst", company="
 
 
 
-def test_resume_tool(resume_file="./resume_samples/sample1.txt", job="data analyst", company="", posting_link=posting_link) -> str:
+def test_resume_tool(resume_file="./resume_samples/linkedin.txt", job="software engineer", company="", posting_link="") -> str:
 
     """ End-to-end testing of the resume evaluator without the UI. """
     
@@ -73,6 +73,11 @@ def test_resume_tool(resume_file="./resume_samples/sample1.txt", job="data analy
                               """)
     print(f"RESUME ADVICE: {resume_advice}")
 
+# Pass
+def test_pursuit(posting_path="./uploads/link/accountant.txt"):
+    content = "I want to apply for the MSBA program at University of Louisville"
+    pursuit = extract_pursuit_information(content)
+    pursuit1 = extract_pursuit_information(read_txt(posting_path))
 
 def test_general_job_description(my_job_title="data analyst"):
     job_query  = f"""Research what a {my_job_title} does and output a detailed description of the common skills, responsibilities, education, experience needed. 
@@ -120,6 +125,10 @@ def test_extract_fields(resume_file="./resume_samples/college-student-resume-exa
     assert isinstance(field_content, dict), "field content not a dictionary!"
     print(f"RESUME FIELD NAMES: {field_names}")
     print(f"RESUME FIELD CONTENT: {field_content}")
+
+
+def test_generated_responses(resume_file="", posting_path="", about_me=""):
+    dict = get_generated_responses(resume_content=read_txt("./resume_samples/college-student-resume-example.txt"))
 
    
 
@@ -542,9 +551,11 @@ def test_resume_missing(my_job_title = "Professor of Geography", highest_educati
 
 
 
-# test_coverletter_tool()
+test_coverletter_tool()
 # test_resume_tool()
+# test_generated_responses()
 
+# test_pursuit()
 # test_general_job_description()
 # test_work_experience()
 # test_company_description()
@@ -561,7 +572,7 @@ def test_resume_missing(my_job_title = "Professor of Geography", highest_educati
 # test_field_evaluation()
 # test_field_retrieval()
 # test_search_similar_resume()
-test_extract_fields()
+# test_extract_fields()
 # test_resume_missing()
 # test_resume_impression()
 

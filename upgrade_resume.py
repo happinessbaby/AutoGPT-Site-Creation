@@ -380,8 +380,8 @@ def create_resume_evaluator_tool() -> List[Tool]:
     Then it calls the processing_resume function to process the JSON data. """
 
     name = "resume_evaluator"
-    parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link": "<job post link>"}}'
-    output = '{{"file_path": "<file_path>"}}'
+    parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link":"<job post link>"}}'
+    output = '{{"file_path":"<file_path>"}}'
     description = f"""Helps to evaluate a resume. Use this tool more than any other tool when user asks to evaluate, review, help with a resume. 
     Input should be a single string strictly in the following JSON format: {parameters} \n
      Leave value blank if there's no information provided. DO NOT MAKE STUFF UP. 
