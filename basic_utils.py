@@ -14,7 +14,8 @@ from pptx import Presentation
 from langchain.document_loaders import UnstructuredURLLoader
 from typing import Any, List, Union, Dict
 from docxtpl import DocxTemplate
-
+from langchain.document_transformers import Html2TextTransformer
+from langchain.document_loaders import AsyncHtmlLoader
     
 
 def convert_to_txt(file, output_path):
@@ -130,13 +131,23 @@ def retrieve_web_content(link, save_path="./web_data/test.txt"):
         print('Failed to retrieve content from the URL.')
         return False
     
-
-# def write_to_docx(doc: Any, text: str, type: str, res_path: str):
-#     if type=="cover_letter":
-#         p = doc.add_paragraph()
-#         p.add_run(text)
-#         doc.save(res_path)  
-#         print(f"Succesfully writte cover letter to {res_path}")
+# this one is better than the above function 
+def html_to_text(urls:List[str], save_path="./web_data/test.txt"):
+    loader = AsyncHtmlLoader(urls)
+    docs = loader.load()
+    html2text = Html2TextTransformer()
+    docs_transformed = html2text.transform_documents(docs)
+    content = docs_transformed[0].page_content
+    print(docs_transformed[0].page_content[0:500])
+    if content:
+        with open(save_path, 'w') as file:
+            file.write(content)
+            file.close()
+            print('Content retrieved and written to file.')
+            return True
+    else:
+        print('Failed to retrieve content from the URL.')
+        return False
 
 
 
@@ -156,10 +167,14 @@ def write_to_docx_template(doc: Any, field_name: List[str], field_content: Dict[
 
 
 if __name__=="__main__":
-    retrieve_web_content(
-        "https://www.zippia.com/advice/resume-objectives-entry-level/",
-        save_path = f"./web_data/{str(uuid.uuid4())}.txt")
-    convert_to_txt("./resume_samples/college-student-resume-example.pdf", "./resume_samples/college-student-resume-example.txt")
+    # retrieve_web_content(
+    #     "https://apply.deloitte.com/careers/InviteToApply?jobId=160041&source=LinkedIn",
+    #     save_path = f"./uploads/link/deloitte.txt")
+    html_to_text(
+        "https://www.themuse.com/advice/interview-questions-and-answers",
+    #     save_path =f"./uploads/link/deloitte.txt")
+        save_path = f"./interview_data/{str(uuid.uuid4())}.txt")
+    # convert_to_txt("./resume_samples/resume2023.docx", "./resume_samples/resume2023v3.txt")
 
 
 
