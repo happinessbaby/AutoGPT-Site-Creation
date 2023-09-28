@@ -263,57 +263,57 @@ def extract_pursuit_information(content: str, llm = ChatOpenAI(temperature=0, mo
     return pursuit_info_dict
 
 
-def extract_posting_information(content: str, llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> str:
+# def extract_posting_information(content: str, llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> str:
 
-    """ Extracts job title and company name from job posting. 
+#     """ Extracts job title and company name from job posting. 
 
-    See: https://python.langchain.com/docs/modules/model_io/output_parsers/structured
+#     See: https://python.langchain.com/docs/modules/model_io/output_parsers/structured
 
-    Args: 
+#     Args: 
 
-        posting (str): job posting in text string format
+#         posting (str): job posting in text string format
 
-    Keyword Args:
+#     Keyword Args:
 
-        llm (BaseModel): ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False) by default
+#         llm (BaseModel): ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False) by default
 
-    Returns:
+#     Returns:
 
-        a dictionary containing the extracted information; if a field does not exist, its dictionary value will be -1.
+#         a dictionary containing the extracted information; if a field does not exist, its dictionary value will be -1.
      
-    """
+#     """
 
-    job_schema = ResponseSchema(name="job",
-                             description="Extract the job position of the job listing. If this information is not found, output -1")
-    company_schema = ResponseSchema(name="company",
-                                        description="Extract the company name of the job listing. If this information is not found, output -1")
+#     job_schema = ResponseSchema(name="job",
+#                              description="Extract the job position of the job listing. If this information is not found, output -1")
+#     company_schema = ResponseSchema(name="company",
+#                                         description="Extract the company name of the job listing. If this information is not found, output -1")
     
-    response_schemas = [job_schema, 
-                        company_schema]
+#     response_schemas = [job_schema, 
+#                         company_schema]
 
-    output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
-    format_instructions = output_parser.get_format_instructions()
-    template_string = """For the following text, delimited with {delimiter} chracters, extract the following information:
+#     output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
+#     format_instructions = output_parser.get_format_instructions()
+#     template_string = """For the following text, delimited with {delimiter} chracters, extract the following information:
 
-    job: Extract the job positiong of the job posting. If this information is not found, output -1\
+#     job: Extract the job positiong of the job posting. If this information is not found, output -1\
 
-    company: Extract the company name of the job posting. If this information is not found, output -1\
+#     company: Extract the company name of the job posting. If this information is not found, output -1\
 
 
-    text: {delimiter}{text}{delimiter}
+#     text: {delimiter}{text}{delimiter}
 
-    {format_instructions}
-    """
+#     {format_instructions}
+#     """
 
-    prompt = ChatPromptTemplate.from_template(template=template_string)
-    messages = prompt.format_messages(text=content, 
-                                format_instructions=format_instructions,
-                                delimiter=delimiter)
+#     prompt = ChatPromptTemplate.from_template(template=template_string)
+#     messages = prompt.format_messages(text=content, 
+#                                 format_instructions=format_instructions,
+#                                 delimiter=delimiter)
  
-    response = llm(messages)
-    posting_info_dict = output_parser.parse(response.content)
-    print(f"Successfully extracted posting info: {posting_info_dict}")
-    return posting_info_dict
+#     response = llm(messages)
+#     posting_info_dict = output_parser.parse(response.content)
+#     print(f"Successfully extracted posting info: {posting_info_dict}")
+#     return posting_info_dict
 
 
 
@@ -343,19 +343,19 @@ def extract_education_level(resume: str) -> str:
     return response
 
 
-def extract_job_title(resume: str) -> str:
+# def extract_job_title(resume: str) -> str:
 
-    """ Extracts job title from resume. """
+#     """ Extracts job title from resume. """
 
-    response = get_completion(f"""Read the resume closely. It is delimited with {delimiter} characters. 
+#     response = get_completion(f"""Read the resume closely. It is delimited with {delimiter} characters. 
                               
-                              Output a likely job position that this applicant is currently holding or a possible job position he or she is applying for.
+#                               Output a likely job position that this applicant is currently holding or a possible job position he or she is applying for.
                               
-                              resume: {delimiter}{resume}{delimiter}. \n
+#                               resume: {delimiter}{resume}{delimiter}. \n
                               
-                              Response with only the job position, no punctuation or other text. """)
-    print(f"Successfull extracted job title: {response}")
-    return response
+#                               Response with only the job position, no punctuation or other text. """)
+#     print(f"Successfull extracted job title: {response}")
+#     return response
 
 
 # class ResumeField(BaseModel):
@@ -424,9 +424,11 @@ def extract_resume_fields(resume: str,  llm=OpenAI(temperature=0,  max_tokens=20
     field_content_chain = LLMChain(llm=llm, prompt=prompt, output_key="field_content")
 
     # Chain three: trim the dictionary for further resume evaluation
-    dict_trim_query = """ For the field content in the JSON string format below, delete all the JSON keys that have an empty value.
+    dict_trim_query = """ For the field content in the JSON string format below:
+    
+    Remove all the JSON key value pair where the value is empty. 
 
-    If there are two keys with the same value, delete one of the keys. 
+    If there are two keys with the same value, remove one of the key and value pair from the JSON entry.
 
     Output the same JSON string with the above things deleted. MAKE SURE YOUR OUTPUT IS IN JSON FORMAT.
 
@@ -454,6 +456,7 @@ def extract_resume_fields(resume: str,  llm=OpenAI(temperature=0,  max_tokens=20
     field_names = output_parser.parse(response.get("field_names", ""))
     # sometimes, not always, there's an annoying text "Output: " in front of json that needs to be stripped
     # field_content = '{' + response.get("field_content", "").split('{', 1)[-1]
+    # print(response.get("field_content", ""))
     trimmed_field_content = '{' + response.get("trimmed_field_content", "").split('{', 1)[-1]
     print(trimmed_field_content)
     try:
@@ -743,6 +746,7 @@ def get_generated_responses(resume_content="", personal_statement="", about_me="
         job = pursuit_info_dict["job"]
         if job!=-1:
             work_experience = extract_work_experience_level(resume_content, job)
+        else: work_experience = ""
         education_level = extract_education_level(resume_content)
         generated_responses.update({"highest education level": education_level})
         generated_responses.update({"work experience level": work_experience})

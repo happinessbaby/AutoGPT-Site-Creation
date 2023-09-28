@@ -8,7 +8,7 @@ from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
 from basic_utils import read_txt
 from common_utils import (extract_personal_information, get_web_resources,  retrieve_from_db,extract_education_level, extract_work_experience_level, get_generated_responses,
-                          create_sample_tools, extract_job_title, search_related_samples)
+                          create_sample_tools, search_related_samples)
 from datetime import date
 from pathlib import Path
 import json
@@ -79,19 +79,19 @@ def generate_basic_cover_letter(about_me="", resume_file="",  posting_path="") -
     job_specification = info_dict.get("job specification", "")
     job_description = info_dict.get("job description", "")
     company_description = info_dict.get("company description", "")
-    company_name = info_dict.get("company name", "")
-    job_title= info_dict.get("job title", "")
+    company = info_dict.get("company", "")
+    job = info_dict.get("job", "")
     name = info_dict.get("name", "")
     phone = info_dict.get("phone", "")
     email = info_dict.get("email", "")
 
     # Get adviced from web data on personalized best practices
-    advice_query = f"""Best practices when writing a cover letter for {job_title} with the given information:
+    advice_query = f"""Best practices when writing a cover letter for {job} with the given information:
       highest level of education: {highest_education_level}
       work experience level:   {work_experience_level}"""
     advices = retrieve_from_db(advice_query)
     # Get sample comparisons
-    related_samples = search_related_samples(job_title, cover_letter_samples_path)
+    related_samples = search_related_samples(job, cover_letter_samples_path)
     sample_tools, tool_names = create_sample_tools(related_samples, "cover_letter")
     # Get resume's relevant and irrelevant info for job: few-shot learning works great here
     query_relevancy = f""" You are an expert resume advisor. 
@@ -152,12 +152,15 @@ def generate_basic_cover_letter(about_me="", resume_file="",  posting_path="") -
 
         expert advices: {advices}
 
-      Step 3: You're provided with some company informtion. 
+      Step 3: You're provided with some company informtion, job description, and/or job specification. 
 
         Use it to make the cover letter cater to the company values. 
 
         company information: {company_description}.  \n
 
+        job specification: {job_specification} \n
+
+        job description: {job_description} \n
     
       Step 4: Change all personal information of the cover letter to the following. Do not incude them if they are -1 or empty: 
 
@@ -193,12 +196,14 @@ def generate_basic_cover_letter(about_me="", resume_file="",  posting_path="") -
                     phone = phone,
                     email = email,
                     date = date.today(),
-                    company = company_name,
-                    job = job_title,
+                    company = company,
+                    job = job,
                     content=resume_content,
                     relevancy=relevancy, 
                     advices = advices,
                     company_description = company_description, 
+                    job_description = job_description,
+                    job_specification = job_specification,
                     delimiter = delimiter,
                     delimiter4 = delimiter4,
     )

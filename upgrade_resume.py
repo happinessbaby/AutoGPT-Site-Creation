@@ -7,8 +7,8 @@ from langchain.output_parsers import CommaSeparatedListOutputParser
 from langchain import PromptTemplate
 from langchain.agents import AgentType, Tool, initialize_agent, create_json_agent
 from basic_utils import read_txt, write_to_docx_template
-from common_utils import (get_web_resources, retrieve_from_db, extract_posting_information, extract_education_level, extract_work_experience_level, get_generated_responses,
-                           extract_resume_fields, extract_job_title,  search_related_samples, create_sample_tools, extract_personal_information)
+from common_utils import (get_web_resources, retrieve_from_db,  extract_education_level, extract_work_experience_level, get_generated_responses,
+                           extract_resume_fields, search_related_samples, create_sample_tools, extract_personal_information)
 from langchain_utils import create_search_tools, create_mapreduce_chain, create_summary_chain, generate_multifunction_response, create_refine_chain, handle_tool_error
 from pathlib import Path
 import json
@@ -16,8 +16,6 @@ from json import JSONDecodeError
 from multiprocessing import Process, Queue, Value
 from langchain.tools.json.tool import JsonSpec
 from langchain.agents.agent_toolkits import JsonToolkit
-from langchain.agents.agent_toolkits import create_python_agent
-from langchain.tools.python.tool import PythonREPLTool
 from typing import Dict, List, Optional
 from langchain.document_loaders import BSHTMLLoader
 from langchain.tools import tool
@@ -51,7 +49,7 @@ document = Document()
 document.add_heading('Resume Evaluation', 0)
 
 
-def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path="") -> str:
+def evaluate_resume(about_me="", resume_file = "", posting_path="") -> str:
 
 
     dirname, fname = os.path.split(resume_file)
@@ -59,29 +57,23 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
     docx_filename = filename + "_evaluation"+".docx"
     # get resume info
     resume_content = read_txt(resume_file)
-    info_dict=get_generated_responses(resume_content, my_job_title, company, posting_path)
-    highest_education_level = info_dict["highest education level"]
-    work_experience_level = info_dict["work experience level"]
-    name = info_dict["name"]
-    phone = info_dict["phone"]
-    email = info_dict["email"]
-    linkedin = info_dict["linkedin"]
-    website = info_dict["website"]
-    job_title = info_dict["job title"]
-    field_names = info_dict["field names"]
-    personal_info_dict = {"Name":name, "Phone":phone, "Email":email, "LinkedIn": linkedin, "Website": website, "JobTitle":job_title}
-    print(personal_info_dict)
-
-
-  
+    info_dict=get_generated_responses(resume_content=resume_content, posting_path=posting_path, about_me=about_me)
+    highest_education_level = info_dict.get("highest education level", "")
+    work_experience_level = info_dict.get("work experience level", "")
+    name = info_dict.get("name", "")
+    phone = info_dict.get("phone", "")
+    email = info_dict.get("email", "")
+    linkedin = info_dict.get("linkedin", "")
+    website = info_dict.get("website", "")
+    job = info_dict.get("job", "")
+    company = info_dict.get("company", "")
+    field_names = info_dict.get("field names", "")
+    personal_info_dict = {"Name":name, "Phone":phone, "Email":email, "LinkedIn": linkedin, "Website": website, "JobTitle":job}
+    print(personal_info_dict) 
     # write_to_docx_template(doc, personal_info, personal_info_dict, docx_filename)
 
-    # # Note: retrieval query works best if clear, concise, and detail-dense
-    advice_query = f"""what fields to include for resume with someone with {highest_education_level} and {work_experience_level} for {my_job_title}"""
-    advice = retrieve_from_db(advice_query)
-    # samples query to find missing content from resume using document comparison
     # Note: document comparison benefits from a clear and simple prompt
-    related_samples = search_related_samples(my_job_title, resume_samples_path)
+    related_samples = search_related_samples(job, resume_samples_path)
     sample_tools, tool_names = create_sample_tools(related_samples, "resume")
 
     impression_query = f""" You are an expert resume critic who assesses the quality of a resume. 
@@ -92,15 +84,24 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
                               
     applicant's resume: {delimiter}{resume_content}{delimiter} \n
 
-   Please generate your impression for the applicant's resume only and write it in one paragraph.
+   Please generate your impression for the applicant's resume only and write it in one paragraph. 
+   
+   Be critical of the length, the quality of writing, and the extensiveness of the fields.
+
+   If you believe there to be any missing fields, please inform Human. 
    
    Use your tools if you need to reference other resume.
 
    """
+    # # Note: retrieval query works best if clear, concise, and detail-dense
+    # samples query to find missing content from resume using document comparison
     impression = generate_multifunction_response(impression_query, sample_tools)
     document.add_heading(f"Overall Impression", level=2)
     document.add_paragraph(impression)
     document.add_page_break()
+
+    advice_query = f"""what fields to include for resume with someone with {highest_education_level} and {work_experience_level} for {job}"""
+    advice = retrieve_from_db(advice_query)
 
     query_missing = f"""  
   
@@ -132,30 +133,6 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
     document.save(docx_filename)
     print("Successfully saved resume evaluation.")
 
-      # files.append(file_path)
-
-    # main_template = """Write a detailed summary of the following: {text}
-    #     DETAILED SUMMARY: """
-    # refine_template = (
-    #     "Your job is to produce a final summary\n"
-    #     "We have provided an existing summary up to a certain point: {existing_answer}\n"
-    #     "We have the opportunity to refine the existing summary"
-    #     "(only if needed) with some more context below.\n"
-    #     "------------\n"
-    #     "{text}\n"
-    #     "------------\n"
-    #     "Given the new context, refine the original summary."
-    #     "If the context isn't useful, return the original summary."
-    # )
-    # response = create_refine_chain(files, main_template, refine_template)
-    # return response
-    # return create_mapreduce_chain(files)
-
-
-
-
-
-
     # process all fields in parallel
     # processes = [Process(target = improve_resume_fields, args = (generated_responses, field, resume, res_path, relevancy_tools, sample_tools)) for field in resume_fields]
 
@@ -173,46 +150,24 @@ def evaluate_resume(my_job_title="", company="", resume_file = "", posting_path=
 def improve_resume_fields(generated_response: Dict[str, str], field: str, field_content: str, tools: List[Tool], docx_filename: str) -> None:
 
     print(f"CURRENT FIELD IS: {field}")
+    job = generated_response.get("job", "")
     company_description = generated_response.get("company description", "")
     job_specification = generated_response.get("job specification", "")
     job_description = generated_response.get("job description", "")
+    highest_education_level = generated_response.get("highest education level", "")
+    work_experience_level = generated_response.get("work experience level", "")
     # education_level = generated_response.get("education", "")
 
-    # The purpose of getting expert advices is to evaluate weaknesses in the current resume field content
     advice_query =  f"""What are some dos and don'ts when writing resume field {field} to make it ATS-friendly?"""
-    advices = retrieve_from_db(advice_query)
-    query_evaluation = f"""You are given some expert advices on writing {field} section of the resume most ATS-friendly.
-    
-    expert advices: {advices}
+    advice1 = retrieve_from_db(advice_query)
+    advice_query = f"""what to include in {field} of resume for {highest_education_level} and {work_experience_level} as a {job}"""
+    advice2 = retrieve_from_db(advice_query)
 
-    Use these advices to generate a list of weaknesses of the field content and a list of the strengths.
-    
-    field content: {field_content}. \n
+    query_evaluation = f"""  You are an expert resume field advisor. 
 
-    Your answer should be detailed and only from the field content. Please also provide your reasoning too as in the following examples:
-    
-        Weaknesses of Objective:
-
-        1. Weak nouns: you wrote  “LSW” but if the ATS might be checking for “Licensed Social Worker,”
-
-        Strengths of Objective:
-
-        1. Strong adjectives: "Dedicated" and "empathetic" qualities make a good social worker
-
-    Please ignore all formatting advices as formatting should not be part of the assessment.
-
-    Use your tools if you need to reference other resume.
-
-    """
-    vulnerability = generate_multifunction_response(query_evaluation, tools)
-
-    # Get resume's relevant and irrelevant info for resume field: few-shot learning works great here
-    # The purpose of identitying irrelevant and relevant information is so that irrelevant information can be deleted or reworded
-    query_relevancy = f"""You are an expert resume advisor. Determine the relevant and irrelevant information contained in the field content. 
-
-     Generate a list of irrelevant information that should not be included in the resume field and a list of relevant information that should be included in the resume field.
+     Generate a list of missing, irrelevant, and not ATS-friendly information in the resume field content. 
        
-      Remember to use either job specification or general job description as your guideline. Don't forget to use your tool "search_relevancy_advice".
+     Remember to use either job specification or general job description as your guideline along with the expert advice.
 
       field name: {field}
 
@@ -222,58 +177,130 @@ def improve_resume_fields(generated_response: Dict[str, str], field: str, field_
 
       general job description: {job_description} \n
 
-      Your answer should be detailed and only from the resume. Please also provide your reasoning too as in the following example:
-
-          Relevant information in the Experience field:
-
-          1. Experience as a Big Data Engineer: skills and responsibilities of a Big Data Engineer are transferable to those of a data analyst
-
-          Irrelevant information  in the Experience Field:
-
-          1. Experience as a front desk receptionist is not directly related to the role of a data analyst
-    
-      Please ignore all formatting advices as formatting should not be part of the assessment.
-
-      Use your tools if you need to reference other resume.
-
-      """
-    
-    relevancy = generate_multifunction_response(query_relevancy, tools)
-        
-    query_missing_field = f"""  You are an expert resume field advisor. 
-
-     Generate a list of missing information that should be included in the resume field content. 
-       
-     Remember to use either job specification or general job description and comany description as your guideline. 
-
-      field name: {field}
-
-      field content: {field_content}\n
-
-      job specification: {job_specification}\n
-
-      general job description: {job_description} \n
-
-      company description: {company_description}
+      expert advice: {advice2} + "\n" + {advice1}
 
       Your answer should be detailed and only from the field content. Please also provide your reasoning too as in the following examples:
 
-            Missing Field Content for Work Experience:
+            Missing or Irrelevant Field Content for Work Experience:
 
-            1. Quantative achievement in project management: no measurable metrics or KPIs to highlight any past achievements. 
+            1. Quantative achievement is missing: no measurable metrics or KPIs to highlight any past achievements. 
 
+            2. Front desk receptionist is irrelevant: Experience as a front desk receptionist is not directly related to the role of a data analyst
+
+            3. Date formatting is not ATS-friendly: an ATS-friendly way to write dates is for example, 01/2001 or January 2001
+    
       Please ignore all formatting advices as formatting should not be part of the assessment.
 
       Use your tools if you need to reference other resume.
 
      """
-    missing = generate_multifunction_response(query_missing_field, tools)
+    evaluation = generate_multifunction_response(query_evaluation, tools)
 
-    evaluation = vulnerability + '\n' + relevancy + '\n' + missing
     document.add_heading(f"{field}", level=1)
     document.add_paragraph(evaluation)
     document.add_page_break()
     document.save(docx_filename)
+
+
+
+
+
+    # The purpose of getting expert advices is to evaluate weaknesses in the current resume field content
+    # advice_query =  f"""What are some dos and don'ts when writing resume field {field} to make it ATS-friendly?"""
+    # advices = retrieve_from_db(advice_query)
+    # query_evaluation = f"""You are given some expert advices on writing {field} section of the resume most ATS-friendly.
+    
+    # expert advices: {advices}
+
+    # Use these advices to generate a list of weaknesses of the field content and a list of the strengths.
+    
+    # field content: {field_content}. \n
+
+    # Your answer should be detailed and only from the field content. Please also provide your reasoning too as in the following examples:
+    
+    #     Weaknesses of Objective:
+
+    #     1. Weak nouns: you wrote  “LSW” but if the ATS might be checking for “Licensed Social Worker,”
+
+    #     Strengths of Objective:
+
+    #     1. Strong adjectives: "Dedicated" and "empathetic" qualities make a good social worker
+
+    # Please ignore all formatting advices as formatting should not be part of the assessment.
+
+    # Use your tools if you need to reference other resume.
+
+    # """
+    # vulnerability = generate_multifunction_response(query_evaluation, tools)
+
+    # # Get resume's relevant and irrelevant info for resume field: few-shot learning works great here
+    # # The purpose of identitying irrelevant and relevant information is so that irrelevant information can be deleted or reworded
+    # query_relevancy = f"""You are an expert resume advisor. Determine the relevant and irrelevant information contained in the field content. 
+
+    #  Generate a list of irrelevant information that should not be included in the resume field and a list of relevant information that should be included in the resume field.
+       
+    #   Remember to use either job specification or general job description as your guideline. Don't forget to use your tool "search_relevancy_advice".
+
+    #   field name: {field}
+
+    #   field content: {field_content}\n
+
+    #   job specification: {job_specification}\n
+
+    #   general job description: {job_description} \n
+
+    #   Your answer should be detailed and only from the resume. Please also provide your reasoning too as in the following example:
+
+    #       Relevant information in the Experience field:
+
+    #       1. Experience as a Big Data Engineer: skills and responsibilities of a Big Data Engineer are transferable to those of a data analyst
+
+    #       Irrelevant information  in the Experience Field:
+
+    #       1. Experience as a front desk receptionist is not directly related to the role of a data analyst
+    
+    #   Please ignore all formatting advices as formatting should not be part of the assessment.
+
+    #   Use your tools if you need to reference other resume.
+
+    #   """
+    
+    # relevancy = generate_multifunction_response(query_relevancy, tools)
+        
+    # query_missing_field = f"""  You are an expert resume field advisor. 
+
+    #  Generate a list of missing information that should be included in the resume field content. 
+       
+    #  Remember to use either job specification or general job description and comany description as your guideline. 
+
+    #   field name: {field}
+
+    #   field content: {field_content}\n
+
+    #   job specification: {job_specification}\n
+
+    #   general job description: {job_description} \n
+
+    #   company description: {company_description}
+
+    #   Your answer should be detailed and only from the field content. Please also provide your reasoning too as in the following examples:
+
+    #         Missing Field Content for Work Experience:
+
+    #         1. Quantative achievement in project management: no measurable metrics or KPIs to highlight any past achievements. 
+
+    #   Please ignore all formatting advices as formatting should not be part of the assessment.
+
+    #   Use your tools if you need to reference other resume.
+
+    #  """
+    # missing = generate_multifunction_response(query_missing_field, tools)
+
+    # evaluation = vulnerability + '\n' + relevancy + '\n' + missing
+    # document.add_heading(f"{field}", level=1)
+    # document.add_paragraph(evaluation)
+    # document.add_page_break()
+    # document.save(docx_filename)
 
 
 
@@ -298,11 +325,14 @@ def resume_evaluator(json_request: str)-> str:
 
     """Helps to evaluate a resume. Use this tool more than any other tool when user asks to evaluate, review, help with a resume. 
 
-    Input should be  a single string strictly in the following JSON format:  '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link":"<job post link>"}}' \n
+    Input should be  a single string strictly in the following JSON format:  '{{"about me":"<about me>", "resume file":"<resume file>", "job post link":"<job post link>"}}' \n
 
-    (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) \n
+    Leave value blank if there's no information provided. DO NOT MAKE STUFF UP. 
 
-     
+     (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) \n
+
+     Output should be using the "get download link" tool in the following single string JSON format: '{{"file_path":"<file_path>"}}'
+   
     """
 
     try:
@@ -312,27 +342,30 @@ def resume_evaluator(json_request: str)-> str:
       print(f"JSON DECODE ERROR: {e}")
       return "Format in a single string JSON and try again."
 
-
     # if resume doesn't exist, ask for resume
     if ("resume file" not in args or args["resume file"]=="" or args["resume file"]=="<resume file>"):
       return "Can you provide your resume so I can further assist you? "
     else:
       # may need to clean up the path first
         resume_file = args["resume file"]
-    if ("job" not in args or args["job"] == "" or args["job"]=="<job>"):
-        job = ""
+    if ("about me" not in args or args["about me"] == "" or args["about me"]=="<about me>"):
+        about_me = ""
     else:
-       job = args["job"]
-    if ("company" not in args or args["company"] == "" or args["company"]=="<company>"):
-        company = ""
-    else:
-        company = args["company"]
+        about_me = args["about me"]
+    # if ("job" not in args or args["job"] == "" or args["job"]=="<job>"):
+    #     job = ""
+    # else:
+    #    job = args["job"]
+    # if ("company" not in args or args["company"] == "" or args["company"]=="<company>"):
+    #     company = ""
+    # else:
+    #     company = args["company"]
     if ("job post link" not in args or args["job post link"]=="" or args["job post link"]=="<job post link>"):
         posting_path = ""
     else:
         posting_path = args["job post link"]
 
-    return evaluate_resume(my_job_title=job, company=company, resume_file=resume_file, posting_path=posting_path)
+    return evaluate_resume(about_me=about_me, resume_file=resume_file, posting_path=posting_path)
 
 
 
