@@ -164,32 +164,23 @@ class InterviewController():
         #initialize interviewer agent
 
         template =   f"""
-            You are an AI job interviewer. The following, if available, are things pertaining to the interview.
+            You are an AI job interviewer. The following, if available, are things pertaining to the interview. Generate your interview questions from them. 
             
            {self.additional_interview_info}
 
-            The interview content is contained in the tool "search_interview_material", if available.
+            The interview content is contained in the tool "search_interview_material", if available. Generate your interview questions from this tool.
 
             Personal information about the applicant is contained in the tool "search_resume", if available.
-
-            Job specific information is contained in the tool "search_job_posting", if available. 
 
             As an interviewer, you do not need to assess Human's response to your questions. Their response will be sent to a professional grader.         
 
             Sometimes you will be provided with the professional grader's feedback. They will be handed out to the Human at the end of the session. You should ignore them. 
 
-            Always remember your role as an interviewer. Unless you're told to stop interviewing, you should not stop asking interview questions in the format:
-
-            Question: <new interview question>
-
-            Remmeber to use all of your tools to your advantage when generating interview questions. Most of your questions should come from using the tools.
-
-            Please do not stop asking questions unless you are specifically told to do so. 
+            Always remember your role as an interviewer. Unless you're told to stop interviewing, you should not stop asking interview questions.
 
             If the Human is asking about other things instead of answering an interview question, please steer them back to the interview process.
 
-            Also, if Human says they want to end the interview, you should use the tool "interview_stopper" to end the interview session. 
-              
+            Please ask your interview question now!
 
            """
         
@@ -252,8 +243,6 @@ class InterviewController():
            The interview content is contained in the tool "search_interview_material", if available.
 
             Personal information about the applicant is contained in the tool "search_resume", if available.
-
-            Job specific information is contained in the tool "search_job_posting", if available. 
         
             Use these tools to search for the correct answer.
 
@@ -264,9 +253,6 @@ class InterviewController():
           Positive Feedback: <in which ways the Human answered the question well>
 
           Negative Feedback: <in which ways the Human failed to answer the question>
-
-          Also, if Human says they want to end the interview, you should use the tool "interview_stopper" to end the interview session. 
-
         
             """
         #   Your feedback should take both the correct answer and the Human's response into consideration. When the Human's response implies that they don't know the answer, provide the correct answer in your feedback.
