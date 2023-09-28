@@ -16,7 +16,7 @@ from callbacks.capturing_callback_handler import playback_callbacks
 from basic_utils import convert_to_txt, read_txt, retrieve_web_content
 from openai_api import check_content_safety
 from dotenv import load_dotenv, find_dotenv
-from common_utils import  check_content
+from common_utils import  check_content, get_generated_responses
 import asyncio
 import concurrent.futures
 import subprocess
@@ -111,12 +111,19 @@ class Interview():
                             
                 How the mock interview works: 
      
-                - refresh the page if you want to start a new session
-                - press Enter to start the session     
+                - refresh the page to start a new session   
                 - press "r" + Spacebar to start recording
                 - press "Shift" + "Esc" to end the session
                             
                 ''')
+
+                add_vertical_space(5)
+                st.markdown('''
+        
+                Troubleshooting:
+
+                1. if the AI cannot hear you, make sure your mic is turned on and enabled
+                            ''')
 
             if "userid" not in st.session_state:
                 st.session_state["userid"] = str(uuid.uuid4())
@@ -130,10 +137,13 @@ class Interview():
                 with modal.container():
                     with st.form( key='my_form', clear_on_submit=True):
                         add_vertical_space(1)
-                        st.markdown("Please upload your interview material before we begin")
-                        st.text_input("links", "", key = "interview_links", )
+                        # st.markdown("Please fill out the form below before we begin")
 
-                        st.file_uploader(label="Upload your files",
+                        st.text_area("tell me about your interview", value="for example, you can say, my interview is with ABC for a store manager position", key="interview_about")
+
+                        st.text_input("links (this can be a job posting)", "", key = "interview_links", )
+
+                        st.file_uploader(label="Upload your interview material or resume",
                                                         type=["pdf","odt", "docx","txt", "zip", "pptx"], 
                                                         key = "interview_files",
                                                         accept_multiple_files=True)
@@ -154,6 +164,13 @@ class Interview():
     
 
             else:  
+                
+                if "resume_file" not in st.session_state:
+                    st.session_state["resume_file"]=""
+                if "job_posting" not in st.session_state:
+                    st.session_state["job_posting"]=""
+                if "about" not in st.session_state:
+                    st.session_state["about"]=""
 
                 if "listener" not in st.session_state:
                     new_listener = keyboard.Listener(
@@ -161,7 +178,8 @@ class Interview():
                     on_release=self.on_release)
 
                 if "baseinterview" not in st.session_state:
-                    new_interview = InterviewController(st.session_state.userid)
+                    additional_prompt_info = self.update_prompt(about=st.session_state.about, resume_file=st.session_state.resume_file, job_posting=st.session_state.job_posting)
+                    new_interview = InterviewController(st.session_state.userid, additional_prompt_info)
                     st.session_state["baseinterview"] = new_interview     
                     welcome_msg = "Welcome to your mock interview session. I will begin conducting the interview now. Please review the sidebar for instructions. "
                     message(welcome_msg, avatar_style="initials", seed="AI_Interviewer", allow_html=True)
@@ -340,16 +358,47 @@ class Interview():
             self.process_link(link)
         except Exception:
             pass 
+        # st.session_state.baseinterview.additional_interview_info = ""
+        try:
+            about = st.session_state.interview_about
+            if "about" not in st.session_state:
+                st.session_state["about"] = about
+        except Exception:
+            pass
+
+        # self.update_prompt(about=about, resume_file=resume_file, job_posting=job_posting)
 
         # if "baseinterview" not in st.session_state:
         #     new_interview = InterviewController(st.session_state.userid)
         #     st.session_state["baseinterview"] = new_interview      
 
+    def update_prompt(self, about: str, resume_file:str, job_posting:str) -> str:
+
+        print(f"about: {about}")
+        print(f"resume file: {resume_file}")
+        print(f"job psoting: {job_posting}")
+        additional_interview_info = about
+        try:
+            resume_content = read_txt(resume_file)
+        except Exception:
+            resume_content = ""
+        generated_dict=get_generated_responses(about_me=about, resume_content=resume_content, posting_path=job_posting)
+        job_description=generated_dict.get("job description", "")
+        company_description = generated_dict.get("company description", "")
+        job_specification=generated_dict.get("job specification", "")
+        if job_description!="":
+            additional_interview_info += f"job description: {job_description} \n"
+        if job_specification!="":
+            additional_interview_info += f"job specification: {job_specification} \n"
+        if company_description!="":
+            additional_interview_info += f"company description: {company_description} \n"
+        return additional_interview_info
+
 
     def process_file(self, uploaded_files: Any) -> None:
 
         """ Processes user uploaded files including converting all format to txt, checking content safety, and categorizing content type  """
-    
+
         for uploaded_file in uploaded_files:
             file_ext = Path(uploaded_file.name).suffix
             filename = str(uuid.uuid4())+file_ext
@@ -362,10 +411,20 @@ class Interview():
             content_safe, content_type, content_topics = check_content(end_path)
             print(content_type, content_safe, content_topics) 
             if content_safe:
-                self.update_vectorstore(content_type, end_path)
+                if content_type=="other":
+                    self.update_vectorstore(content_type, end_path)
+                if content_type=="resume":
+                    print(f"user uploaded a resume file")
+                    if "resume_file" not in st.session_state:
+                        st.session_state["resume_file"]=end_path
+                if content_type=="job posting":
+                    print(f"user uploaded job posting")
+                    if "job_posting" not in st.session_state:
+                        st.session_state["job_posting"]= end_path
             else:
                 print("file content unsafe")
                 os.remove(end_path)
+
         
 
     def process_link(self, posting: Any) -> None:
@@ -376,10 +435,16 @@ class Interview():
         if (retrieve_web_content(posting, save_path = end_path)):
             content_safe, content_type, content_topics = check_content(end_path)
             if content_safe:
-                self.update_vectorstore(content_type, end_path)
+                if content_type=="other":
+                    self.update_vectorstore(content_type, end_path)
+                if content_type == "job posting":
+                    print(f"user uploaded job posting")
+                    if "job_posting" not in st.session_state:
+                        st.session_state["job_posting"]= end_path
             else:
                 print("link content unsafe")
                 os.remove(end_path)
+
     
     def update_vectorstore(self, content_type:str, end_path:str): 
 

@@ -91,9 +91,11 @@ class InterviewController():
     # initialize new memory (shared betweeen interviewer and grader_agent)
     interview_memory = AgentTokenBufferMemory(memory_key=memory_key, llm=llm, input_key="input", max_token_limit=memory_max_token)
 
-    def __init__(self, userid):
+
+    def __init__(self, userid, additional_prompt_info):
         self.userid = userid
         self.mode = "interview"
+        self.additional_interview_info = additional_prompt_info
         self._initialize_log()
         self._initialize_interview_agent()
         self._initialize_interview_grader()
@@ -160,8 +162,11 @@ class InterviewController():
 
             # Human may also have asked for a specific interview topic: {topic}
         #initialize interviewer agent
+
         template =   f"""
-            You are an AI job interviewer. 
+            You are an AI job interviewer. The following, if available, are things pertaining to the interview.
+            
+           {self.additional_interview_info}
 
             The interview content is contained in the tool "search_interview_material", if available.
 
@@ -198,7 +203,7 @@ class InterviewController():
             extra_prompt_messages=[MessagesPlaceholder(variable_name="chat_history")]
             )
 
-        print(f"XXXXXXXXXXXx{[tools.name for tools in self.interview_tools]}")
+        print(f"INTERVIEW AGENT TOOLS: {[tools.name for tools in self.interview_tools]}")
         agent = OpenAIFunctionsAgent(llm=self.llm, tools=self.interview_tools, prompt=prompt)
 
         # messages = chat_prompt.format_messages(
@@ -232,13 +237,17 @@ class InterviewController():
         system_message = SystemMessage(
         content=(
 
-          """You are a professional interview grader who grades the quality of responses to interview questions. 
+          f"""You are a professional interview grader who grades the quality of responses to interview questions. 
           
           Access your memory and retrieve the very last piece of the conversation, if available.
 
           Determine if the AI has asked an interview question. If it has, you are to grade the Human input based on how well it answers the question.
 
           Otherwise, respond with the phrase "skip" only.
+
+          The following, if available, are things pertaining to the interview.
+            
+           {self.additional_interview_info}
 
            The interview content is contained in the tool "search_interview_material", if available.
 
@@ -343,16 +352,17 @@ class InterviewController():
         return response
     
     
-    def update_tools(self, tools: List[Tool]) -> None:
+    
+    # def update_tools(self, tools: List[Tool]) -> None:
 
-        """ Updates interview tools, which are study material or resume converted to vectore store retriever as tools """
-        try:
-            self.interview_tools
-        except AttributeError:
-            self.interview_tools = tools
-        else:
-            self.interview_tools += tools
-        print(f"Succesfully updated tool {[t.name for t in tools]}for interview agent.")
+    #     """ Updates interview tools, which are study material or resume converted to vectore store retriever as tools """
+    #     try:
+    #         self.interview_tools
+    #     except AttributeError:
+    #         self.interview_tools = tools
+    #     else:
+    #         self.interview_tools += tools
+    #     print(f"Succesfully updated tool {[t.name for t in tools]}for interview agent.")
     
         
 
