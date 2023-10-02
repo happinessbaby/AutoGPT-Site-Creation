@@ -19,7 +19,7 @@ from typing import Any
 from langchain.chat_models import ChatOpenAI
 from langchain.llms import OpenAI
 from langchain.embeddings import OpenAIEmbeddings
-from common_utils import file_loader, check_content
+from common_utils import file_loader, check_content, search_interview_material
 from langchain_utils import (create_vectorstore, create_summary_chain,
                              retrieve_redis_vectorstore, split_doc, CustomOutputParser, CustomPromptTemplate, create_vs_retriever_tools,
                              create_retriever_tools, retrieve_faiss_vectorstore, merge_faiss_vectorstore, handle_tool_error, create_search_tools, create_wiki_tools)
@@ -94,7 +94,6 @@ class InterviewController():
 
     def __init__(self, userid, additional_prompt_info):
         self.userid = userid
-        self.mode = "interview"
         self.additional_interview_info = additional_prompt_info
         self._initialize_log()
         self._initialize_interview_agent()
@@ -129,13 +128,15 @@ class InterviewController():
             json_request (str): input argument from human's question, in this case the interview topic that may be contained in the Human input.
 
         """
- 
-           
-        # interview_stopper_tool = self.ends_interview_tool()h.
 
-        wiki_tool = create_wiki_tools()
-        self.interview_tools = wiki_tool
-        # load vector store
+        store = retrieve_faiss_vectorstore("faiss_interview_data")
+        retriever = store.as_retriever()
+        general_tool_description = """Use this tool to generate general interview questions and answer.
+        Prioritize other tools over this tool. """
+        general_tool= create_retriever_tools(retriever, "search_interview_database", general_tool_description)
+        self.interview_tools = general_tool
+
+        # create vector store retriever tool for interview material
         vs_directory = f"./faiss/{self.userid}/"
         try:
             subfolders= [f.path for f in os.scandir(vs_directory) if f.is_dir()]
@@ -144,20 +145,13 @@ class InterviewController():
                 # suffix = dirname.rfind("_")
                 # tool_name = "search_" + dirname[:suffix].removeprefix(vs_directory)
                 tool_name = "search_" + dirname.removeprefix(vs_directory).removesuffix(f"_{self.userid}")
-                tool_description =  """Useful for generating personalized interview questions and answers. 
-                    Use this tool more than any other tool during a mock interview session when asking personal questions such as work experience, personal projects, tell me about yourself.
+                tool_description =  """Useful for generating interview questions and answers. 
+                    Use this tool more than any other tool during a mock interview session to generate interview questions.
                     Do not use this tool to load any files or documents.  """ 
                 tools = create_vs_retriever_tools(vs, tool_name, tool_description)
                 self.interview_tools+=tools
         except FileNotFoundError:
-            pass
-        
-        # try:
-        #     self.interview_tools
-        # except AttributeError:
-        #     self.interview_tools = wiki_tool
-        # else:
-        #     self.interview_tools += wiki_tool     
+            pass  
 
 
             # Human may also have asked for a specific interview topic: {topic}
@@ -352,34 +346,3 @@ class InterviewController():
     
         
 
-    # def ends_interview_tool(self) -> List[Tool]:
-
-    #     """ Agent tool used to end the interview session."""
-        
-    #     name = "interview_stopper"
-    #     parameters = '{{"end interivew": "<end interview>"}}'
-    #     description = f"""Ends the interview process.Use this whenever user asks to end the interview session or go back to the main chat. 
-    #         Do not use it in any other circumstances.  
-    #         Input should be empty  \n
-    #          """
-    #     tools = [
-    #         Tool(
-    #         name = name,
-    #         func = self.interview_stopper,
-    #         description = description, 
-    #         verbose = False,
-    #         handle_tool_error=handle_tool_error,
-    #         )
-    #     ]
-    #     print("Succesfully created interview initiator tool.")
-    #     return tools
-
-
-    # def interview_stopper(self, json_request:str) -> str:
-
-    #     # try:
-    #     #     args = json.loads(json_request)
-    #     #     request = args["user request"]
-    #     # except Exception:
-    #     #     request = "please inform user that interivew session has ended"
-    #     self.mode = "chat"

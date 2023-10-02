@@ -12,7 +12,7 @@ from langchain.callbacks import StreamlitCallbackHandler
 from career_advisor import ChatController
 from mock_interview import InterviewController
 from callbacks.capturing_callback_handler import playback_callbacks
-from basic_utils import convert_to_txt, read_txt, retrieve_web_content
+from basic_utils import convert_to_txt, read_txt, retrieve_web_content, html_to_text
 from openai_api import check_content_safety
 from dotenv import load_dotenv, find_dotenv
 from common_utils import  check_content
@@ -254,55 +254,11 @@ class Chat():
                     message(st.session_state['questions'][i], is_user=True, key=str(i) + '_user',  avatar_style="initials", seed="Yueqi", allow_html=True)
 
 
-    # def mode_popup(self, mode):
-    #     if mode=="interview":
-    #         if "interview_state" not in st.session_state:
-    #             modal = Modal(key="form_popup",title="""Your interview session will start. 
-    #                           Please upload any interview material if you have not done so.""")
-    #             with modal.container():
-    #                 # with st.form( key='interview_form', clear_on_submit=True):
-    #                 #     st.file_uploader(label="Upload your file",
-    #                 #                                     type=["pdf","odt", "docx","txt", "zip", "pptx"], 
-    #                 #                                     key = "interview_files",
-    #                 #                                     accept_multiple_files=True)
-    #                 #     st.form_submit_button(label='Submit', on_click=self.interview_form_callback)
-    #                 #     # TODO: add links capability
-    #                 col1, buffer, col2= st.columns([5, 5, 5])
-    #                 with col1:
-    #                     back = st.button("take me back to main chat")
-    #                 with col2:
-    #                     confirm = st.button("okay, take me to it!")
-    #                 # with col3:
-    #                 # skip = st.button("skip")
-    #                 # if skip:
-    #                 #     st.session_state.mode = "interview"
-    #                 if back:
-    #                     print("back is pressed")
-    #                     st.session_state.mode = "chat"
-    #                 if confirm:
-    #                     print("confirm is pressed")          
-    #                     st.session_state.mode = "interview"
-    #                     st.experimental_rerun()
-    #                 #TODO right now close button mode is still interview, need to switch to chat
-    #                 # if modal.close():
-    #                 #     st.session_state.mode = "chat"
-    #     elif mode == "chat":
-    #         if "chat_state" not in st.session_state:
-    #             modal = Modal(key="popup_chat", title="Are you sure you want to go back to the main chat?")
-    #             with modal.container():
-    #                 col1, buffer, col2= st.columns([5, 5, 5])
-    #                 with col1:
-    #                     yes = st.button("yes")
-    #                 with col2:
-    #                     no = st.button("no")
-    #                 if yes:
-    #                     st.session_state.mode = "chat"
-    #                     st.experimental_rerun()
-    #                 if no:
-    #                     st.session_state.mode = "interview"
 
 
     def form_callback(self):
+
+        """ Processes form information during form submission callback. """
 
         try: 
             temp_dir = temp_path+st.session_state.userid
@@ -362,7 +318,21 @@ class Chat():
             content_safe, content_type, content_topics = check_content(end_path)
             print(content_type, content_safe, content_topics) 
             if content_safe:
-                self.add_to_chat(content_type, content_topics, end_path)
+                if content_type != "other":
+                    entity = f"""{content_type} file: {end_path} /n ###"""
+                    self.new_chat.update_entities(entity)
+                else:
+                    # update interview material, to be used for "search_interview_material" tool
+                    if content_topics: 
+                        entity = f"""interview material topics: {str(content_topics)} """
+                        self.new_chat.update_entities(entity)
+                        vs_name = "interview_material"
+                        vs = merge_faiss_vectorstore(vs_name, end_path)
+                        vs_path = f"./faiss/{st.csession_state.userid}/{vs_name}"
+                        vs.save_local(vs_path)
+                        entity = f"""interview material path: {vs_path} /n ###"""
+                        self.new_chat.update_entities(entity)
+                # self.add_to_chat(content_type, content_topics, end_path)
             else:
                 print("file content unsafe")
                 os.remove(end_path)
@@ -373,52 +343,58 @@ class Chat():
         """ Processes user shared links including converting all format to txt, checking content safety, and categorizing content type """
 
         end_path = os.path.join(save_path, st.session_state.userid, str(uuid.uuid4())+".txt")
-        if (retrieve_web_content(posting, save_path = end_path)):
+        if html_to_text([posting], save_path=end_path):
+        # if (retrieve_web_content(posting, save_path = end_path)):
             content_safe, content_type, content_topics = check_content(end_path)
             if content_safe:
-                self.add_to_chat(content_type, content_topics, end_path)
+                if content_type!="other":
+                    entity = f"""{content_type} file: {end_path} /n ###"""
+                    self.new_chat.update_entities(entity)
+                    # self.add_to_chat(content_type, content_topics, end_path)
+                else:
+                    st.write("Content not recognized. Please try to save the content and upload it.")
             else:
-                print("link content unsafe")
+                st.write("Link content unsafe. Please try another link.")
                 os.remove(end_path)
 
 
-    def add_to_chat(self, content_type: str, content_topics: set, file_path: str) -> None:
+    # def add_to_chat(self, content_type: str, content_topics: set, file_path: str) -> None:
 
-        """ Updates entities, vector stores, and tools for different chat agents. The main chat agent will have file paths saved as entities. The interview agent will have files as tools.
+    #     """ Updates entities, vector stores, and tools for different chat agents. The main chat agent will have file paths saved as entities. The interview agent will have files as tools.
         
-        Args: 
+    #     Args: 
 
-            content_type (str): content category, such as resume, cover letter, job posting, other
+    #         content_type (str): content category, such as resume, cover letter, job posting, other
 
-            content_topics (str): if content_type is other, content will be treated as interview material. So in this case, content_topics is interview topics. 
+    #         content_topics (str): if content_type is other, content will be treated as interview material. So in this case, content_topics is interview topics. 
 
-            read_path (str): content file path
+    #         read_path (str): content file path
              
-         """
+    #      """
 
-        if content_type != "other":
-            entity = f"""{content_type} file: {file_path} /n ###"""
-            self.new_chat.update_entities(entity)
-            # name = content_type.strip().replace(" ", "_")
-            # vs_name = f"faiss_{name}_{st.session_state.userid}"
-            # vs = create_vectorstore("faiss", file_path, "file", vs_name)
-            # tool_name = "search_" + vs_name.removeprefix("faiss_").removesuffix(f"_{st.session_state.userid}")
-            # tool_description =  f"""Useful for searching documents with respect to content type {content_type}.
-            #     Do not use this tool to load any files or documents.  """ 
-            # tools = create_retriever_tools(vs.as_retriever(), tool_name, tool_description)
-            # self.new_chat.update_tools(tool_name)
+    #     if content_type != "other":
+    #         entity = f"""{content_type} file: {file_path} /n ###"""
+    #         self.new_chat.update_entities(entity)
+    #         # name = content_type.strip().replace(" ", "_")
+    #         # vs_name = f"faiss_{name}_{st.session_state.userid}"
+    #         # vs = create_vectorstore("faiss", file_path, "file", vs_name)
+    #         # tool_name = "search_" + vs_name.removeprefix("faiss_").removesuffix(f"_{st.session_state.userid}")
+    #         # tool_description =  f"""Useful for searching documents with respect to content type {content_type}.
+    #         #     Do not use this tool to load any files or documents.  """ 
+    #         # tools = create_retriever_tools(vs.as_retriever(), tool_name, tool_description)
+    #         # self.new_chat.update_tools(tool_name)
    
-        else:
-            if content_topics: 
-                entity = f"""study material topics: {str(content_topics)} """
-                self.new_chat.update_entities(entity)
-            # vs_name = f"faiss_study_material_{st.session_state.userid}"
-            # vs = merge_faiss_vectorstore(vs_name, file_path)
-            # tool_name = "search_" + vs_name.removeprefix("faiss_").removesuffix(f"_{st.session_state.userid}")
-            # tool_description =  f"""Used for searching material with respect to content topics such as {content_topics}. 
-            #     Do not use this tool to load any files or documents. This should be used only for searching and generating questions and answers of the relevant materials and topics. """
-            # tools = create_retriever_tools(vs.as_retriever(), tool_name, tool_description)
-            # self.new_chat.update_tools(tools)
+    #     else:
+    #         if content_topics: 
+    #             entity = f"""study material topics: {str(content_topics)} """
+    #             self.new_chat.update_entities(entity)
+    #         # vs_name = f"faiss_study_material_{st.session_state.userid}"
+    #         # vs = merge_faiss_vectorstore(vs_name, file_path)
+    #         # tool_name = "search_" + vs_name.removeprefix("faiss_").removesuffix(f"_{st.session_state.userid}")
+    #         # tool_description =  f"""Used for searching material with respect to content topics such as {content_topics}. 
+    #         #     Do not use this tool to load any files or documents. This should be used only for searching and generating questions and answers of the relevant materials and topics. """
+    #         # tools = create_retriever_tools(vs.as_retriever(), tool_name, tool_description)
+    #         # self.new_chat.update_tools(tools)
             
 
     

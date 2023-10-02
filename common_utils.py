@@ -811,24 +811,40 @@ class FeastPromptTemplate(StringPromptTemplate):
         return prompt.format(**kwargs)
 
 
-# @tool
-# def search_relevancy_advice(query: str) -> str:
-#     """Searches for general advice on relevant and irrelevant information in resume"""
-#     subquery_relevancy = "how to determine what's relevant in resume"
-#     # option 1: compression retriever
-#     # retriever = create_compression_retriever()
-#     # option 2: ensemble retriever
-#     # retriever = create_ensemble_retriever(split_doc())
-#     # option 3: vector store retriever
-#     # db = retrieve_redis_vectorstore("index_web_advice")
-#     db = retrieve_faiss_vectorstore("faiss_web_data")
-#     retriever = db.as_retriever(search_type="similarity_score_threshold", search_kwargs={"score_threshold": .5, "k":1})
-#     docs = retriever.get_relevant_documents(subquery_relevancy)
-#     # reordered_docs = reorder_docs(retriever.get_relevant_documents(subquery_relevancy))
-#     texts = [doc.page_content for doc in docs]
-#     texts_merged = "\n\n".join(texts)
-#     print(f"Successfully used relevancy tool to generate answer: {texts_merged}")
-#     return texts_merged
+@tool()
+def search_user_material(json_request: str) -> str:
+
+    """Searches and looks up user uploaded material, if available.
+
+      Input should be a single string strictly in the following JSON format: '{{"user material path":"<user material path>", "user query":"<user query>" \n"""
+
+    try:
+        json_request = json_request.strip("'<>() ").replace('\'', '\"')
+        args = json.loads(json_request)
+    except JSONDecodeError as e:
+        print(f"JSON DECODE ERROR: {e}")
+        return "Format in a single string JSON and try again."
+ 
+    vs_path = args["user material path"]
+    query = args["user query"]
+    if vs_path!="" and query!="":
+        # subquery_relevancy = "how to determine what's relevant in resume"
+        # option 1: compression retriever
+        # retriever = create_compression_retriever()
+        # option 2: ensemble retriever
+        # retriever = create_ensemble_retriever(split_doc())
+        # option 3: vector store retriever
+        # db = retrieve_redis_vectorstore("index_web_advice")
+        db = retrieve_faiss_vectorstore(vs_path)
+        retriever = db.as_retriever(search_type="similarity_score_threshold", search_kwargs={"score_threshold": .5, "k":1})
+        docs = retriever.get_relevant_documents(query)
+        # reordered_docs = reorder_docs(retriever.get_relevant_documents(subquery_relevancy))
+        texts = [doc.page_content for doc in docs]
+        texts_merged = "\n\n".join(texts)
+        return texts_merged
+    else:
+        return "There is no user material or query to look up."
+
 
 
 @tool(return_direct=True)
@@ -852,7 +868,7 @@ def file_loader(json_request: str) -> str:
     except Exception as e:
         return "file did not load successfully. try another tool"
     
-@tool("get download link", return_direct=True)
+@tool("get_download_link", return_direct=True)
 def binary_file_downloader_html(json_request: str):
 
     """ Gets the download link from file. DO NOT USE THIS TOOL UNLESS YOU ARE TOLD TO DO SO.

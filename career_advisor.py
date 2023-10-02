@@ -6,9 +6,8 @@ from langchain.chat_models import ChatOpenAI
 from langchain.llms import OpenAI
 from langchain.embeddings import OpenAIEmbeddings
 # from langchain.prompts import ChatPromptTemplate
-from langchain import PromptTemplate, LLMChain
 # from langchain.agents import ConversationalChatAgent, Tool, AgentExecutor
-from common_utils import file_loader, check_content, binary_file_downloader_html, search_all_chat_history
+from common_utils import file_loader, check_content, binary_file_downloader_html, search_all_chat_history, search_interview_material
 from langchain_utils import (create_vectorstore, create_summary_chain,
                              retrieve_redis_vectorstore, split_doc, CustomOutputParser, CustomPromptTemplate, create_vs_retriever_tools,
                              create_retriever_tools, retrieve_faiss_vectorstore, merge_faiss_vectorstore, handle_tool_error, create_search_tools, create_wiki_tools)
@@ -16,9 +15,7 @@ from langchain_utils import (create_vectorstore, create_summary_chain,
 from langchain.agents import Tool, AgentExecutor, LLMSingleActionAgent, AgentOutputParser
 # from langchain.experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
 # from langchain.schema import AgentAction, AgentFinish, HumanMessage
-# from typing import List, Union
-# import re
-# from langchain import LLMChain
+from langchain.chains import LLMChain
 from langchain.memory import ConversationBufferMemory, ReadOnlySharedMemory
 from langchain.agents import initialize_agent
 from langchain.agents import AgentType, Tool, load_tools
@@ -109,7 +106,7 @@ memory_key="chat_history"
 
 class ChatController():
 
-    llm = ChatOpenAI(streaming=True, callbacks=[StreamingStdOutCallbackHandler()], temperature=0, cache = False)
+    llm = ChatOpenAI(model="gpt-4", streaming=True, callbacks=[StreamingStdOutCallbackHandler()], temperature=0, cache = False)
     embeddings = OpenAIEmbeddings()
     chat_memory = ConversationBufferMemory(llm=llm, memory_key=memory_key, return_messages=True, input_key="input", output_key="output", max_token_limit=memory_max_token)
     # chat_memory = ReadOnlySharedMemory(memory=chat_memory)
@@ -119,7 +116,6 @@ class ChatController():
 
     def __init__(self, userid):
         self.userid = userid
-        self.mode = "chat"
         self._initialize_log()
         self._initialize_chat_agent()
         if update_instruction:
@@ -132,27 +128,28 @@ class ChatController():
         """ Initializes main chat, a CHAT_CONVERSATIONAL_REACT_DESCRIPTION agent:  https://python.langchain.com/docs/modules/agents/agent_types/chat_conversation_agent#using-a-chat-model """
     
         # initialize tools
-        cover_letter_tool = create_cover_letter_generator_tool()
+        # cover_letter_tool = create_cover_letter_generator_tool()
         # cover letter generator tool
-        # cover_letter_tool = [cover_letter_generator]
-        resume_evaluator_tool = create_resume_evaluator_tool()
+        cover_letter_tool = [cover_letter_generator]
+        # resume_evaluator_tool = create_resume_evaluator_tool()
         # resume evaluator tool
-        # resume_evaluator_tool = [resume_evaluator]
+        resume_evaluator_tool = [resume_evaluator]
         personal_statement_writer_tool = create_personal_statement_writer_tool()
+        interview_material_tool = [search_interview_material]
         # interview mode starter tool
         # interview_tool = self.initiate_interview_tool()
         # file_loader_tool = create_file_loader_tool()
         # file loader tool
         working_directory = f"./static/{self.userid}/"
         file_loader_tool = [file_loader]
-        file_sys_tools = FileManagementToolkit(
-            root_dir=working_directory, # ensures only the working directory is accessible 
-            selected_tools=["read_file", "list_directory"],
-        ).get_tools()
-        file_sys_tools[0].return_direct = True
-        file_sys_tools[1].return_direct = True
-        file_sys_tools[0].description = 'Read file from disk. DO NOT USE THIS TOOL UNLESS YOU ARE TOLD TO DO SO.'
-        file_sys_tools[1].description = 'List files and directories in a specified folder. DO NOT USE THIS TOOL UNLESS YOU ARE TOLD TO DO SO.'
+        # file_sys_tools = FileManagementToolkit(
+        #     root_dir=working_directory, # ensures only the working directory is accessible 
+        #     selected_tools=["read_file", "list_directory"],
+        # ).get_tools()
+        # file_sys_tools[0].return_direct = True
+        # file_sys_tools[1].return_direct = True
+        # file_sys_tools[0].description = 'Read file from disk. DO NOT USE THIS TOOL UNLESS YOU ARE TOLD TO DO SO.'
+        # file_sys_tools[1].description = 'List files and directories in a specified folder. DO NOT USE THIS TOOL UNLESS YOU ARE TOLD TO DO SO.'
 
 
         link_download_tool = [binary_file_downloader_html]
@@ -179,10 +176,10 @@ class ChatController():
         # wiki tool
         wiki_tool = create_wiki_tools()
         # gather all the tools together
-        self.tools =  cover_letter_tool + resume_evaluator_tool + search_tool + wiki_tool + link_download_tool + [tool for tool in file_sys_tools] + general_tool + personal_statement_writer_tool
+        self.tools =  cover_letter_tool + resume_evaluator_tool + search_tool + wiki_tool + link_download_tool  + general_tool + personal_statement_writer_tool + interview_material_tool
+        # + [tool for tool in file_sys_tools]
         tool_names = [tool.name for tool in self.tools]
-
-
+        print(f"Chat agent tools: {tool_names}")
 
         # initialize evaluator
         if (evaluate_result):
@@ -561,30 +558,6 @@ class ChatController():
     #     self.chat_history = messages_to_dict(extracted_messages)
     
 
-
-
-    
-    # def create_retriever_tools(self, vectorstore: Any, vs_name: str) -> List[Tool]:   
-
-    #     """Create retriever tools from vectorstore for conversational retrieval agent
-        
-    #     Args: 
-    #         vecstorstore: """   
-
-    #     retriever = vectorstore.as_retriever()
-    #     name = vs_name.removeprefix("faiss_").removesuffix(f"_{self.userid}")
-    #     tool_name =f"search_{name}"
-    #     tool_description =  """Useful for generating interview questions and answers. 
-    #     Use this tool more than any other tool during a mock interview session. This tool can also be used for questions about topics in the interview material topics. 
-    #     Do not use this tool to load any files or documents. This should be used only for searching and generating questions and answers of the relevant materials and topics. """
-    #     tool = [create_retriever_tool(
-    #         retriever,
-    #         tool_name,
-    #         tool_description
-    #         )]
-    #     print(f"Succesfully created interview material tool: {tool_name}")
-
-    #     return tool
     # def update_tools(self, tools:List[Tool]) -> None:
 
     #     """ Update tools for chat agent."""
@@ -631,39 +604,6 @@ class ChatController():
 
 
     
-
-    # def initiate_interview_tool(self) -> List[Tool]:
-
-    #     """ Agent tool used to initialized the interview session."""
-        
-    #     name = "interview_starter"
-    #     parameters = '{{"interview topic": "<interview topic>"}}'
-    #     description = f"""Initiates the interview process.
-    #         Use this tool whenever Human wants to conduct a mock interview. Do not use this tool for study purposes or answering interview questions. 
-    #         Input should be a single string strictly in the following JSON format: {parameters} \n
-    #         Output should be asking user to confirm that they wish to proceed to the interview process."""
-    #     tools = [
-    #         Tool(
-    #         name = name,
-    #         func = self.interview_starter,
-    #         description = description, 
-    #         verbose = False,
-    #         handle_tool_error=handle_tool_error,
-    #         )
-    #     ]
-    #     print("Succesfully created interview initiator tool.")
-    #     return tools
-    
-    # def interview_starter(self, json_request:str) -> str:
-
-    #     self.topics = ""
-    #     try:
-    #         args = json.loads(json_request)
-    #         self.topics = args["interview topic"]
-    #     except Exception:
-    #         self.topics = ""
-    #     self.mode = "interview"
-        
 
     
 
