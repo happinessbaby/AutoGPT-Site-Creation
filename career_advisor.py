@@ -7,7 +7,7 @@ from langchain.llms import OpenAI
 from langchain.embeddings import OpenAIEmbeddings
 # from langchain.prompts import ChatPromptTemplate
 # from langchain.agents import ConversationalChatAgent, Tool, AgentExecutor
-from common_utils import file_loader, check_content, binary_file_downloader_html, search_all_chat_history, search_interview_material
+from common_utils import file_loader, check_content, binary_file_downloader_html, search_all_chat_history, search_user_material
 from langchain_utils import (create_vectorstore, create_summary_chain,
                              retrieve_redis_vectorstore, split_doc, CustomOutputParser, CustomPromptTemplate, create_vs_retriever_tools,
                              create_retriever_tools, retrieve_faiss_vectorstore, merge_faiss_vectorstore, handle_tool_error, create_search_tools, create_wiki_tools)
@@ -135,7 +135,7 @@ class ChatController():
         # resume evaluator tool
         resume_evaluator_tool = [resume_evaluator]
         personal_statement_writer_tool = create_personal_statement_writer_tool()
-        interview_material_tool = [search_interview_material]
+        interview_material_tool = [search_user_material]
         # interview mode starter tool
         # interview_tool = self.initiate_interview_tool()
         # file_loader_tool = create_file_loader_tool()

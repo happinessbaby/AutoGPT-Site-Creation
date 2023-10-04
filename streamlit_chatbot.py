@@ -13,6 +13,7 @@ from career_advisor import ChatController
 from mock_interview import InterviewController
 from callbacks.capturing_callback_handler import playback_callbacks
 from basic_utils import convert_to_txt, read_txt, retrieve_web_content, html_to_text
+from openai_api import get_completion
 from openai_api import check_content_safety
 from dotenv import load_dotenv, find_dotenv
 from common_utils import  check_content
@@ -20,6 +21,7 @@ import asyncio
 import concurrent.futures
 import subprocess
 import sys
+import re
 from multiprocessing import Process, Queue, Value
 import pickle
 import requests
@@ -118,8 +120,7 @@ class Chat():
                 "":"",
                 "help me write a cover letter": "coverletter",
                 "help  evaluate my my resume": "resume",
-                "I want to do a mock interview": "interview",
-                "polish my personal statement, thanks": "personalstatement"
+                "polish my personal statement": "personalstatement"
             }
 
 
@@ -158,7 +159,7 @@ class Chat():
             with st.sidebar:
                 st.title('Quick Navigation 🧸')
                 st.markdown('''
-                Hi, I'm Acai, your AI career advisor. I can: 
+                Hi, I'm Acai, a career AI. I can: 
                             
                 - improve your resume and personal statement
                 - write a cover letter
@@ -191,10 +192,10 @@ class Chat():
                     #         key = "company"
                     #     )
 
-                    about_me = st.text_area(label="tell me about yourself", value="For example, you can say, I want to pursue a developer job at ABC company, or I want to apply for the MBA program at ABC University", key="about_me")
+                    about_me = st.text_area(label="tell me about yourself", placeholder="For example, you can say,  I want to apply for the MBA program at ABC University, or I want to apply for this job at <link> ", key="about_me")
                         
                     add_vertical_space(1)
-                    link = st.text_input("job posting link", "", key = "link")
+                    # link = st.text_input("job posting link", "", key = "link")
 
                     uploaded_files = st.file_uploader(label="Upload your file",
                                                     type=["pdf","odt", "docx","txt", "zip", "pptx"], 
@@ -283,24 +284,32 @@ class Chat():
             self.process_file(files)
         except Exception:
             pass
-        try:
-            link = st.session_state.link
-            self.process_link(link)
-        except Exception:
-            pass
+        # try:
+        #     link = st.session_state.link
+        #     self.process_link(link)
+        # except Exception:
+        #     pass
         try:
             about_me = st.session_state.about_me
-            # self.process_about_me(about_me)
-            self.new_chat.update_entities(f"about me:{about_me} /n ###")
+            self.process_about_me(about_me)
+            # self.new_chat.update_entities(f"about me:{about_me} /n ###")
         except Exception:
             pass
 
     
-    # def process_about_me(self) -> None:
-    #     #TODO: extract job, company, institution, program, 
 
-    #     return None
-
+    def process_about_me(self, about_me: Any) -> None:
+    
+        """ Processes user's about me text input, including any links in the description. """
+        
+        about_me_summary = get_completion(f"Summarize the following about me. Do not include any links in your summary: {about_me}")
+        self.new_chat.update_entities(f"about me:{about_me_summary} /n ###")
+        # process any links in the about me
+        urls = re.findall(r'(https?://\S+)', about_me)
+        print(urls)
+        if urls:
+            for url in urls:
+                self.process_link(url)
 
     def process_file(self, uploaded_files: Any) -> None:
 
@@ -322,40 +331,46 @@ class Chat():
                     entity = f"""{content_type} file: {end_path} /n ###"""
                     self.new_chat.update_entities(entity)
                 else:
-                    # update interview material, to be used for "search_interview_material" tool
-                    if content_topics: 
-                        entity = f"""interview material topics: {str(content_topics)} """
-                        self.new_chat.update_entities(entity)
-                        vs_name = "interview_material"
-                        vs = merge_faiss_vectorstore(vs_name, end_path)
-                        vs_path = f"./faiss/{st.csession_state.userid}/{vs_name}"
-                        vs.save_local(vs_path)
-                        entity = f"""interview material path: {vs_path} /n ###"""
-                        self.new_chat.update_entities(entity)
+                    # update user material, to be used for "search_user_material" tool
+                    self.update_vectorstore(content_topics, end_path)
                 # self.add_to_chat(content_type, content_topics, end_path)
             else:
-                print("file content unsafe")
+                st.write("File content unsafe. Please try another file.")
                 os.remove(end_path)
         
 
-    def process_link(self, posting: Any) -> None:
+    def process_link(self, link: Any) -> None:
 
         """ Processes user shared links including converting all format to txt, checking content safety, and categorizing content type """
 
         end_path = os.path.join(save_path, st.session_state.userid, str(uuid.uuid4())+".txt")
-        if html_to_text([posting], save_path=end_path):
+        if html_to_text([link], save_path=end_path):
         # if (retrieve_web_content(posting, save_path = end_path)):
             content_safe, content_type, content_topics = check_content(end_path)
             if content_safe:
-                if content_type!="other":
+                if content_type=="browser error":
+                    st.write("Link content cannot be parsed, please try another link.")
+                elif content_type!="other":
                     entity = f"""{content_type} file: {end_path} /n ###"""
                     self.new_chat.update_entities(entity)
                     # self.add_to_chat(content_type, content_topics, end_path)
                 else:
-                    st.write("Content not recognized. Please try to save the content and upload it.")
+                    self.update_vectorstore(content_topics, end_path)
             else:
                 st.write("Link content unsafe. Please try another link.")
                 os.remove(end_path)
+
+    def update_vectorstore(self, content_topics: str, end_path: str) -> None:
+
+        entity = f"""topics: {str(content_topics)} """
+        self.new_chat.update_entities(entity)
+        vs_name = "user_material"
+        vs = merge_faiss_vectorstore(vs_name, end_path)
+        vs_path = f"./faiss/{st.session_state.userid}/chat/{vs_name}"
+        vs.save_local(vs_path)
+        entity = f"""user material path: {vs_path} /n ###"""
+        self.new_chat.update_entities(entity)
+
 
 
     # def add_to_chat(self, content_type: str, content_topics: set, file_path: str) -> None:

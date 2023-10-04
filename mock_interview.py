@@ -19,7 +19,7 @@ from typing import Any
 from langchain.chat_models import ChatOpenAI
 from langchain.llms import OpenAI
 from langchain.embeddings import OpenAIEmbeddings
-from common_utils import file_loader, check_content, search_interview_material
+from common_utils import file_loader, check_content
 from langchain_utils import (create_vectorstore, create_summary_chain,
                              retrieve_redis_vectorstore, split_doc, CustomOutputParser, CustomPromptTemplate, create_vs_retriever_tools,
                              create_retriever_tools, retrieve_faiss_vectorstore, merge_faiss_vectorstore, handle_tool_error, create_search_tools, create_wiki_tools)
@@ -67,6 +67,7 @@ from langchain.agents.agent_toolkits import FileManagementToolkit
 from langchain.tools.file_management.read import ReadFileTool
 from langchain.cache import InMemoryCache
 from langchain.tools import StructuredTool
+from urllib import request
 
 
 from dotenv import load_dotenv, find_dotenv
@@ -104,9 +105,9 @@ class InterviewController():
         """ Initializes log: https://python.langchain.com/docs/modules/callbacks/filecallbackhandler """
 
          # initialize file callback logging
-        logfile = log_path + f"{self.userid}.log"
-        self.handler = FileCallbackHandler(logfile)
-        logger.add(logfile,  enqueue=True)
+        self.logfile = log_path + f"{self.userid}.log"
+        self.handler = FileCallbackHandler(self.logfile)
+        logger.add(self.logfile,  enqueue=True)
         # Upon start, all the .log files will be deleted and changed to .txt files
         for path in  Path(log_path).glob('**/*.log'):
             file = str(path)
@@ -137,7 +138,7 @@ class InterviewController():
         self.interview_tools = general_tool
 
         # create vector store retriever tool for interview material
-        vs_directory = f"./faiss/{self.userid}/"
+        vs_directory = f"./faiss/{self.userid}/interview/"
         try:
             subfolders= [f.path for f in os.scandir(vs_directory) if f.is_dir()]
             for dirname in list(subfolders):
@@ -174,7 +175,9 @@ class InterviewController():
 
             If the Human is asking about other things instead of answering an interview question, please steer them back to the interview process.
 
-            Please ask your interview question now!
+            Remember to ask one interview question at a time!
+
+            Please ask your interview question now:
 
            """
         
@@ -331,6 +334,22 @@ class InterviewController():
             # print(f"Sucessfully pickled conversation: {chat_history}")
         return response
     
+
+    def retrieve_feedback(self):
+
+        """ Retrieves feedback from conversation and writes it to file. """
+
+        # conversation = str(self.interview_memory.chat_memory.messages)
+        end_path = f"./log/{Path(self.logfile).stem}.txt"
+        convert_to_txt(self.logfile, f"./log/{Path(self.logfile).stem}.txt")
+        conversation = read_txt(end_path)
+        response = get_completion(f"Extract the positive and negative feedbacks from the following conversation: {conversation}")
+        with open("./feedback.txt", "w") as f:
+            f.write(response)
+        print(conversation)
+        print(f"Successfully retrieved interview feedback summary: {response}")
+        return "./feedback.txt"
+        
     
     
     # def update_tools(self, tools: List[Tool]) -> None:
