@@ -47,6 +47,7 @@ delimiter4 = "****"
 # personal_info = ["Name", "Phone", "Email", "LinkedIn", "Website", "JobTitle"]
 document = Document()
 document.add_heading('Resume Evaluation', 0)
+document_dict = {}
 
 
 def evaluate_resume(about_me="", resume_file = "", posting_path="") -> str:
@@ -96,9 +97,10 @@ def evaluate_resume(about_me="", resume_file = "", posting_path="") -> str:
     # # Note: retrieval query works best if clear, concise, and detail-dense
     # samples query to find missing content from resume using document comparison
     impression = generate_multifunction_response(impression_query, sample_tools)
-    document.add_heading(f"Overall Impression", level=2)
-    document.add_paragraph(impression)
-    document.add_page_break()
+    document_dict.update({"Overall Impression":impression})
+    # document.add_heading(f"Overall Impression", level=2)
+    # document.add_paragraph(impression)
+    # document.add_page_break()
 
     advice_query = f"""what fields to include for resume with someone with {highest_education_level} and {work_experience_level} for {job}"""
     advice = retrieve_from_db(advice_query)
@@ -117,37 +119,37 @@ def evaluate_resume(about_me="", resume_file = "", posting_path="") -> str:
 
     """
     missing_fields = generate_multifunction_response(query_missing, sample_tools)
-    document.add_heading(f"Possible Missing Fields", level=2)
-    document.add_paragraph(missing_fields)
-    document.add_page_break()
-    document.save(docx_filename)
+    document_dict.update({"Possible Missing Fields": missing_fields})
+    # document.add_heading(f"Possible Missing Fields", level=2)
+    # document.add_paragraph(missing_fields)
+    # document.add_page_break()
+    # document.save(docx_filename)
 
-    for field in field_names:
-      if field != "Personal Information":
-        try: 
-          field_content = info_dict[field]
-          improve_resume_fields(info_dict, field, field_content,  sample_tools, docx_filename)
-        except Exception as e:
-          raise e
+    # for field in field_names:
+    #   if field != "Personal Information":
+    #     try: 
+    #       field_content = info_dict[field]
+    #       improve_resume_fields(info_dict, field, field_content,  sample_tools, docx_filename)
+    #     except Exception as e:
+    #       raise e
       
-    document.save(docx_filename)
-    print("Successfully saved resume evaluation.")
+    # document.save(docx_filename)
+    # print("Successfully saved resume evaluation.")
 
     # process all fields in parallel
-    # processes = [Process(target = improve_resume_fields, args = (generated_responses, field, resume, res_path, relevancy_tools, sample_tools)) for field in resume_fields]
+    processes = [Process(target = improve_resume_fields, args = (info_dict, field, info_dict.get(field, ""),  sample_tools, document_dict)) for field in field_names]
+    for p in processes:
+       p.start()
+    for p in processes:
+       p.join()
 
-    # start all processes
-    # for p in processes:
-    #    p.start()
-
-    # for p in processes:
-    #    p.join()
+    return document_dict
 
     # return result to chat agent
-    return f""" file_path: {docx_filename} """
+    # return f""" file_path: {docx_filename} """
 
 
-def improve_resume_fields(generated_response: Dict[str, str], field: str, field_content: str, tools: List[Tool], docx_filename: str) -> None:
+def improve_resume_fields(generated_response: Dict[str, str], field: str, field_content: str, tools: List[Tool], document_dict: Dict[str, str]) -> None:
 
     print(f"CURRENT FIELD IS: {field}")
     job = generated_response.get("job", "")
@@ -158,7 +160,7 @@ def improve_resume_fields(generated_response: Dict[str, str], field: str, field_
     work_experience_level = generated_response.get("work experience level", "")
     # education_level = generated_response.get("education", "")
 
-    advice_query =  f"""What are some dos and don'ts when writing resume field {field} to make it ATS-friendly?"""
+    advice_query =  f"""how to make resume field {field} ATS-friendly? No formatting advices."""
     advice1 = retrieve_from_db(advice_query)
     advice_query = f"""what to include in {field} of resume for {highest_education_level} and {work_experience_level} as a {job}"""
     advice2 = retrieve_from_db(advice_query)
@@ -195,11 +197,13 @@ def improve_resume_fields(generated_response: Dict[str, str], field: str, field_
 
      """
     evaluation = generate_multifunction_response(query_evaluation, tools)
+    document_dict.update({f"{field} evaluation":evaluation})
+    
 
-    document.add_heading(f"{field}", level=1)
-    document.add_paragraph(evaluation)
-    document.add_page_break()
-    document.save(docx_filename)
+    # document.add_heading(f"{field}", level=1)
+    # document.add_paragraph(evaluation)
+    # document.add_page_break()
+    # document.save(docx_filename)
 
 
 

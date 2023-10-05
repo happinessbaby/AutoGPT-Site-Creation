@@ -163,9 +163,9 @@ class InterviewController():
             
            {self.additional_interview_info}
 
-            The interview content is contained in the tool "search_interview_material", if available. Generate your interview questions from this tool.
+            The main interview content is contained in the tool "search_interview_material", if available. Generate your interview questions from this tool.
 
-            Personal information about the applicant is contained in the tool "search_resume", if available.
+            If you have other tools, use them as well to generate interview questions. Please don't skip using the tools if you have any. 
 
             As an interviewer, you do not need to assess Human's response to your questions. Their response will be sent to a professional grader.         
 
@@ -174,6 +174,8 @@ class InterviewController():
             Always remember your role as an interviewer. Unless you're told to stop interviewing, you should not stop asking interview questions.
 
             If the Human is asking about other things instead of answering an interview question, please steer them back to the interview process.
+
+            You do not need to provide any sort of feedbacks. 
 
             Remember to ask one interview question at a time!
 
@@ -237,13 +239,13 @@ class InterviewController():
             
            {self.additional_interview_info}
 
-           The interview content is contained in the tool "search_interview_material", if available.
+           The main interview content is contained in the tool "search_interview_material", if available.
 
-            Personal information about the applicant is contained in the tool "search_resume", if available.
+           If you have other tools, they may also be helpful to you as a grader. 
         
-            Use these tools to search for the correct answer.
+           Remember to use these tools to search for the correct answer.
 
-          If the answer cannot be found in the your search, use other tools or answer to your best knowledge. 
+          If the answer cannot be found in your tools, use your best knowledge. 
 
           Remember, the Human may not know the answer or may have answered the question incorrectly. Therefore it is important that you provide an informative feedback to the Human's response in the format:
 

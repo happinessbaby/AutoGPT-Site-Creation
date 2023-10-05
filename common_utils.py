@@ -147,58 +147,6 @@ def extract_personal_information(resume: str,  llm = ChatOpenAI(temperature=0, m
     print(f"Successfully extracted personal info: {personal_info_dict}")
     return personal_info_dict
 
-# def extract_personal_statement_information(personal_statement:str, llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)):
-
-
-#     """ Extracts institution name, area of study, and degree of pursuit from personal statement. 
-
-#     See: https://python.langchain.com/docs/modules/model_io/output_parsers/structured
-
-#     Args: 
-
-#         personal_statement (str)
-
-#     Keyword Args:
-
-#         llm (BaseModel): ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False) by default
-
-#     Returns:
-
-#         a dictionary containing the extracted information; if a field does not exist, its dictionary value will be -1.
-     
-#     """
-
-#     institution_schema = ResponseSchema(name="institution",
-#                              description="Extract the institution name the applicant is applying to. If this information is not found, output -1")
-#     program_schema = ResponseSchema(name="program",
-#                                         description="Extract the degree program the applicant is pursuing. If this information is not found, output -1")
-    
-#     response_schemas = [institution_schema, 
-#                         program_schema]
-
-#     output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
-#     format_instructions = output_parser.get_format_instructions()
-#     template_string = """For the following text, delimited with {delimiter} chracters, extract the following information:
-
-#     institution: Extract the institution name the applicant is applying to. If this information is not found, output -1\
-
-#     program: Extract the degree program the applicant is pursuing in. If this information is not found, output -1\
-    
-#     text: {delimiter}{text}{delimiter}
-
-#     {format_instructions}
-#     """
-
-#     prompt = ChatPromptTemplate.from_template(template=template_string)
-#     messages = prompt.format_messages(text=personal_statement, 
-#                                 format_instructions=format_instructions,
-#                                 delimiter=delimiter)
- 
-#     response = llm(messages)
-#     personal_statement_dict = output_parser.parse(response.content)
-#     print(f"Successfully extracted posting info: {personal_statement_dict}")
-#     return personal_statement_dict
-
 
 
 def extract_pursuit_information(content: str, llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> Any:
@@ -263,60 +211,6 @@ def extract_pursuit_information(content: str, llm = ChatOpenAI(temperature=0, mo
     return pursuit_info_dict
 
 
-# def extract_posting_information(content: str, llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> str:
-
-#     """ Extracts job title and company name from job posting. 
-
-#     See: https://python.langchain.com/docs/modules/model_io/output_parsers/structured
-
-#     Args: 
-
-#         posting (str): job posting in text string format
-
-#     Keyword Args:
-
-#         llm (BaseModel): ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False) by default
-
-#     Returns:
-
-#         a dictionary containing the extracted information; if a field does not exist, its dictionary value will be -1.
-     
-#     """
-
-#     job_schema = ResponseSchema(name="job",
-#                              description="Extract the job position of the job listing. If this information is not found, output -1")
-#     company_schema = ResponseSchema(name="company",
-#                                         description="Extract the company name of the job listing. If this information is not found, output -1")
-    
-#     response_schemas = [job_schema, 
-#                         company_schema]
-
-#     output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
-#     format_instructions = output_parser.get_format_instructions()
-#     template_string = """For the following text, delimited with {delimiter} chracters, extract the following information:
-
-#     job: Extract the job positiong of the job posting. If this information is not found, output -1\
-
-#     company: Extract the company name of the job posting. If this information is not found, output -1\
-
-
-#     text: {delimiter}{text}{delimiter}
-
-#     {format_instructions}
-#     """
-
-#     prompt = ChatPromptTemplate.from_template(template=template_string)
-#     messages = prompt.format_messages(text=content, 
-#                                 format_instructions=format_instructions,
-#                                 delimiter=delimiter)
- 
-#     response = llm(messages)
-#     posting_info_dict = output_parser.parse(response.content)
-#     print(f"Successfully extracted posting info: {posting_info_dict}")
-#     return posting_info_dict
-
-
-
 
 
 def extract_education_level(resume: str) -> str:
@@ -343,19 +237,19 @@ def extract_education_level(resume: str) -> str:
     return response
 
 
-# def extract_job_title(resume: str) -> str:
+def extract_job_title(resume: str) -> str:
 
-#     """ Extracts job title from resume. """
+    """ Extracts job title from resume. """
 
-#     response = get_completion(f"""Read the resume closely. It is delimited with {delimiter} characters. 
+    response = get_completion(f"""Read the resume closely. It is delimited with {delimiter} characters. 
                               
-#                               Output a likely job position that this applicant is currently holding or a possible job position he or she is applying for.
+                              Output a likely job position that this applicant is currently holding or a possible job position he or she is applying for.
                               
-#                               resume: {delimiter}{resume}{delimiter}. \n
+                              resume: {delimiter}{resume}{delimiter}. \n
                               
-#                               Response with only the job position, no punctuation or other text. """)
-#     print(f"Successfull extracted job title: {response}")
-#     return response
+                              Response with only the job position, no punctuation or other text. """)
+    print(f"Successfull extracted job title: {response}")
+    return response
 
 
 # class ResumeField(BaseModel):
@@ -539,6 +433,10 @@ def extract_work_experience_level(content: str, job_title:str, llm=OpenAI()) -> 
     return response
 
 
+def extract_link_info():
+    return None
+
+
 def get_web_resources(query: str, llm = ChatOpenAI(temperature=0.8, model="gpt-3.5-turbo-0613", cache=False)) -> str:
 
     """ Retrieves web answer given a query question. The default search is using WebReserachRetriever: https://python.langchain.com/docs/modules/data_connection/retrievers/web_research.
@@ -708,7 +606,7 @@ def get_generated_responses(resume_content="", personal_statement="", about_me="
 
     # Get personal information from resume
     generated_responses={}
-    pursuit_info_dict = {"job":"", "company":"", "institution":"", "program":""}
+    pursuit_info_dict = {"job": -1, "company": -1, "institution": -1, "program": -1}
 
     if about_me!="":
         pursuit_info_dict0 = extract_pursuit_information(about_me)
@@ -738,15 +636,9 @@ def get_generated_responses(resume_content="", personal_statement="", about_me="
         field_names = list(field_content.keys())
         generated_responses.update({"field names": field_names})
         generated_responses.update(field_content)
-        pursuit_info_dict2 = extract_pursuit_information(resume_content)
-        for key, value in pursuit_info_dict.items():
-            if value == "":
-                pursuit_info_dict[key]=pursuit_info_dict2[key]
-        # get highest education level and relevant work experience level
-        job = pursuit_info_dict["job"]
-        if job!=-1:
-            work_experience = extract_work_experience_level(resume_content, job)
-        else: work_experience = ""
+        if pursuit_info_dict["job"] == -1:
+            pursuit_info_dict["job"] = extract_job_title(resume_content)
+        work_experience = extract_work_experience_level(resume_content, pursuit_info_dict["job"])
         education_level = extract_education_level(resume_content)
         generated_responses.update({"highest education level": education_level})
         generated_responses.update({"work experience level": work_experience})
@@ -786,29 +678,29 @@ def get_generated_responses(resume_content="", personal_statement="", about_me="
     return generated_responses
 
     
-class FeastPromptTemplate(StringPromptTemplate):
-    def format(self, **kwargs) -> str:
-        userid = kwargs.pop("userid")
-        feature_vector = store.get_online_features(
-            features=[
-                "resume_info:name",
-                "resume_info:email",
-                "resume_info:phone",
-                "resume_info:address",
-                "resume_info:job_title", 
-                "resume_info:highest_education_level",
-                "resume_info:work_experience_level",
-            ],
-            entity_rows=[{"userid": userid}],
-        ).to_dict()
-        kwargs["name"] = feature_vector["name"][0]
-        kwargs["email"] = feature_vector["email"][0]
-        kwargs["phone"] = feature_vector["phone"][0]
-        kwargs["address"] = feature_vector["address"][0]
-        kwargs["job_title"] = feature_vector["job_title"][0]
-        kwargs["highest_education_level"] = feature_vector["highest_education_level"][0]
-        kwargs["work_experience_level"] = feature_vector["work_experience_level"][0]
-        return prompt.format(**kwargs)
+# class FeastPromptTemplate(StringPromptTemplate):
+#     def format(self, **kwargs) -> str:
+#         userid = kwargs.pop("userid")
+#         feature_vector = store.get_online_features(
+#             features=[
+#                 "resume_info:name",
+#                 "resume_info:email",
+#                 "resume_info:phone",
+#                 "resume_info:address",
+#                 "resume_info:job_title", 
+#                 "resume_info:highest_education_level",
+#                 "resume_info:work_experience_level",
+#             ],
+#             entity_rows=[{"userid": userid}],
+#         ).to_dict()
+#         kwargs["name"] = feature_vector["name"][0]
+#         kwargs["email"] = feature_vector["email"][0]
+#         kwargs["phone"] = feature_vector["phone"][0]
+#         kwargs["address"] = feature_vector["address"][0]
+#         kwargs["job_title"] = feature_vector["job_title"][0]
+#         kwargs["highest_education_level"] = feature_vector["highest_education_level"][0]
+#         kwargs["work_experience_level"] = feature_vector["work_experience_level"][0]
+#         return prompt.format(**kwargs)
 
 
 @tool()
@@ -947,7 +839,7 @@ def check_content(txt_path: str) -> Union[bool, str, set] :
         {
             "name": "category",
             "type": "string",
-            "enum": ["resume", "cover letter", "user profile", "job posting", "personal statement", "other"],
+            "enum": ["resume", "cover letter", "user profile", "job posting", "personal statement", "browser error", "other"],
             "description": "categorizes content into the provided categories",
             "required":True,
         },
