@@ -13,8 +13,10 @@ import uuid
 from pptx import Presentation
 from langchain.document_loaders import UnstructuredURLLoader
 from typing import Any, List, Union, Dict
-
-
+from docxtpl import DocxTemplate
+from langchain.document_transformers import Html2TextTransformer
+from langchain.document_loaders import AsyncHtmlLoader
+    
 
 def convert_to_txt(file, output_path):
     file_ext = os.path.splitext(file)[1]
@@ -55,7 +57,7 @@ def convert_pptx_to_txt(pptx_file, output_path):
         f.write(text)
         f.close()
 
-
+#TODO: needs to find the best pdf to txt converter that takes care of special characters best (such as the dash between dates)
 def convert_pdf_to_txt(pdf_file, output_path):
     pdf = fitz.open(pdf_file)
     text = ""
@@ -65,7 +67,7 @@ def convert_pdf_to_txt(pdf_file, output_path):
         f.write(text)
         f.close()
 
-
+#TODO: needs to find the best docx to txt converter that takes care of special characters best
 def convert_doc_to_txt(doc_file, output_path):
     pypandoc.convert_file(doc_file, 'plain', outputfile=output_path)
 
@@ -129,12 +131,34 @@ def retrieve_web_content(link, save_path="./web_data/test.txt"):
         print('Failed to retrieve content from the URL.')
         return False
     
+# this one is better than the above function 
+def html_to_text(urls:List[str], save_path="./web_data/test.txt"):
+    loader = AsyncHtmlLoader(urls)
+    docs = loader.load()
+    html2text = Html2TextTransformer()
+    docs_transformed = html2text.transform_documents(docs)
+    content = docs_transformed[0].page_content
+    print(docs_transformed[0].page_content[0:500])
+    if content:
+        with open(save_path, 'w') as file:
+            file.write(content)
+            file.close()
+            print('Content retrieved and written to file.')
+            return True
+    else:
+        print('Failed to retrieve content from the URL.')
+        return False
 
-def write_to_docx(doc: Any, text: str, type: str, res_path: str):
-    if type=="cover_letter":
-        p = doc.add_paragraph()
-        p.add_run(text)
-        doc.save(res_path)
+
+
+def write_to_docx_template(doc: Any, field_name: List[str], field_content: Dict[str, str], res_path) -> None:
+    context = {key: None for key in field_name}
+    for field in field_name:
+        if field_content[field] != -1:
+            context[field] = field_content[field]
+    doc.render(context)
+    doc.save(res_path)
+    print(f"Succesfully written {field_name} to {res_path}.")
 
 
         
@@ -143,9 +167,14 @@ def write_to_docx(doc: Any, text: str, type: str, res_path: str):
 
 
 if __name__=="__main__":
-    retrieve_web_content(
-        "https://learning.shine.com/talenteconomy/resume-tips/resume-objectives/",
-        save_path = f"./web_data/{str(uuid.uuid4())}.txt")
+    # retrieve_web_content(
+    #     "https://apply.deloitte.com/careers/InviteToApply?jobId=160041&source=LinkedIn",
+    #     save_path = f"./uploads/link/deloitte.txt")
+    html_to_text(
+        "https://www.themuse.com/advice/interview-questions-and-answers",
+    #     save_path =f"./uploads/link/deloitte.txt")
+        save_path = f"./interview_data/{str(uuid.uuid4())}.txt")
+    # convert_to_txt("./resume_samples/resume2023.docx", "./resume_samples/resume2023v3.txt")
 
 
 

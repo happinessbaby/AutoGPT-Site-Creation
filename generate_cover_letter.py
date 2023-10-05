@@ -6,9 +6,9 @@ from langchain.llms import OpenAI
 from langchain import PromptTemplate
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
-from basic_utils import read_txt, write_to_docx
+from basic_utils import read_txt
 from common_utils import (extract_personal_information, get_web_resources,  retrieve_from_db,extract_education_level, extract_work_experience_level, get_generated_responses,
-                         extract_posting_information, create_sample_tools, extract_job_title, search_related_samples)
+                          create_sample_tools, search_related_samples)
 from datetime import date
 from pathlib import Path
 import json
@@ -23,6 +23,7 @@ from langchain.tools import tool
 import uuid
 import docx
 import base64
+from docx import Document
 
 
 
@@ -42,9 +43,10 @@ delimiter3 = '---'
 delimiter4 = '////'
 delimiter5 = '~~~~'
 
-
+document = Document()
+document.add_heading('Cover Letter', 0)
       
-def generate_basic_cover_letter(my_job_title="", company="", resume_file="",  posting_path="") -> str:
+def generate_basic_cover_letter(about_me="", resume_file="",  posting_path="") -> str:
     
     """ Main function that generates the cover letter.
     
@@ -65,34 +67,31 @@ def generate_basic_cover_letter(my_job_title="", company="", resume_file="",  po
     """
     
     dirname, fname = os.path.split(resume_file)
-    res_path = os.path.join(dirname, "cover_letter"+".docx")
+    filename = Path(fname).stem 
+    docx_filename = filename + "_cover_letter"+".docx"
 
     # Get resume info
     resume_content = read_txt(resume_file)
-    info_dict = get_generated_responses(resume_content, my_job_title, company, posting_path)
-    #TODO: save generated responses to feature store 
-    # in the future, information should be retrieved from feature store, so when applying for a diffrent company for example, info is updated
+    info_dict = get_generated_responses(resume_content=resume_content, about_me=about_me, posting_path=posting_path)
 
-    highest_education_level = info_dict["highest education level"]
-    work_experience_level = info_dict["work experience level"]
-    job_specification = info_dict["job specification"]
-    job_description = info_dict["job description"]
-    company_description = info_dict["company description"]
-    company_name = info_dict["company name"]
-    job_title= info_dict["job title"]
-    name = info_dict["name"]
-    phone = info_dict["phone"]
-    email = info_dict["email"]
+    highest_education_level = info_dict.get("highest education level", "")
+    work_experience_level = info_dict.get("work experience level", "")
+    job_specification = info_dict.get("job specification", "")
+    job_description = info_dict.get("job description", "")
+    company_description = info_dict.get("company description", "")
+    company = info_dict.get("company", "")
+    job = info_dict.get("job", "")
+    name = info_dict.get("name", "")
+    phone = info_dict.get("phone", "")
+    email = info_dict.get("email", "")
 
     # Get adviced from web data on personalized best practices
-    advice_query = f"""Best practices when writing a cover letter for {job_title} with the given information:
+    advice_query = f"""Best practices when writing a cover letter for {job} with the given information:
       highest level of education: {highest_education_level}
       work experience level:   {work_experience_level}"""
     advices = retrieve_from_db(advice_query)
-    
-
     # Get sample comparisons
-    related_samples = search_related_samples(my_job_title, cover_letter_samples_path)
+    related_samples = search_related_samples(job, cover_letter_samples_path)
     sample_tools, tool_names = create_sample_tools(related_samples, "cover_letter")
     # Get resume's relevant and irrelevant info for job: few-shot learning works great here
     query_relevancy = f""" You are an expert resume advisor. 
@@ -153,12 +152,15 @@ def generate_basic_cover_letter(my_job_title="", company="", resume_file="",  po
 
         expert advices: {advices}
 
-      Step 3: You're provided with some company informtion. 
+      Step 3: You're provided with some company informtion, job description, and/or job specification. 
 
         Use it to make the cover letter cater to the company values. 
 
         company information: {company_description}.  \n
 
+        job specification: {job_specification} \n
+
+        job description: {job_description} \n
     
       Step 4: Change all personal information of the cover letter to the following. Do not incude them if they are -1 or empty: 
 
@@ -194,35 +196,39 @@ def generate_basic_cover_letter(my_job_title="", company="", resume_file="",  po
                     phone = phone,
                     email = email,
                     date = date.today(),
-                    company = company_name,
-                    job = job_title,
+                    company = company,
+                    job = job,
                     content=resume_content,
                     relevancy=relevancy, 
                     advices = advices,
                     company_description = company_description, 
+                    job_description = job_description,
+                    job_specification = job_specification,
                     delimiter = delimiter,
                     delimiter4 = delimiter4,
     )
 
     my_cover_letter = llm(cover_letter_message).content
     cover_letter = get_completion(f"Extract the cover letter from text: {my_cover_letter}")
-    # write cover letter to file  
-    doc = docx.Document()
-    write_to_docx(doc, cover_letter, "cover_letter", res_path)
-    return f"""file_path:{res_path}"""
+    document.add_paragraph(cover_letter)
+    document.save(docx_filename)
+    print(f"Successfully saved cover letter to: {docx_filename}")
+    return f"""file_path:{docx_filename}"""
     return cover_letter
 
 
 @tool(return_direct=True)
 def cover_letter_generator(json_request:str) -> str:
     
-    """Helps to ge nerate a cover letter. Use this tool more than any other tool when user asks to write a cover letter.  
+    """Helps to generate a cover letter. Use this tool more than any other tool when user asks to write a cover letter.  
 
-    Input should be a single string strictly in the following JSON format:  '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link": "<job post link>"}}'\n
+    Input should be a single string strictly in the following JSON format: '{{"about me":"<about me>", "resume file":"<resume file>", "job post link":"<job post link>"}}' \n
 
-    (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) \n
+    Leave value blank if there's no information provided. DO NOT MAKE STUFF UP. 
 
-    Output should be using the "get download link" tool in the following single string JSON format: '{{"file_path": "<file_path>"}}'
+    (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) 
+
+    Output should be using the "get download link" tool in the following single string JSON format: '{{"file_path":"<file_path>"}}'
 
     """
     # Output should be the exact cover letter that's generated for the user word for word. 
@@ -237,23 +243,17 @@ def cover_letter_generator(json_request:str) -> str:
     if ("resume file" not in args or args["resume file"]=="" or args["resume file"]=="<resume file>"):
       return "Can you provide your resume so I can further assist you? "
     else:
-      # may need to clean up the path first
         resume_file = args["resume file"]
-    if ("job" not in args or args["job"] == "" or args["job"]=="<job>"):
-        job = ""
+    if ("about me" not in args or args["about me"] == "" or args["about me"]=="<about me>"):
+        about_me = ""
     else:
-      job = args["job"]
-    if ("company" not in args or args["company"] == "" or args["company"]=="<company>"):
-        company = ""
-    else:
-        company = args["company"]
+        about_me = args["about me"]
     if ("job post link" not in args or args["job post link"]=="" or args["job post link"]=="<job post link>"):
         posting_path = ""
     else:
         posting_path = args["job post link"]
 
-
-    return generate_basic_cover_letter(my_job_title=job, company=company, resume_file=resume_file, posting_path=posting_path)
+    return generate_basic_cover_letter(about_me=about_me, resume_file=resume_file, posting_path=posting_path)
 
 
 
@@ -274,21 +274,24 @@ def processing_cover_letter(json_request: str) -> None:
     else:
       # may need to clean up the path first
         resume_file = args["resume file"]
-    if ("job" not in args or args["job"] == "" or args["job"]=="<job>"):
-        job = ""
+    # if ("job" not in args or args["job"] == "" or args["job"]=="<job>"):
+    #     job = ""
+    # else:
+    #   job = args["job"]
+    # if ("company" not in args or args["company"] == "" or args["company"]=="<company>"):
+    #     company = ""
+    # else:
+    #     company = args["company"]
+    if ("about me" not in args or args["about me"] == "" or args["about me"]=="<about me>"):
+        about_me = ""
     else:
-      job = args["job"]
-    if ("company" not in args or args["company"] == "" or args["company"]=="<company>"):
-        company = ""
-    else:
-        company = args["company"]
+        about_me = args["about me"]
     if ("job post link" not in args or args["job post link"]=="" or args["job post link"]=="<job post link>"):
         posting_path = ""
     else:
         posting_path = args["job post link"]
 
-
-    return generate_basic_cover_letter(my_job_title=job, company=company, resume_file=resume_file, posting_path=posting_path)
+    return generate_basic_cover_letter(about_me=about_me, resume_file=resume_file, posting_path=posting_path)
 
 
     
@@ -299,7 +302,7 @@ def create_cover_letter_generator_tool() -> List[Tool]:
     Then it calls the processing_cover_letter function to process the JSON data. """
     
     name = "cover_letter_generator"
-    parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link": "<job post link>"}}'
+    parameters = '{{"about me":"<about me>", "resume file":"<resume file>", "job post link": "<job post link>"}}'
     output =  '{{"file_path": "<file_path>"}}'
     description = f"""Helps to generate a cover letter. Use this tool more than any other tool when user asks to write a cover letter. 
      Input should be a single string strictly in the following JSON format: {parameters} \n
@@ -324,9 +327,12 @@ def create_cover_letter_generator_tool() -> List[Tool]:
  
 if __name__ == '__main__':
     # test run defaults, change for yours (only resume_file cannot be left empty)
-    my_job_title = 'data analyst'
-    my_resume_file = 'resume_samples/resume2023v2.txt'
-    generate_basic_cover_letter(resume_file = my_resume_file)
+    # my_job_title = 'Data Analyst'
+    # company = "Southern Company"
+    my_resume_file = './resume_samples/resume2023v3.txt'
+    job_posting = "./uploads/file/data_analyst_SC.txt"
+    about_me = ""
+    generate_basic_cover_letter(resume_file = my_resume_file, posting_path=job_posting, about_me=about_me)
 
 
 

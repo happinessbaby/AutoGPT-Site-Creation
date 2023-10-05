@@ -13,8 +13,8 @@ from langchain.tools.python.tool import PythonREPLTool
 from langchain.agents import AgentType
 from langchain.chains import RetrievalQA,  LLMChain
 from pathlib import Path
-from basic_utils import read_txt, convert_to_txt, write_to_docx
-from langchain_utils import ( create_wiki_tools, create_search_tools, create_retriever_tools, create_compression_retriever, create_ensemble_retriever, retrieve_redis_vectorstore, create_vectorstore, merge_faiss_vectorstore, create_vs_retriever_tools,
+from basic_utils import read_txt, convert_to_txt
+from langchain_utils import ( create_wiki_tools, create_search_tools, create_retriever_tools, create_compression_retriever, create_ensemble_retriever, generate_multifunction_response,
                               split_doc, handle_tool_error, retrieve_faiss_vectorstore, split_doc_file_size, reorder_docs, create_summary_chain)
 from langchain import PromptTemplate
 # from langchain.experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
@@ -102,15 +102,17 @@ def extract_personal_information(resume: str,  llm = ChatOpenAI(temperature=0, m
                                         description="Extract the phone number of the applicant. If this information is not found, output -1")
     address_schema = ResponseSchema(name="address",
                                         description="Extract the home address of the applicant. If this information is not found, output -1")
-    # education_schema = ResponseSchema(name="education",
-    #                                   description = "Extract the highest level of education of the applicant. If this information is not found, output-1.")
-
+    linkedin_schema = ResponseSchema(name="linkedin", 
+                                 description="Extract the LinkedIn html in the resume. If this information is not found, output -1")
+    website_schema = ResponseSchema(name="website", 
+                                   description="Extract website html in the personal information section of the resume that is not a LinkedIn html.  If this information is not found, output -1")
 
     response_schemas = [name_schema, 
                         email_schema,
                         phone_schema, 
                         address_schema, 
-                        # education_schema,
+                        linkedin_schema,
+                        website_schema,
                         ]
 
     output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
@@ -121,15 +123,18 @@ def extract_personal_information(resume: str,  llm = ChatOpenAI(temperature=0, m
 
     email: Extract the email address of the applicant. If this information is not found, output -1\
 
-    phone number: Extract the phone number of the applicant. If this information is not found, output -1\
+    phone: Extract the phone number of the applicant. If this information is not found, output -1\
     
-    address: Extract the home address of the applicant. If this information is not found, output -1\  
+    address: Extract the home address of the applicant. If this information is not found, output -1\
+
+    linkedin: Extract the LinkedIn html in the resume. If this information is not found, output -1\
+
+    website: Extract website html in the personal information section of the resume that is not a LinkedIn html.  If this information is not found, output -1\
 
     text: {delimiter}{text}{delimiter}
 
     {format_instructions}
     """
-    # education: Extract the highest level of education the applicant. If this information is not found, output -1\
 
     prompt = ChatPromptTemplate.from_template(template=template_string)
     messages = prompt.format_messages(text=resume, 
@@ -144,10 +149,9 @@ def extract_personal_information(resume: str,  llm = ChatOpenAI(temperature=0, m
 
 
 
+def extract_pursuit_information(content: str, llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> Any:
 
-def extract_posting_information(posting: str, llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> Any:
-
-    """" Extracts job title and company name from job posting. 
+    """ Extracts job title and company name from job posting. 
 
     See: https://python.langchain.com/docs/modules/model_io/output_parsers/structured
 
@@ -166,21 +170,30 @@ def extract_posting_information(posting: str, llm = ChatOpenAI(temperature=0, mo
     """
 
     job_schema = ResponseSchema(name="job",
-                             description="Extract the job position of the job listing. If this information is not found, output -1")
+                             description="Extract the job position the applicant is applying for. If this information is not found, output -1")
     company_schema = ResponseSchema(name="company",
-                                        description="Extract the company name of the job listing. If this information is not found, output -1")
+                                        description="Extract the company name the applicant is applying to. If this information is not found, output -1")
+    institution_schema = ResponseSchema(name="institution",
+                             description="Extract the institution name the applicant is applying to. If this information is not found, output -1")
+    program_schema = ResponseSchema(name="program",
+                                        description="Extract the degree program the applicant is pursuing. If this information is not found, output -1")
     
     response_schemas = [job_schema, 
-                        company_schema]
+                        company_schema,
+                        institution_schema,
+                        program_schema]
 
     output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
     format_instructions = output_parser.get_format_instructions()
     template_string = """For the following text, delimited with {delimiter} chracters, extract the following information:
 
-    job: Extract the job positiong of the job posting. If this information is not found, output -1\
+    job: Extract the job position the applicant is applying for. If this information is not found, output -1\
 
-    company: Extract the company name of the job posting. If this information is not found, output -1\
-
+    company: Extract the company name the applicant is applying to. If this information is not found, output -1\
+    
+    institution: Extract the institution name the applicant is applying to. If this information is not found, output -1\
+    
+    program: Extract the degree program the applicant is pursuing. If this information is not found, output -1\
 
     text: {delimiter}{text}{delimiter}
 
@@ -188,14 +201,17 @@ def extract_posting_information(posting: str, llm = ChatOpenAI(temperature=0, mo
     """
 
     prompt = ChatPromptTemplate.from_template(template=template_string)
-    messages = prompt.format_messages(text=posting, 
+    messages = prompt.format_messages(text=content, 
                                 format_instructions=format_instructions,
                                 delimiter=delimiter)
  
     response = llm(messages)
-    posting_info_dict = output_parser.parse(response.content)
-    print(f"Successfully extracted posting info: {posting_info_dict}")
-    return posting_info_dict
+    pursuit_info_dict = output_parser.parse(response.content)
+    print(f"Successfully extracted pursuit info: {pursuit_info_dict}")
+    return pursuit_info_dict
+
+
+
 
 def extract_education_level(resume: str) -> str:
 
@@ -235,10 +251,11 @@ def extract_job_title(resume: str) -> str:
     print(f"Successfull extracted job title: {response}")
     return response
 
+
 # class ResumeField(BaseModel):
 #     field_name: str=Field(description="field name")
 #     field_content: str=Field(description="content of the field")
-def extract_resume_fields(resume: str,  llm=OpenAI(temperature=0,  max_tokens=1024)) -> Union[List[str], Dict[str, str]]:
+def extract_resume_fields(resume: str,  llm=OpenAI(temperature=0,  max_tokens=2048)) -> Dict[str, str]:
 
     """ Extracts resume field names and field content.
 
@@ -254,18 +271,18 @@ def extract_resume_fields(resume: str,  llm=OpenAI(temperature=0,  max_tokens=10
 
     Returns:
 
-        a list of field names along with a dictionary of field names and their respective content
+        a dictionary of field names and their respective content
     
     
     """
 
-
+    # First chain: get resume field names
     field_name_query =  """Search and extract names of fields contained in the resume delimited with {delimiter} characters. A field name must has content contained in it for it to be considered a field name. 
 
         Some common resume field names include but not limited to personal information, objective, education, work experience, awards and honors, area of expertise, professional highlights, skills, etc. 
          
          
-        If there are no obvious field name but some information belong together, like name, phone number, address, please generate a field name for this group of information, such as Personal Information.    
+        If there are no obvious field name but some information belong together, like name, phone number, address, please generate a field name for this group of information, such as Personal Information.   
 
          resume: {delimiter}{resume}{delimiter} \n
          
@@ -279,90 +296,73 @@ def extract_resume_fields(resume: str,  llm=OpenAI(temperature=0,  max_tokens=10
     )
     field_name_chain = LLMChain(llm=llm, prompt=field_name_prompt, output_key="field_names")
 
-    query = """For each field name in {field_names}, check if there is valid content within it in the resume. 
+    field_content_query = """For each field name in {field_names}, check if there is valid content within it in the resume. 
 
-    If the field name is valid, output in JSON with field name as key and content as value. 
+    If the field name is valid, output in JSON with field name as key and content as value. DO NOT LOSE ANY INFORMATION OF THE CONTENT WHEN YOU SAVE IT AS THE VALUE.
 
       resume: {delimiter}{resume}{delimiter} \n
  
     """
+
     # {format_instructions}
     
     # output_parser = PydanticOutputParser(pydantic_object=ResumeField)
 
-    format_instructions = output_parser.get_format_instructions()
+    # Chain two: get resume field content associated with each names
     format_instructions = output_parser.get_format_instructions()
     prompt = PromptTemplate(
-        template=query,
+        template=field_content_query,
         input_variables=["delimiter", "resume", "field_names"],
         # partial_variables={"format_instructions": format_instructions}
     )
-    chain = LLMChain(llm=llm, prompt=prompt, output_key="field_content")
+    field_content_chain = LLMChain(llm=llm, prompt=prompt, output_key="field_content")
+
+    # Chain three: trim the dictionary for further resume evaluation
+    dict_trim_query = """ For the field content in the JSON string format below:
+    
+    Remove all the JSON key value pair where the value is empty. 
+
+    If there are two keys with the same value, remove one of the key and value pair from the JSON entry.
+
+    Output the same JSON string with the above things deleted. MAKE SURE YOUR OUTPUT IS IN JSON FORMAT.
+
+    field content: {field_content}
+
+    """
+    format_instructions = output_parser.get_format_instructions()
+    prompt = PromptTemplate(
+        template=dict_trim_query,
+        input_variables=["field_content"],
+        # partial_variables={"format_instructions": format_instructions}
+    )
+    content_trim_chain = LLMChain(llm=llm, prompt=prompt, output_key="trimmed_field_content")
+
     overall_chain = SequentialChain(
         memory=SimpleMemory(memories={"resume":resume}),
-        chains=[field_name_chain, chain],
+        chains=[field_name_chain, field_content_chain, content_trim_chain],
         # input_variables=["delimiter", "resume"],
         input_variables=["delimiter"],
     # Here we return multiple variables
-        output_variables=["field_names",  "field_content"],
+        output_variables=["field_names",  "field_content", "trimmed_field_content"],
         verbose=True)
     # response = overall_chain({"delimiter":"####", "resume":resume})
     response = overall_chain({"delimiter": "####"})
     field_names = output_parser.parse(response.get("field_names", ""))
     # sometimes, not always, there's an annoying text "Output: " in front of json that needs to be stripped
-    field_content = '{' + response.get("field_content", "").split('{', 1)[-1]
-    print(field_content)
-    field_content = json.loads(field_content)
+    # field_content = '{' + response.get("field_content", "").split('{', 1)[-1]
+    # print(response.get("field_content", ""))
+    trimmed_field_content = '{' + response.get("trimmed_field_content", "").split('{', 1)[-1]
+    print(trimmed_field_content)
+    try:
+        field_content = json.loads(trimmed_field_content)
+    except JSONDecodeError as e:
+        field_content = get_completion(f""" Correct the misformatted JSON string below and output a valid JSON string:
+                       {trimmed_field_content} """)
     # output_parser.parse(field_content)
-    return field_names, field_content
+    return field_content
 
 
 
-#TODO: once there's enough samples, education level and work experience level could also be included in searching criteria
-def search_related_samples(job_title: str, directory: str) -> List[str]:
-
-    """ Searches resume or cover letter samples in the directory for similar content as job title.
-
-    Args:
-
-        job_title (str)
-
-        directory (str): samples directory path
-
-    Returns:
-
-        a list of paths in the samples directory 
-    
-    """
-
-    system_message = f"""
-		You are an assistant that evaluates whether the job position described in the content is similar to {job_title} or relevant to {job_title}. 
-
-		Respond with a Y or N character, with no punctuation:
-		Y - if the job position is similar to {job_title} or relevant to it
-		N - otherwise
-
-		Output a single letter only.
-		"""
-    related_files = []
-    for path in  Path(directory).glob('**/*.txt'):
-        if len(related_files)==3:
-            break
-        file = str(path)
-        content = read_txt(file)
-        # print(file, len(content))
-        messages = [
-        {'role': 'system', 'content': system_message},
-        {'role': 'user', 'content': content}
-        ]	
-        
-        response = get_completion_from_messages(messages, max_tokens=1)
-        if (response=="Y"):
-            related_files.append(file)
-    #TODO: if no match, a general template will be used
-    if len(related_files)==0:
-        related_files.append(directory + "software_developer.txt")
-    return related_files
 
 # This is actually a hard one for LLM to get
 #TODO: math chain date calculation errors out because of formatting
@@ -429,7 +429,12 @@ def extract_work_experience_level(content: str, job_title:str, llm=OpenAI()) -> 
     except Exception:
         response = ""
     # response = generate_multifunction_response(query, tools, max_iter=5)
+    print(f"Sucessfully retriever work experience level: {response}")
     return response
+
+
+def extract_link_info():
+    return None
 
 
 def get_web_resources(query: str, llm = ChatOpenAI(temperature=0.8, model="gpt-3.5-turbo-0613", cache=False)) -> str:
@@ -472,7 +477,6 @@ def get_web_resources(query: str, llm = ChatOpenAI(temperature=0.8, model="gpt-3
     return response
 
 
-
 def retrieve_from_db(query: str, llm=OpenAI(temperature=0.8, cache=False)) -> str:
 
     """ Retrieves query answer from database. 
@@ -483,7 +487,7 @@ def retrieve_from_db(query: str, llm=OpenAI(temperature=0.8, cache=False)) -> st
   
     """
 
-    compression_retriever = create_compression_retriever()
+    compression_retriever = create_compression_retriever(vectorstore="faiss_web_data")
     docs = compression_retriever.get_relevant_documents(query)
     reordered_docs = reorder_docs(docs)
 
@@ -513,7 +517,54 @@ def retrieve_from_db(query: str, llm=OpenAI(temperature=0.8, cache=False)) -> st
     print(f"Successfully retrieved answer using compression retriever with Stuff Document Chain: {response}")
     return response
 
+ #TODO: once there's enough samples, education level and work experience level could also be included in searching criteria
+def search_related_samples(job_title: str, directory: str) -> List[str]:
+
+    """ Searches resume or cover letter samples in the directory for similar content as job title.
+
+    Args:
+
+        job_title (str)
+
+        directory (str): samples directory path
+
+    Returns:
+
+        a list of paths in the samples directory 
     
+    """
+
+    system_message = f"""
+		You are an assistant that evaluates whether the job position described in the content is similar to {job_title} or relevant to {job_title}. 
+
+		Respond with a Y or N character, with no punctuation:
+		Y - if the job position is similar to {job_title} or relevant to it
+		N - otherwise
+
+		Output a single letter only.
+		"""
+    related_files = []
+    for path in  Path(directory).glob('**/*.txt'):
+        if len(related_files)==3:
+            break
+        file = str(path)
+        content = read_txt(file)
+        # print(file, len(content))
+        messages = [
+        {'role': 'system', 'content': system_message},
+        {'role': 'user', 'content': content}
+        ]	
+        try:
+            response = get_completion_from_messages(messages, max_tokens=1)
+            if (response=="Y"):
+                related_files.append(file)
+        #TODO: the resume file may be too long and cause openai.error.InvalidRequestError: This model's maximum context length is 4097 tokens.
+        except Exception:
+            pass
+    #TODO: if no match, a general template will be used
+    if len(related_files)==0:
+        related_files.append(file)
+    return related_files   
 
 
 def create_sample_tools(related_samples: List[str], sample_type: str,) -> Union[List[Tool], List[str]]:
@@ -550,102 +601,143 @@ def create_sample_tools(related_samples: List[str], sample_type: str,) -> Union[
     return tools, tool_names
 
 
-def get_generated_responses(resume_content:str, my_job_title:str, company:str, posting_path:str,): 
+# one of the most important functions
+def get_generated_responses(resume_content="", personal_statement="", about_me="", posting_path=""): 
 
     # Get personal information from resume
     generated_responses={}
-    personal_info_dict = extract_personal_information(resume_content)
-    generated_responses.update(personal_info_dict)
+    pursuit_info_dict = {"job": -1, "company": -1, "institution": -1, "program": -1}
 
-    field_names, field_content = extract_resume_fields(resume_content)
-    generated_responses.update({"field names":field_names})
-    generated_responses.update(field_content)
+    if about_me!="":
+        pursuit_info_dict0 = extract_pursuit_information(about_me)
+        for key, value in pursuit_info_dict.items():
+            if value == "":
+                pursuit_info_dict[key]=pursuit_info_dict0[key]
+        generated_responses.update({"about me": about_me})
+        
 
-    job_specification = ""
-    job_description = ""
-    # Get job information from posting link, if provided
     if (Path(posting_path).is_file()):
-      prompt_template = """Identity the job position, company then provide a summary of the following job posting:
-        {text} \n
-        Focus on roles and skills involved for this job. Do not include information irrelevant to this specific position.
-      """
-      job_specification = create_summary_chain(posting_path, prompt_template)
-      posting = read_txt(posting_path)
-      posting_info_dict=extract_posting_information(posting)
-      my_job_title = posting_info_dict["job"]
-      company = posting_info_dict["company"]
-    else:
-      # if job title is not provided anywhere else, extract from resume
-      if (my_job_title==""):
-          my_job_title = extract_job_title(resume_content)
-    # Search for a job description of the job title
-      job_query  = f"""Research what a {my_job_title} does and output a detailed description of the common skills, responsibilities, education, experience needed. """
-      job_description = get_web_resources(job_query)  
-    generated_responses.update({"job title": my_job_title})
-    generated_responses.update({"company name": company})
-    generated_responses.update({"job specification": job_specification})
-    generated_responses.update({"job description": job_description})
+        prompt_template = """Identity the job position, company then provide a summary of the following job posting:
+            {text} \n
+            Focus on roles and skills involved for this job. Do not include information irrelevant to this specific position.
+        """
+        job_specification = create_summary_chain(posting_path, prompt_template)
+        generated_responses.update({"job specification": job_specification})
+        posting = read_txt(posting_path)
+        pursuit_info_dict1 = extract_pursuit_information(posting)
+        for key, value in pursuit_info_dict.items():
+            if value == "":
+                pursuit_info_dict[key]=pursuit_info_dict1[key]
+ 
+    if resume_content!="":
+        personal_info_dict = extract_personal_information(resume_content)
+        generated_responses.update(personal_info_dict)
+        field_content = extract_resume_fields(resume_content)
+        field_names = list(field_content.keys())
+        generated_responses.update({"field names": field_names})
+        generated_responses.update(field_content)
+        if pursuit_info_dict["job"] == -1:
+            pursuit_info_dict["job"] = extract_job_title(resume_content)
+        work_experience = extract_work_experience_level(resume_content, pursuit_info_dict["job"])
+        education_level = extract_education_level(resume_content)
+        generated_responses.update({"highest education level": education_level})
+        generated_responses.update({"work experience level": work_experience})
 
-    # Search for company description if company name is provided
-    company_description=""
-    if (company!=""):
-      company_query = f""" Research what kind of company {company} is, such as its culture, mission, and values.                       
-                          Look up the exact name of the company. If it doesn't exist or the search result does not return a company, output -1."""
-      company_description = get_web_resources(company_query)
-    generated_responses.update({"company description": company_description})
+    generated_responses.update(pursuit_info_dict)
+    job = generated_responses["job"]
+    company = generated_responses["company"]
+    institution = generated_responses["institution"]
+    program = generated_responses["program"]
 
-    # get highest education level and relevant work experience level
-    education_level = extract_education_level(resume_content)
-    work_experience = extract_work_experience_level(resume_content, my_job_title)
-    generated_responses.update({"highest education level": education_level})
-    generated_responses.update({"work experience level": work_experience})
+    if job!=-1 and generated_responses.get("job specification", "")=="":
+        job_query  = f"""Research what a {job} does and output a detailed description of the common skills, responsibilities, education, experience needed. """
+        job_description = get_web_resources(job_query)  
+        generated_responses.update({"job description": job_description})
 
+    if company!=-1:
+        company_query = f""" Research what kind of company {company} is, such as its culture, mission, and values.                       
+                            Look up the exact name of the company. If it doesn't exist or the search result does not return a company, output -1."""
+        company_description = get_web_resources(company_query)
+        generated_responses.update({"company description": company_description})
+
+    if institution!=-1:
+        institution_query = f""" Research {institution}'s culture, mission, and values.                       
+                        Look up the exact name of the institution. If it doesn't exist or the search result does not return an institution output -1."""
+        institution_description = get_web_resources(institution_query)
+        generated_responses.update({"institution description": institution_description})
+
+    if program!=-1:
+        program_query = f"""Research the degree program in the institution provided below. 
+        Find out what {program} at the institution {institution} involves, and what's special about the program, and why it's worth pursuing.     
+        If institution is -1, research the general program itself.
+        """
+        program_description = get_web_resources(program_query)   
+        generated_responses.update({"program description": program_description}) 
+
+    print(generated_responses)
     return generated_responses
 
     
-class FeastPromptTemplate(StringPromptTemplate):
-    def format(self, **kwargs) -> str:
-        userid = kwargs.pop("userid")
-        feature_vector = store.get_online_features(
-            features=[
-                "resume_info:name",
-                "resume_info:email",
-                "resume_info:phone",
-                "resume_info:address",
-                "resume_info:job_title", 
-                "resume_info:highest_education_level",
-                "resume_info:work_experience_level",
-            ],
-            entity_rows=[{"userid": userid}],
-        ).to_dict()
-        kwargs["name"] = feature_vector["name"][0]
-        kwargs["email"] = feature_vector["email"][0]
-        kwargs["phone"] = feature_vector["phone"][0]
-        kwargs["address"] = feature_vector["address"][0]
-        kwargs["job_title"] = feature_vector["job_title"][0]
-        kwargs["highest_education_level"] = feature_vector["highest_education_level"][0]
-        kwargs["work_experience_level"] = feature_vector["work_experience_level"][0]
-        return prompt.format(**kwargs)
+# class FeastPromptTemplate(StringPromptTemplate):
+#     def format(self, **kwargs) -> str:
+#         userid = kwargs.pop("userid")
+#         feature_vector = store.get_online_features(
+#             features=[
+#                 "resume_info:name",
+#                 "resume_info:email",
+#                 "resume_info:phone",
+#                 "resume_info:address",
+#                 "resume_info:job_title", 
+#                 "resume_info:highest_education_level",
+#                 "resume_info:work_experience_level",
+#             ],
+#             entity_rows=[{"userid": userid}],
+#         ).to_dict()
+#         kwargs["name"] = feature_vector["name"][0]
+#         kwargs["email"] = feature_vector["email"][0]
+#         kwargs["phone"] = feature_vector["phone"][0]
+#         kwargs["address"] = feature_vector["address"][0]
+#         kwargs["job_title"] = feature_vector["job_title"][0]
+#         kwargs["highest_education_level"] = feature_vector["highest_education_level"][0]
+#         kwargs["work_experience_level"] = feature_vector["work_experience_level"][0]
+#         return prompt.format(**kwargs)
 
 
-# @tool
-# def search_relevancy_advice(query: str) -> str:
-#     """Searches for general advice on relevant and irrelevant information in resume"""
-#     subquery_relevancy = "how to determine what's relevant in resume"
-#     # option 1: compression retriever
-#     # retriever = create_compression_retriever()
-#     # option 2: ensemble retriever
-#     # retriever = create_ensemble_retriever(split_doc())
-#     # option 3: vector store retriever
-#     # db = retrieve_redis_vectorstore("index_web_advice")
-#     db = retrieve_faiss_vectorstore("faiss_web_data")
-#     retriever = db.as_retriever(search_type="similarity_score_threshold", search_kwargs={"score_threshold": .5, "k":1})
-#     docs = retriever.get_relevant_documents(subquery_relevancy)
-#     # reordered_docs = reorder_docs(retriever.get_relevant_documents(subquery_relevancy))
-#     texts = [doc.page_content for doc in docs]
-#     texts_merged = "\n\n".join(texts)
-#     print(f"Successfully used relevancy tool to generate answer: {texts_merged}")
-#     return texts_merged
+@tool()
+def search_user_material(json_request: str) -> str:
+
+    """Searches and looks up user uploaded material, if available.
+
+      Input should be a single string strictly in the following JSON format: '{{"user material path":"<user material path>", "user query":"<user query>" \n"""
+
+    try:
+        json_request = json_request.strip("'<>() ").replace('\'', '\"')
+        args = json.loads(json_request)
+    except JSONDecodeError as e:
+        print(f"JSON DECODE ERROR: {e}")
+        return "Format in a single string JSON and try again."
+ 
+    vs_path = args["user material path"]
+    query = args["user query"]
+    if vs_path!="" and query!="":
+        # subquery_relevancy = "how to determine what's relevant in resume"
+        # option 1: compression retriever
+        # retriever = create_compression_retriever()
+        # option 2: ensemble retriever
+        # retriever = create_ensemble_retriever(split_doc())
+        # option 3: vector store retriever
+        # db = retrieve_redis_vectorstore("index_web_advice")
+        db = retrieve_faiss_vectorstore(vs_path)
+        retriever = db.as_retriever(search_type="similarity_score_threshold", search_kwargs={"score_threshold": .5, "k":1})
+        docs = retriever.get_relevant_documents(query)
+        # reordered_docs = reorder_docs(retriever.get_relevant_documents(subquery_relevancy))
+        texts = [doc.page_content for doc in docs]
+        texts_merged = "\n\n".join(texts)
+        return texts_merged
+    else:
+        return "There is no user material or query to look up."
+
+
 
 @tool(return_direct=True)
 def file_loader(json_request: str) -> str:
@@ -668,7 +760,7 @@ def file_loader(json_request: str) -> str:
     except Exception as e:
         return "file did not load successfully. try another tool"
     
-@tool("get download link", return_direct=True)
+@tool("get_download_link", return_direct=True)
 def binary_file_downloader_html(json_request: str):
 
     """ Gets the download link from file. DO NOT USE THIS TOOL UNLESS YOU ARE TOLD TO DO SO.
@@ -686,10 +778,7 @@ def binary_file_downloader_html(json_request: str):
     href = f'<a href="data:application/octet-stream;base64,{bin_str}" download="{os.path.basename(file)}">Download the cover letter</a>'
     return href
     
-@tool
-def docx_writer():
-    """ Writes to a docx file. DO NOT USE THIS TOOL UNLESS YOU ARE TOLD TO DO SO.
-    Input should be a single string in the following JSON format: '{{"file path": "<file path>", "field name":"<field name>", "content":"<content>"}}' \n"""
+
 
 # https://python.langchain.com/docs/modules/agents/agent_types/self_ask_with_search
 @tool("search chat history")
@@ -750,7 +839,7 @@ def check_content(txt_path: str) -> Union[bool, str, set] :
         {
             "name": "category",
             "type": "string",
-            "enum": ["resume", "cover letter", "user profile", "job posting", "other"],
+            "enum": ["resume", "cover letter", "user profile", "job posting", "personal statement", "browser error", "other"],
             "description": "categorizes content into the provided categories",
             "required":True,
         },

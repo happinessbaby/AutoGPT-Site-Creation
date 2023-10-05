@@ -22,7 +22,6 @@ from langchain.chains import RetrievalQA, RetrievalQAWithSourcesChain, Transform
 from langchain.memory import ConversationBufferMemory
 from langchain.chains.qa_with_sources import load_qa_with_sources_chain, stuff_prompt
 import os
-from feast import FeatureStore
 from langchain.text_splitter import CharacterTextSplitter,  RecursiveCharacterTextSplitter
 from langchain.chains.mapreduce import MapReduceChain
 from langchain.chains import RetrievalQAWithSourcesChain, StuffDocumentsChain
@@ -36,6 +35,7 @@ from langchain.cache import RedisSemanticCache
 import json
 from typing import List, Union, Any
 import re
+import docx
 from langchain.tools import tool
 from langchain.agents.agent_toolkits import create_retriever_tool
 from langchain.agents.agent_types import AgentType
@@ -184,13 +184,13 @@ def create_wiki_tools() -> List[Tool]:
     docstore = DocstoreExplorer(Wikipedia())
     tools = [
         Tool(
-            name = "Search",
+            name = "Wikipedia_Search",
             func = docstore.search,
             description= "Search for a term in the docstore.",
             handle_tool_error=handle_tool_error,
         ),
         Tool(
-            name = "Lookup",
+            name = "Wikipedia_Lookup",
             func = docstore.lookup,
             description = "Lookup a term in the docstore.",
             handle_tool_error=handle_tool_error,
@@ -284,7 +284,7 @@ def create_retriever_tools(retriever: Any, name: str, description: str, llm=Open
         name=name,
         description=description,
         func=RetrievalQA.from_chain_type(llm=llm, retriever=retriever, chain_type=chain_type),
-        handle_tool_error=handle_tool_error,
+        handle_tool_error=True,
     ),
     ]
     print(f"Succesfully created database tool: {name}")
@@ -586,8 +586,12 @@ def generate_multifunction_response(query: str, tools: List[Tool], early_stoppin
         agent = initialize_agent(
             tools, llm, agent=AgentType.OPENAI_MULTI_FUNCTIONS
         )
-    response = agent({"input": query}).get("output", "")   
-    print(f"Successfully got multifunction response: {response}")
+    try: 
+        response = agent({"input": query}).get("output", "")   
+        print(f"Successfully got multifunction response: {response}")
+    except Exception as e:
+        print(e)
+        response = ""
     return response
 
 
@@ -616,7 +620,7 @@ def create_vectorstore(vs_type: str, file: str, file_type: str, index_name: str,
         docs = split_doc(file, file_type, splitter_type="tiktoken")
         if (vs_type=="faiss"):
             db=FAISS.from_documents(docs, embeddings)
-            db.save_local(index_name)
+            # db.save_local(index_name)
             print("Succesfully created Faiss vector store.")
         elif (vs_type=="redis"):
             db = Redis.from_documents(
@@ -676,19 +680,19 @@ def merge_faiss_vectorstore(index_name_main: str, file: str, embeddings=OpenAIEm
         main_db = create_vectorstore("faiss", file, "file", index_name_main)
         print(f"Successfully created vectorstore: {index_name_main}")
     else:
-        db = create_vectorstore(embeddings, "faiss", file, "file", "temp")
+        db = create_vectorstore("faiss", file, "file", "temp")
         main_db.merge_from(db)
         print(f"Successfully merged vectorestore {index_name_main}")
     return main_db
     
 
 
-def retrieve_faiss_vectorstore(index_name: str, embeddings = OpenAIEmbeddings()) -> FAISS or None:
+def retrieve_faiss_vectorstore(path: str, embeddings = OpenAIEmbeddings()) -> FAISS or None:
 
     """ Retrieves the Faiss vector store if exists, else returns None  """
     
     try:
-        db = FAISS.load_local(index_name, embeddings)
+        db = FAISS.load_local(path, embeddings)
         return db
     except Exception as e:
         return None
@@ -769,7 +773,9 @@ class CustomOutputParser(AgentOutputParser):
 if __name__ == '__main__':
 
     # db =  create_vectorstore("redis", "./web_data/", "dir", "index_web_advice")
-     db = create_vectorstore("faiss", "./web_data/", "dir", "faiss_web_data")
+     db = create_vectorstore("faiss", "./interview_data/", "dir", "faiss_interview_data")
+     db.save_local("faiss_interview_data")
+    #  create_vectorstore("faiss", "./log/", "dir", "chat_debug")
  
 
     
