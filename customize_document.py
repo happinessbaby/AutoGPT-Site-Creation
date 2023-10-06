@@ -50,7 +50,40 @@ def improve_personal_statement(personal_statement="", about_me=""):
     response = generate_multifunction_response(query, tools)
     return response
 
+def customize_document(file="", file_type = "", about_me=""):
+    return "DONE"
 
+
+
+@tool
+def document_customize_writer(json_request:str) -> str:
+
+    """ Helps customize, personalize, and improve personal statement, cover letter, or resume. 
+    Input should be a single string strictly in the following JSON format: '{{"file":"<file>", "file type":"<file type>", "about me":"<about me>"}}' 
+    file type should be either "personal statement", "cover letter", or "resume \n
+    (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else)"""
+    
+    try:
+        json_request = json_request.strip("'<>() ").replace(" ", "").__str__().replace("'", '"')
+        args = json.loads(json_request)
+    except JSONDecodeError as e:
+        print(f"JSON DECODER ERROR: {e}")
+        return "Format in JSON and try again."
+    
+    if ("file" not in args or args["file"]=="" or args["file"]=="<file>"):
+        return """stop using or calling the document_improvement_writer tool. Ask user to upload their file instead. """
+    else:
+        file = args["file"]
+    if ("about me" not in args or args["about me"] == "" or args["about me"]=="<about me>"):
+        about_me = ""
+    else:
+        about_me = args["about me"]
+    if ("file type" not in args or args["file type"] == "" or args["file type"]=="<file type>"):
+        file_type = ""
+    else:
+        file_type = args["file type"]
+    print(file, about_me, file_type)
+    customize_document(file=file, about_me=about_me)
 
 
 

@@ -608,27 +608,27 @@ def get_generated_responses(resume_content="", personal_statement="", about_me="
     generated_responses={}
     pursuit_info_dict = {"job": -1, "company": -1, "institution": -1, "program": -1}
 
-    if about_me!="":
-        pursuit_info_dict0 = extract_pursuit_information(about_me)
-        for key, value in pursuit_info_dict.items():
-            if value == "":
-                pursuit_info_dict[key]=pursuit_info_dict0[key]
-        generated_responses.update({"about me": about_me})
-        
-
     if (Path(posting_path).is_file()):
         prompt_template = """Identity the job position, company then provide a summary of the following job posting:
             {text} \n
             Focus on roles and skills involved for this job. Do not include information irrelevant to this specific position.
         """
-        job_specification = create_summary_chain(posting_path, prompt_template)
+        job_specification = create_summary_chain(posting_path, prompt_template, chunk_size=4000)
         generated_responses.update({"job specification": job_specification})
         posting = read_txt(posting_path)
         pursuit_info_dict1 = extract_pursuit_information(posting)
         for key, value in pursuit_info_dict.items():
-            if value == "":
+            if value == -1:
                 pursuit_info_dict[key]=pursuit_info_dict1[key]
- 
+
+    if about_me!="" or about_me!="-1":
+        pursuit_info_dict0 = extract_pursuit_information(about_me)
+        for key, value in pursuit_info_dict.items():
+            if value == -1:
+                pursuit_info_dict[key]=pursuit_info_dict0[key]
+        generated_responses.update({"about me": about_me})
+        
+
     if resume_content!="":
         personal_info_dict = extract_personal_information(resume_content)
         generated_responses.update(personal_info_dict)

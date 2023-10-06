@@ -43,10 +43,11 @@ delimiter3 = '---'
 delimiter4 = '////'
 delimiter5 = '~~~~'
 
+
 document = Document()
 document.add_heading('Cover Letter', 0)
       
-def generate_basic_cover_letter(about_me="", resume_file="",  posting_path="") -> str:
+def generate_basic_cover_letter(about_me="" or "-1", resume_file="",  posting_path="") -> str:
     
     """ Main function that generates the cover letter.
     
@@ -74,6 +75,7 @@ def generate_basic_cover_letter(about_me="", resume_file="",  posting_path="") -
     resume_content = read_txt(resume_file)
     info_dict = get_generated_responses(resume_content=resume_content, about_me=about_me, posting_path=posting_path)
 
+
     highest_education_level = info_dict.get("highest education level", "")
     work_experience_level = info_dict.get("work experience level", "")
     job_specification = info_dict.get("job specification", "")
@@ -86,9 +88,7 @@ def generate_basic_cover_letter(about_me="", resume_file="",  posting_path="") -
     email = info_dict.get("email", "")
 
     # Get adviced from web data on personalized best practices
-    advice_query = f"""Best practices when writing a cover letter for {job} with the given information:
-      highest level of education: {highest_education_level}
-      work experience level:   {work_experience_level}"""
+    advice_query = f"""Best practices when writing a cover letter for applicant with {highest_education_level} and {work_experience_level} experience as a {job}"""
     advices = retrieve_from_db(advice_query)
     # Get sample comparisons
     related_samples = search_related_samples(job, cover_letter_samples_path)
@@ -221,6 +221,8 @@ def generate_basic_cover_letter(about_me="", resume_file="",  posting_path="") -
 def cover_letter_generator(json_request:str) -> str:
     
     """Helps to generate a cover letter. Use this tool more than any other tool when user asks to write a cover letter.  
+
+    Do not use this tool when user provides a cover letter file and asks you to customize or improve it. 
 
     Input should be a single string strictly in the following JSON format: '{{"about me":"<about me>", "resume file":"<resume file>", "job post link":"<job post link>"}}' \n
 

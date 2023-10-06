@@ -327,7 +327,7 @@ def improve_resume_fields(generated_response: Dict[str, str], field: str, field_
 @tool(return_direct=True)
 def resume_evaluator(json_request: str)-> str:
 
-    """Helps to evaluate a resume. Use this tool more than any other tool when user asks to evaluate, review, help with a resume. 
+    """Helps to evaluate a resume. Use this tool more than any other tool when user asks to evaluate or review a resume. 
 
     Input should be  a single string strictly in the following JSON format:  '{{"about me":"<about me>", "resume file":"<resume file>", "job post link":"<job post link>"}}' \n
 

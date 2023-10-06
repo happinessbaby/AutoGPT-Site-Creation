@@ -477,7 +477,8 @@ class Interview():
 
         """ Processes user's about interview text input, including any links in the description."""
         
-        about_interview_summary = get_completion(f"Summarize the following description. Do not include any links in your summary: {about_interview}")
+        about_interview_summary = get_completion(f"""Summarize the following description, if provided, and ignore all the links: {about_interview} \n
+            If you are unable to summarize, ouput -1 only. Remember, ignore any links and output -1 if you can't summarize.""")
         if "about" not in st.session_state:
             st.session_state["about"] = about_interview_summary
         # process any links in the about me

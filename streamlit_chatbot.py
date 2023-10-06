@@ -119,8 +119,8 @@ class Chat():
             SAMPLE_QUESTIONS = {
                 "":"",
                 "help me write a cover letter": "coverletter",
-                "help  evaluate my my resume": "resume",
-                "polish my personal statement": "personalstatement"
+                "help me evaluate my resume": "resume",
+                "help me customize my resume, cover letter, or personal statement": "customize"
             }
 
 
@@ -132,7 +132,10 @@ class Chat():
             ## generated stores AI generated responses
             if 'responses' not in st.session_state:
                 st.session_state['responses'] = list()
-
+            if "results_container" not in st.session_state:
+                st.session_state["results_container"] = st.container()
+            if "questions_container" not in st.session_state:
+                st.session_state["question_container"] = st.container()
             question_container = st.container()
             results_container = st.container()
 
@@ -146,12 +149,12 @@ class Chat():
             # User input
             ## Function for taking user provided prompt as input
             def get_text():
-                st.text_input("Ask a specific question: ", "", key="input", on_change = submit)
+                st.text_input("Chat with me: ", "", key="input", on_change = submit)
                 return st.session_state.questionInput
             ## Applying the user input box
-            with question_container:
+            with st.session_state.question_container:
                 user_input = get_text()
-                question_container = st.empty()
+                st.session_state.question_container = st.empty()
                 st.session_state.questionInput=''
 
 
@@ -159,13 +162,16 @@ class Chat():
             with st.sidebar:
                 st.title('Quick Navigation 🧸')
                 st.markdown('''
-                Hi, I'm Acai, a career AI. I can: 
+                Hi, I'm Acai, a career AI advisor. I can help with your:
                             
-                - improve your resume and personal statement
-                - write a cover letter
-                - conduct a mock interview 
+                - resume
+                - cover letter
+                - personal statement
+                - mock interview
                             
-                Fill out the form below. Only your resume is really required, but I can generate better responses if you provide me with more information!
+                Get started by filling out the form below.
+                            
+                If you want to practice for a mock interview, switch to the "Mock Interview" tab above. 
                                             
                 ''')
 
@@ -192,7 +198,7 @@ class Chat():
                     #         key = "company"
                     #     )
 
-                    about_me = st.text_area(label="tell me about yourself", placeholder="For example, you can say,  I want to apply for the MBA program at ABC University, or I want to apply for this job at <link> ", key="about_me")
+                    about_me = st.text_area(label="tell me about yourself or request", placeholder="For example, you can say,  I want to apply for the MBA program at ABC University, or I want to apply for this job at <link> ", key="about_me")
                         
                     add_vertical_space(1)
                     # link = st.text_input("job posting link", "", key = "link")
@@ -222,13 +228,13 @@ class Chat():
                         # if link:
                         #     self.process_link(link)
                         if prefilled:
-                            res = results_container.container()
+                            res = st.session_state.results_container.container()
                             streamlit_handler = StreamlitCallbackHandler(
                                 parent_container=res,
                             )
-                            question = prefilled
-                            response = self.new_chat.askAI(st.session_state.userid, question, callbacks=streamlit_handler)
-                            st.session_state.questions.append(question)
+                            self.question = prefilled
+                            response = self.new_chat.askAI(st.session_state.userid, self.question, callbacks=streamlit_handler)
+                            st.session_state.questions.append(self.question)
                             st.session_state.responses.append(response)
 
 
@@ -238,16 +244,16 @@ class Chat():
 
             # Chat section
             if user_input:
-                res = results_container.container()
+                res = st.session_state.results_container.container()
                 streamlit_handler = StreamlitCallbackHandler(
                     parent_container=res,
                     # max_thought_containers=int(max_thought_containers),
                     # expand_new_thoughts=expand_new_thoughts,
                     # collapse_completed_thoughts=collapse_completed_thoughts,
                 )
-                question = user_input
-                response = self.new_chat.askAI(st.session_state.userid, question, callbacks = streamlit_handler)
-                st.session_state.questions.append(question)
+                self.question = user_input
+                response = self.new_chat.askAI(st.session_state.userid, self.question, callbacks = streamlit_handler)
+                st.session_state.questions.append(self.question)
                 st.session_state.responses.append(response)
             if st.session_state['responses']:
                 for i in range(len(st.session_state['responses'])-1, -1, -1):
@@ -277,8 +283,8 @@ class Chat():
         # try: 
         #     company = st.session_state.company
         #     self.new_chat.update_entities(f"company:{company} /n ###")
-        except Exception:
-            pass
+        # except Exception:
+        #     pass
         try:
             files = st.session_state.files 
             self.process_file(files)
@@ -292,17 +298,31 @@ class Chat():
         try:
             about_me = st.session_state.about_me
             self.process_about_me(about_me)
-            # self.new_chat.update_entities(f"about me:{about_me} /n ###")
         except Exception:
             pass
+        # passes the previous user question to the agent one more time after user uploads form
+        try:
+            res = st.session_state.results_container.container()
+            streamlit_handler = StreamlitCallbackHandler(
+                parent_container=res,
+            )
+            response = self.new_chat.askAI(st.session_state.userid, self.question, callbacks=streamlit_handler)
+            st.session_state.questions.append(self.question)
+            st.session_state.responses.append(response)
+        # 'Chat' object has no attribute 'question': exception occurs when user has not asked a question, in this case, pass
+        except AttributeError:
+            pass
+            
 
     
 
     def process_about_me(self, about_me: Any) -> None:
     
         """ Processes user's about me text input, including any links in the description. """
-        
-        about_me_summary = get_completion(f"Summarize the following about me. Do not include any links in your summary: {about_me}")
+
+        about_me_summary = get_completion(f"""Summarize the following decription, if provided, and ignore all the links: {about_me}. 
+                                            If you are unable to summarize, ouput -1 only.
+                                           Remember, ignore any links and output -1 if you can't summarize.  """)
         self.new_chat.update_entities(f"about me:{about_me_summary} /n ###")
         # process any links in the about me
         urls = re.findall(r'(https?://\S+)', about_me)
@@ -310,6 +330,8 @@ class Chat():
         if urls:
             for url in urls:
                 self.process_link(url)
+
+
 
     def process_file(self, uploaded_files: Any) -> None:
 
