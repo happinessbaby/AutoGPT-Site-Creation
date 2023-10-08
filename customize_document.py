@@ -27,31 +27,30 @@ from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
 
 
-def improve_personal_statement(personal_statement="", about_me=""):
+def customize_document(file="", about_me="", file_type=""):
 
-    personal_statement = read_txt(personal_statement)
-    generated_info_dict=get_generated_responses(personal_statement=personal_statement, about_me=about_me)
+    file = read_txt(file)
+    if file_type == "personal statement":
+        generated_info_dict=get_generated_responses(personal_statement=personal_statement, about_me=about_me)
 
-    institution_description=generated_info_dict["institution description"] 
-    program_description = generated_info_dict["program description"]
+        institution_description=generated_info_dict["institution description"] 
+        program_description = generated_info_dict["program description"]
 
-    query = f""" You are to help Human polish a personal statement. 
-    Prospective employers and universities may ask for a personal statement that details qualifications for a position or degree program.
-    You are provided with a personal statement and various pieces of information that you may use.
-    personal statement: {personal_statement}
-    institution description: {institution_description}
-    program description: {program_description}
+        query = f""" You are to help Human polish a personal statement. 
+        Prospective employers and universities may ask for a personal statement that details qualifications for a position or degree program.
+        You are provided with a personal statement and various pieces of information that you may use.
+        personal statement: {personal_statement}
+        institution description: {institution_description}
+        program description: {program_description}
 
-    please consider blending these information into the existing personal statement. Use the same tone and style when inserting information.
-    
+        please consider blending these information into the existing personal statement. Use the same tone and style when inserting information.
+        
 
-    """
-    tools = create_search_tools("google", 3)
-    response = generate_multifunction_response(query, tools)
+        """
+        tools = create_search_tools("google", 3)
+        response = generate_multifunction_response(query, tools)
     return response
 
-def customize_document(file="", file_type = "", about_me=""):
-    return "DONE"
 
 
 
@@ -83,24 +82,24 @@ def document_customize_writer(json_request:str) -> str:
     else:
         file_type = args["file type"]
     print(file, about_me, file_type)
-    customize_document(file=file, about_me=about_me)
+    customize_document(file=file, about_me=about_me, file_type=file_type)
 
 
 
-def create_personal_statement_writer_tool() -> List[Tool]:
+def create_document_customize_writer_tool() -> List[Tool]:
 
     """ Agent tool that calls the function that writes personal statement """
 
     name = "personal_statement_writer"
-    parameters1 = '{{"personal statement file":"<personal statement file>", "about me":"<about me>"}}'
-    description = f"""
-        Use this tool whenever Human wants your help to write a personal statement or help them check their current one. Do not use this tool for study purposes or answering interview questions. 
-        Input should be a single string strictly in the following JSON format: {parameters1} \n 
-        (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) \n"""
+    parameters = '{{"file":"<file>", "file type":"<file type>", "about me":"<about me>"}}'
+    description = f""" Helps customize, personalize, and improve personal statement, cover letter, or resume. 
+    Input should be a single string strictly in the following JSON format: {parameters}
+    file type should be either "personal statement", "cover letter", or "resume \n
+    (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else)"""
     tools = [
         Tool(
         name = name,
-        func = process_personal_statement,
+        func = process_document,
         description = description, 
         verbose = False,
         handle_tool_error=True,
@@ -109,7 +108,7 @@ def create_personal_statement_writer_tool() -> List[Tool]:
     print("Succesfully created interview initiator tool.")
     return tools
 
-def process_personal_statement(json_request: str) -> str:
+def process_document(json_request: str) -> str:
 
     try:
         json_request = json_request.strip("'<>() ").replace(" ", "").__str__().replace("'", '"')
@@ -118,14 +117,23 @@ def process_personal_statement(json_request: str) -> str:
         print(f"JSON DECODER ERROR: {e}")
         return "Format in JSON and try again."
     
-    if ("personal statement file" not in args or args["personal statement file"]=="" or args["personal statement file"]=="<personal statement file>"):
-        return """stop using or calling the personal_statement_writer tool. Ask user to upload their personal statement. """
+    if ("file" not in args or args["file"]=="" or args["file"]=="<file>"):
+        return """stop using or calling the document_improvement_writer tool. Ask user to upload their file instead. """
     else:
-        personal_statement = args["personal statement file"]
+        file = args["file"]
+    if ("about me" not in args or args["about me"] == "" or args["about me"]=="<about me>"):
+        about_me = ""
+    else:
         about_me = args["about me"]
-        improve_personal_statement(personal_statement=personal_statement, about_me=about_me)
+    if ("file type" not in args or args["file type"] == "" or args["file type"]=="<file type>"):
+        file_type = ""
+    else:
+        file_type = args["file type"]
+    print(file, about_me, file_type)
+    customize_document(file=file, about_me=about_me, file_type=file_type)
+
 
 if __name__=="__main__":
     personal_statement = "./uploads/file/personal_statement.txt"
-    improve_personal_statement(about_me="i want to apply for a MSBA program at university of louisville", personal_statement=personal_statement)
+    customize_document(about_me="i want to apply for a MSBA program at university of louisville", file = personal_statement, file_type="personal statement")
         

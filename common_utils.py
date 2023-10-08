@@ -780,6 +780,7 @@ def binary_file_downloader_html(json_request: str):
     
 
 
+
 # https://python.langchain.com/docs/modules/agents/agent_types/self_ask_with_search
 @tool("search chat history")
 def search_all_chat_history(query:str)-> str:
@@ -812,6 +813,36 @@ def debug_error(self, error_message: str) -> str:
     return "shorten your prompt"
 
 
+
+# Could also implement a scoring system_message to provide model with feedback
+def evaluate_content(content: str, content_type: str) -> bool:
+
+    """ Evaluates if content is a job, work, or study related user request. """
+
+    system_message = f"""
+        You are an assistant that evaluates whether the content contains {content_type}
+
+        Respond with a Y or N character, with no punctuation:
+        Y - if the content contains {content_type}. it's okay if it also contains other things as well.
+        N - otherwise
+
+        Output a single letter only.
+        """
+
+    messages = [
+    {'role': 'system', 'content': system_message},
+    {'role': 'user', 'content': content}
+    ]	
+
+    response = get_completion_from_messages(messages, max_tokens=1)
+
+    if (response=="Y"):
+        return True
+    elif (response == "N"):
+        return False
+    else:
+        # return false for now, will have error handling here
+        return False
 
 
 def check_content(txt_path: str) -> Union[bool, str, set] :
