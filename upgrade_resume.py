@@ -152,53 +152,54 @@ def evaluate_resume(about_me="", resume_file = "", posting_path="") -> str:
 def improve_resume_fields(generated_response: Dict[str, str], field: str, field_content: str, tools: List[Tool], document_dict: Dict[str, str]) -> None:
 
     print(f"CURRENT FIELD IS: {field}")
-    job = generated_response.get("job", "")
-    company_description = generated_response.get("company description", "")
-    job_specification = generated_response.get("job specification", "")
-    job_description = generated_response.get("job description", "")
-    highest_education_level = generated_response.get("highest education level", "")
-    work_experience_level = generated_response.get("work experience level", "")
-    # education_level = generated_response.get("education", "")
+    if field_content!="":
+        job = generated_response.get("job", "")
+        company_description = generated_response.get("company description", "")
+        job_specification = generated_response.get("job specification", "")
+        job_description = generated_response.get("job description", "")
+        highest_education_level = generated_response.get("highest education level", "")
+        work_experience_level = generated_response.get("work experience level", "")
+        # education_level = generated_response.get("education", "")
 
-    advice_query =  f"""how to make resume field {field} ATS-friendly? No formatting advices."""
-    advice1 = retrieve_from_db(advice_query)
-    advice_query = f"""what to include in {field} of resume for {highest_education_level} and {work_experience_level} as a {job}"""
-    advice2 = retrieve_from_db(advice_query)
+        advice_query =  f"""how to make resume field {field} ATS-friendly? No formatting advices."""
+        advice1 = retrieve_from_db(advice_query)
+        advice_query = f"""what to include in {field} of resume for {highest_education_level} and {work_experience_level} as a {job}"""
+        advice2 = retrieve_from_db(advice_query)
 
-    query_evaluation = f"""  You are an expert resume field advisor. 
+        query_evaluation = f"""  You are an expert resume field advisor. 
 
-     Generate a list of missing, irrelevant, and not ATS-friendly information in the resume field content. 
-       
-     Remember to use either job specification or general job description as your guideline along with the expert advice.
+        Generate a list of missing, irrelevant, and not ATS-friendly information in the resume field content. 
+        
+        Remember to use either job specification or general job description as your guideline along with the expert advice.
 
-      field name: {field}
+        field name: {field}
 
-      field content: {field_content}\n
+        field content: {field_content}\n
 
-      job specification: {job_specification}\n
+        job specification: {job_specification}\n
 
-      general job description: {job_description} \n
+        general job description: {job_description} \n
 
-      expert advice: {advice2} + "\n" + {advice1}
+        expert advice: {advice2} + "\n" + {advice1}
 
-      Your answer should be detailed and only from the field content. Please also provide your reasoning too as in the following examples:
+        Your answer should be detailed and only from the field content. Please also provide your reasoning too as in the following examples:
 
-            Missing or Irrelevant Field Content for Work Experience:
+                Missing or Irrelevant Field Content for Work Experience:
 
-            1. Quantative achievement is missing: no measurable metrics or KPIs to highlight any past achievements. 
+                1. Quantative achievement is missing: no measurable metrics or KPIs to highlight any past achievements. 
 
-            2. Front desk receptionist is irrelevant: Experience as a front desk receptionist is not directly related to the role of a data analyst
+                2. Front desk receptionist is irrelevant: Experience as a front desk receptionist is not directly related to the role of a data analyst
 
-            3. Date formatting is not ATS-friendly: an ATS-friendly way to write dates is for example, 01/2001 or January 2001
-    
-      Please ignore all formatting advices as formatting should not be part of the assessment.
+                3. Date formatting is not ATS-friendly: an ATS-friendly way to write dates is for example, 01/2001 or January 2001
+        
+        Please ignore all formatting advices as formatting should not be part of the assessment.
 
-      Use your tools if you need to reference other resume.
+        Use your tools if you need to reference other resume.
 
-     """
-    evaluation = generate_multifunction_response(query_evaluation, tools)
-    document_dict.update({f"{field} evaluation":evaluation})
-    
+        """
+        evaluation = generate_multifunction_response(query_evaluation, tools)
+        document_dict.update({f"{field} evaluation":evaluation})
+        
 
     # document.add_heading(f"{field}", level=1)
     # document.add_paragraph(evaluation)

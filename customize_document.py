@@ -36,25 +36,26 @@ def customize_personal_statement(personal_statement="", resume="", about_me="", 
         resume_content = ""
     generated_info_dict=get_generated_responses(resume_content = resume_content, about_me=about_me, posting_path=posting_path)
 
-    institution_description=generated_info_dict["institution description"] 
-    program_description = generated_info_dict["program description"]
+    institution_description=generated_info_dict.get("institution description", "")
+    program_description = generated_info_dict.get("program description", "")
 
     query = f""" You are to help Human polish a personal statement. 
     Prospective employers and universities may ask for a personal statement that details qualifications for a position or degree program.
-    You are provided with a personal statement and various pieces of information that you may use.
+    You are provided with a personal statement and various pieces of information, if available, that you may use.
     personal statement: {personal_statement}
     institution description: {institution_description}
     program description: {program_description}
 
-    please consider blending these information into the existing personal statement. Use the same tone and style when inserting information.
-    
+    please consider blending these information into the existing personal statement. 
+    Use the same tone and style when inserting information.
+    Correct grammar and spelling mistakes. 
 
     """
     tools = create_search_tools("google", 3)
     response = generate_multifunction_response(query, tools)
     return response
 
-def customize_cover_letter(cover_letter="", resume="", about_me="", posting_path=""):
+def customize_cover_letter(cover_letter="", resume="", about_me="", posting_path="", llm = ChatOpenAI(temperature=0.5, cache=False)):
 
     cover_letter = read_txt(cover_letter)
     try:
@@ -62,47 +63,88 @@ def customize_cover_letter(cover_letter="", resume="", about_me="", posting_path
     except Exception:
         resume_content = ""
     generated_info_dict=get_generated_responses(resume_content = resume_content, about_me=about_me, posting_path=posting_path)
+    
+    job_description = generated_info_dict.get("job description", "")
+    job_specification = generated_info_dict.get("job specification", "")
+    about_me = generated_info_dict.get("about me", "")
+    company_description = generated_info_dict.get("company description", "")
+    company = generated_info_dict.get("company", "")
+    job = generated_info_dict.get("job", "")
+    field_names = generated_info_dict.get("field names")
+    
+    query = f""" Your task is to help Human revise and polish a cover letter. You are provided with a cover letter and various pieces of information, if available, that you may use.
+    Foremost important is the applicant's about me that you should always keep in mind.
+    The applicant is applying for job {job} at company {company}. Please change the cover letter's existing information to suit the purpose of applying to this job and this company, if available.
+    Please consider blending the below information into the existing cover letter to make it more descriptive, personalized, and appropriate for the occasion.
+
+    about me: {about_me}
+    cover letter: {cover_letter}
+    job desciption: {job_description}
+    job specification: {job_specification}
+    company description: {company_description}
+
+    Use the same tone and style when inserting information.
+    Correct grammar and spelling mistakes. 
+
+    """
+    # template_string = """ Your task is to help Human revise and polish a cover letter. You are provided with a cover letter and various pieces of information, if available, that you may use.
+    # Foremost important is Human's about me that you should always keep in mind.
+    # about me: {about_me}
+    # cover letter: {cover_letter}
+    # job desciption: {job_description}
+    # job specification: {job_specification}
+    # company description: {company_description}
+    # today'date: {date}
+
+    # please consider blending these information into the existing cover letter. 
+    # Use the same tone and style when inserting information.
+    # Correct grammar and spelling mistakes. 
+
+    # """
+    tools = create_search_tools("google", 3)
+    response = generate_multifunction_response(query, tools, early_stopping=True)
+    # prompt_template = ChatPromptTemplate.from_template(template_string)
+    # cover_letter_message = prompt_template.format_messages(
+    #     cover_letter = cover_letter,
+    #     about_me = about_me,
+    #     date = date.today(),
+    #     company_description = company_description, 
+    #     job_description = job_description,
+    #     job_specification = job_specification,
+
+    # )
+
+    # response = llm(cover_letter_message).content
+    print(response)
+    return response
 
 def customize_resume(resume="", about_me="", posting_path=""):
 
     resume_content = read_txt(resume)
     generated_info_dict=get_generated_responses(resume_content = resume_content, about_me=about_me, posting_path=posting_path)
+    job_description = generated_info_dict.get("job description", "")
+    job_specification = generated_info_dict.get("job specification", "")
+    about_me = generated_info_dict.get("about me", "")
+    company_description = generated_info_dict.get("company description", "")
+    field_names = generated_info_dict.get("field names", "")
 
+    query = f""" Your task is to help Human revise and polish a resume. You are provided with a resume and various pieces of information, if available, that you may use.
+    Foremost important is Human's about me that you should always keep in mind.
+    about me: {about_me}
+    resume: {resume_content}
+    job desciption: {job_description}
+    job specification: {job_specification}
+    company description: {company_description}
 
+    please consider blending these information into the existing resume. 
+    Use the same tone and style when inserting information.
+    Correct grammar and spelling mistakes. 
 
+    """
+    tools = create_search_tools("google", 3)
+    response = generate_multifunction_response(query, tools)
+    return response
 
-
-
-
-# @tool
-# def document_customize_writer(json_request:str) -> str:
-
-#     """ Helps customize, personalize, and improve personal statement, cover letter, or resume. 
-#     Input should be a single string strictly in the following JSON format: '{{"file":"<file>", "file type":"<file type>", "about me":"<about me>", "resume file":"<resume file>"}}' 
-#     file type should be either "personal statement", "cover letter", or "resume \n
-#     (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else)"""
-    
-#     try:
-#         json_request = json_request.strip("'<>() ").replace(" ", "").__str__().replace("'", '"')
-#         args = json.loads(json_request)
-#     except JSONDecodeError as e:
-#         print(f"JSON DECODER ERROR: {e}")
-#         return "Format in JSON and try again."
-    
-#     if ("file" not in args or args["file"]=="" or args["file"]=="<file>"):
-#         return """stop using or calling the document_improvement_writer tool. Ask user to upload their file, and resume if available. """
-#     else:
-#         file = args["file"]
-#     if ("about me" not in args or args["about me"] == "" or args["about me"]=="<about me>"):
-#         about_me = ""
-#     else:
-#         about_me = args["about me"]
-#     if ("file type" not in args or args["file type"] == "" or args["file type"]=="<file type>"):
-#         file_type = ""
-#     else:
-#         file_type = args["file type"]
-#     print(file, about_me, file_type)
-#     customize_document(file=file, about_me=about_me, file_type=file_type)
 
 
 
@@ -256,5 +298,10 @@ def process_resume(json_request: str) -> str:
 
 if __name__=="__main__":
     personal_statement = "./uploads/file/personal_statement.txt"
-    customize_personal_statement(about_me="i want to apply for a MSBA program at university of louisville", personal_statement = personal_statement)
+    resume = "./resume_samples/resume2023v3.txt"
+    posting_path = "./uploads/link/software05.txt"
+    # customize_personal_statement(about_me="i want to apply for a MSBA program at university of louisville", personal_statement = personal_statement)
+    cover_letter = "cv01.txt"
+    customize_cover_letter(about_me = "", cover_letter=cover_letter, resume=resume, posting_path=posting_path)
+    # customize_resume (about_me="", resume=resume, posting_path=posting_path)
         

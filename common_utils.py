@@ -280,9 +280,10 @@ def extract_resume_fields(resume: str,  llm=OpenAI(temperature=0,  max_tokens=20
     field_name_query =  """Search and extract names of fields contained in the resume delimited with {delimiter} characters. A field name must has content contained in it for it to be considered a field name. 
 
         Some common resume field names include but not limited to personal information, objective, education, work experience, awards and honors, area of expertise, professional highlights, skills, etc. 
-         
-         
-        If there are no obvious field name but some information belong together, like name, phone number, address, please generate a field name for this group of information, such as Personal Information.   
+             
+        If there are no obvious field name but some information belong together, like name, phone number, address, please generate a field name for this group of information, such as Personal Information.  
+ 
+        Do not output both names if they point to the same content, such as Work Experience and Professional Experience. 
 
          resume: {delimiter}{resume}{delimiter} \n
          
@@ -299,6 +300,8 @@ def extract_resume_fields(resume: str,  llm=OpenAI(temperature=0,  max_tokens=20
     field_content_query = """For each field name in {field_names}, check if there is valid content within it in the resume. 
 
     If the field name is valid, output in JSON with field name as key and content as value. DO NOT LOSE ANY INFORMATION OF THE CONTENT WHEN YOU SAVE IT AS THE VALUE.
+
+    Also, there should not be two field names with the same value. 
 
       resume: {delimiter}{resume}{delimiter} \n
  
@@ -318,46 +321,48 @@ def extract_resume_fields(resume: str,  llm=OpenAI(temperature=0,  max_tokens=20
     field_content_chain = LLMChain(llm=llm, prompt=prompt, output_key="field_content")
 
     # Chain three: trim the dictionary for further resume evaluation
-    dict_trim_query = """ For the field content in the JSON string format below:
+    # dict_trim_query = """ For the field content in the JSON string format below:
     
-    Remove all the JSON key value pair where the value is empty. 
+    # Remove all the JSON key value pair where the value is empty. 
 
-    If there are two keys with the same value, remove one of the key and value pair from the JSON entry.
+    # If there are two keys with the same value, remove one of the key and value pair from the JSON entry.
 
-    Output the same JSON string with the above things deleted. MAKE SURE YOUR OUTPUT IS IN JSON FORMAT.
+    # Output the same JSON string with the above things deleted. MAKE SURE YOUR OUTPUT IS IN JSON FORMAT.
 
-    field content: {field_content}
+    # field content: {field_content}
 
-    """
-    format_instructions = output_parser.get_format_instructions()
-    prompt = PromptTemplate(
-        template=dict_trim_query,
-        input_variables=["field_content"],
-        # partial_variables={"format_instructions": format_instructions}
-    )
-    content_trim_chain = LLMChain(llm=llm, prompt=prompt, output_key="trimmed_field_content")
+    # """
+    # format_instructions = output_parser.get_format_instructions()
+    # prompt = PromptTemplate(
+    #     template=dict_trim_query,
+    #     input_variables=["field_content"],
+    #     # partial_variables={"format_instructions": format_instructions}
+    # )
+    # content_trim_chain = LLMChain(llm=llm, prompt=prompt, output_key="trimmed_field_content")
 
     overall_chain = SequentialChain(
         memory=SimpleMemory(memories={"resume":resume}),
-        chains=[field_name_chain, field_content_chain, content_trim_chain],
+        # chains=[field_name_chain, field_content_chain, content_trim_chain],
+        chains=[field_name_chain, field_content_chain],
         # input_variables=["delimiter", "resume"],
         input_variables=["delimiter"],
     # Here we return multiple variables
-        output_variables=["field_names",  "field_content", "trimmed_field_content"],
+        # output_variables=["field_names",  "field_content", "trimmed_field_content"],
+        output_variables=["field_names",  "field_content"],
         verbose=True)
     # response = overall_chain({"delimiter":"####", "resume":resume})
     response = overall_chain({"delimiter": "####"})
     field_names = output_parser.parse(response.get("field_names", ""))
     # sometimes, not always, there's an annoying text "Output: " in front of json that needs to be stripped
-    # field_content = '{' + response.get("field_content", "").split('{', 1)[-1]
-    # print(response.get("field_content", ""))
-    trimmed_field_content = '{' + response.get("trimmed_field_content", "").split('{', 1)[-1]
-    print(trimmed_field_content)
+    field_content = '{' + response.get("field_content", "").split('{', 1)[-1]
+    print(response.get("field_content", ""))
+    # trimmed_field_content = '{' + response.get("trimmed_field_content", "").split('{', 1)[-1]
+    # print(trimmed_field_content)
     try:
-        field_content = json.loads(trimmed_field_content)
+        field_content = json.loads(field_content)
     except JSONDecodeError as e:
         field_content = get_completion(f""" Correct the misformatted JSON string below and output a valid JSON string:
-                       {trimmed_field_content} """)
+                       {field_content} """)
     # output_parser.parse(field_content)
     return field_content
 
@@ -602,14 +607,14 @@ def create_sample_tools(related_samples: List[str], sample_type: str,) -> Union[
 
 
 # one of the most important functions
-def get_generated_responses(resume_content="", personal_statement="", about_me="", posting_path=""): 
+def get_generated_responses(resume_content="",about_me="", posting_path=""): 
 
     # Get personal information from resume
     generated_responses={}
     pursuit_info_dict = {"job": -1, "company": -1, "institution": -1, "program": -1}
 
     if (Path(posting_path).is_file()):
-        prompt_template = """Identity the job position, company then provide a summary of the following job posting:
+        prompt_template = """Identity the job position, company then provide a summary in 100 words or less of the following job posting:
             {text} \n
             Focus on roles and skills involved for this job. Do not include information irrelevant to this specific position.
         """
@@ -621,7 +626,7 @@ def get_generated_responses(resume_content="", personal_statement="", about_me="
             if value == -1:
                 pursuit_info_dict[key]=pursuit_info_dict1[key]
 
-    if about_me!="" or about_me!="-1":
+    if about_me!="" and about_me!="-1":
         pursuit_info_dict0 = extract_pursuit_information(about_me)
         for key, value in pursuit_info_dict.items():
             if value == -1:
@@ -650,25 +655,29 @@ def get_generated_responses(resume_content="", personal_statement="", about_me="
     program = generated_responses["program"]
 
     if job!=-1 and generated_responses.get("job specification", "")=="":
-        job_query  = f"""Research what a {job} does and output a detailed description of the common skills, responsibilities, education, experience needed. """
+        job_query  = f"""Research what a {job} does and output a detailed description of the common skills, responsibilities, education, experience needed. 
+                        In 100 words or less, summarize your research result. """
         job_description = get_web_resources(job_query)  
         generated_responses.update({"job description": job_description})
 
     if company!=-1:
-        company_query = f""" Research what kind of company {company} is, such as its culture, mission, and values.                       
+        company_query = f""" Research what kind of company {company} is, such as its culture, mission, and values.       
+                            In 50 words or less, summarize your research result.                 
                             Look up the exact name of the company. If it doesn't exist or the search result does not return a company, output -1."""
         company_description = get_web_resources(company_query)
         generated_responses.update({"company description": company_description})
 
     if institution!=-1:
-        institution_query = f""" Research {institution}'s culture, mission, and values.                       
+        institution_query = f""" Research {institution}'s culture, mission, and values.   
+                        In 50 words or less, summarize your research result.                     
                         Look up the exact name of the institution. If it doesn't exist or the search result does not return an institution output -1."""
         institution_description = get_web_resources(institution_query)
         generated_responses.update({"institution description": institution_description})
 
     if program!=-1:
         program_query = f"""Research the degree program in the institution provided below. 
-        Find out what {program} at the institution {institution} involves, and what's special about the program, and why it's worth pursuing.     
+        Find out what {program} at the institution {institution} involves, and what's special about the program, and why it's worth pursuing.    
+        In 100 words or less, summarize your research result.  
         If institution is -1, research the general program itself.
         """
         program_description = get_web_resources(program_query)   
@@ -870,7 +879,7 @@ def check_content(txt_path: str) -> Union[bool, str, set] :
         {
             "name": "category",
             "type": "string",
-            "enum": ["resume", "cover letter", "user profile", "job posting", "personal statement", "browser error", "other"],
+            "enum": ["resume", "cover letter", "job posting", "personal statement", "browser error", "work or study related information", "other"],
             "description": "categorizes content into the provided categories",
             "required":True,
         },

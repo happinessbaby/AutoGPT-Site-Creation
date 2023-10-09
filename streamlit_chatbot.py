@@ -136,7 +136,7 @@ class Chat():
                 "":"",
                 "help me write a cover letter": "coverletter",
                 "help me evaluate my resume": "resume",
-                "help me customize my resume, cover letter, or personal statement": "customize"
+                "help me customize my document": "customize"
             }
 
 
@@ -183,7 +183,7 @@ class Chat():
                             
                 - Evaluate your resume
                 - Write a cover letter
-                - Customize your documents for a specific purpose
+                - Customize your documents
                             
                 Get started by filling out the form below, or just chat with me!
                                             
@@ -210,12 +210,12 @@ class Chat():
                     #         key = "company"
                     #     )
 
-                    about_me = st.text_area(label="tell me about yourself", placeholder="For example, you can say,  I want to apply for the MBA program at ABC University, or supply me with a job posting link", key="about_me")
+                    about_me = st.text_area(label="tell me about yourself", placeholder="For example, you can say,  I want to apply for the MBA program at ABC University, or I wish to work for XYZ as a customer service representative", key="about_me")
                         
                     add_vertical_space(1)
-                    # link = st.text_input("job posting link", "", key = "link")
+                    link = st.text_area(label="share your links here", placeholder="Please separate each link by a comma", key = "link")
 
-                    uploaded_files = st.file_uploader(label="Upload your file",
+                    uploaded_files = st.file_uploader(label="Upload your files",
                                                     type=["pdf","odt", "docx","txt", "zip", "pptx"], 
                                                     key = "files",
                                                     accept_multiple_files=True)
@@ -311,11 +311,11 @@ class Chat():
             self.process_file(files)
         except Exception:
             pass
-        # try:
-        #     link = st.session_state.link
-        #     self.process_link(link)
-        # except Exception:
-        #     pass
+        try:
+            link = st.session_state.link
+            self.process_link(link)
+        except Exception:
+            pass
         try:
             about_me = st.session_state.about_me
             self.process_about_me(about_me)
@@ -394,10 +394,9 @@ class Chat():
                 if content_type != "other":
                     entity = f"""{content_type} file: {end_path} /n ###"""
                     self.new_chat.update_entities(entity)
-                else:
+                if content_type=="work or study related information" :
                     # update user material, to be used for "search_user_material" tool
                     self.update_vectorstore(content_topics, end_path)
-                # self.add_to_chat(content_type, content_topics, end_path)
             else:
                 st.write("File content unsafe. Please try another file.")
                 os.remove(end_path)
@@ -413,12 +412,12 @@ class Chat():
             content_safe, content_type, content_topics = check_content(end_path)
             if content_safe:
                 if content_type=="browser error":
-                    st.write("Link content cannot be parsed, please try another link.")
+                    st.write("Link content cannot be parsed. Please try another link, paste the link content, or save the content as file.")
                 elif content_type!="other":
                     entity = f"""{content_type} file: {end_path} /n ###"""
                     self.new_chat.update_entities(entity)
-                    # self.add_to_chat(content_type, content_topics, end_path)
-                else:
+                if content_type=="work or study related information" :
+                    # update user material, to be used for "search_user_material" tool
                     self.update_vectorstore(content_topics, end_path)
             else:
                 st.write("Link content unsafe. Please try another link.")
