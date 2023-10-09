@@ -62,7 +62,7 @@ from langchain.schema import OutputParserException
 from multiprocessing import Process, Queue, Value
 from generate_cover_letter import cover_letter_generator, create_cover_letter_generator_tool
 from upgrade_resume import  resume_evaluator, create_resume_evaluator_tool
-from customize_document import document_customize_writer, create_document_customize_writer_tool
+from customize_document import create_resume_customize_writer_tool, create_cover_letter_customize_writer_tool, create_personal_statement_customize_writer_tool
 from langchain.agents.agent_toolkits import create_conversational_retrieval_agent
 from langchain.agents.agent_toolkits import create_retriever_tool
 from typing import List, Dict
@@ -130,13 +130,15 @@ class ChatController():
     
         # initialize tools
         cover_letter_tool = create_cover_letter_generator_tool()
+        cover_letter_customize_tool = create_cover_letter_customize_writer_tool()
         # cover letter generator tool
         # cover_letter_tool = [cover_letter_generator]
-        # resume_evaluator_tool = create_resume_evaluator_tool()
+        resume_evaluator_tool = create_resume_evaluator_tool()
         # resume evaluator tool
-        resume_evaluator_tool = [resume_evaluator]
-        document_customize_tool = create_document_customize_writer_tool()
+        # resume_evaluator_tool = [resume_evaluator]
+        resume_customize_tool = create_resume_customize_writer_tool()
         # document_customize_tool = [document_customize_writer]
+        personal_statement_customize_tool = create_personal_statement_customize_writer_tool()
         user_material_tool = [search_user_material]
         # interview mode starter tool
         # interview_tool = self.initiate_interview_tool()
@@ -178,7 +180,7 @@ class ChatController():
         # wiki tool
         wiki_tool = create_wiki_tools()
         # gather all the tools together
-        self.tools =  cover_letter_tool + resume_evaluator_tool + search_tool + wiki_tool + link_download_tool  + general_tool + document_customize_tool + user_material_tool  + requests_get
+        self.tools =  cover_letter_tool + resume_evaluator_tool + search_tool + wiki_tool + link_download_tool  + general_tool + resume_customize_tool + personal_statement_customize_tool + cover_letter_customize_tool + user_material_tool  + requests_get
         # + [tool for tool in file_sys_tools]
         tool_names = [tool.name for tool in self.tools]
         print(f"Chat agent tools: {tool_names}")

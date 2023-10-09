@@ -394,20 +394,16 @@ def processing_resume(json_request: str) -> str:
     else:
       # may need to clean up the path first
         resume_file = args["resume file"]
-    if ("job" not in args or args["job"] == "" or args["job"]=="<job>"):
-        job = ""
+    if ("about me" not in args or args["about me"] == "" or args["about me"]=="<about me>"):
+        about_me = ""
     else:
-       job = args["job"]
-    if ("company" not in args or args["company"] == "" or args["company"]=="<company>"):
-        company = ""
-    else:
-        company = args["company"]
+        about_me = args["about me"]
     if ("job post link" not in args or args["job post link"]=="" or args["job post link"]=="<job post link>"):
         posting_path = ""
     else:
         posting_path = args["job post link"]
-
-    return evaluate_resume(my_job_title=job, company=company, resume_file=resume_file, posting_path=posting_path)
+        
+    return evaluate_resume(about_me=about_me, resume_file=resume_file, posting_path=posting_path)
 
 
 def create_resume_evaluator_tool() -> List[Tool]:
@@ -417,7 +413,7 @@ def create_resume_evaluator_tool() -> List[Tool]:
     Then it calls the processing_resume function to process the JSON data. """
 
     name = "resume_evaluator"
-    parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link":"<job post link>"}}'
+    parameters = '{{"about me":"<about me>", "resume file":"<resume file>", "job post link":"<job post link>"}}' 
     output = '{{"file_path":"<file_path>"}}'
     description = f"""Helps to evaluate a resume. Use this tool more than any other tool when user asks to evaluate, review, help with a resume. 
     Input should be a single string strictly in the following JSON format: {parameters} \n

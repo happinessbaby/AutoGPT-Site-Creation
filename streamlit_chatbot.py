@@ -148,10 +148,10 @@ class Chat():
             ## generated stores AI generated responses
             if 'responses' not in st.session_state:
                 st.session_state['responses'] = list()
-            if "responses_container" not in st.session_state:
-                st.session_state["responses_container"] = st.container()
-            if "questions_container" not in st.session_state:
-                st.session_state["questions_container"] = st.container()
+            # if "responses_container" not in st.session_state:
+            #     st.session_state["responses_container"] = st.container()
+            # if "questions_container" not in st.session_state:
+            #     st.session_state["questions_container"] = st.container()
             # question_container = st.container()
             # results_container = st.container()
 
@@ -359,14 +359,11 @@ class Chat():
     
         """ Processes user's about me input for content type and processes any links in the description. """
 
-        content_type = """a job, work, or study related user request. """
+        content_type = """a job or study related user request. """
         user_request = evaluate_content(about_me, content_type)
-        if not user_request:
-            about_me_summary = get_completion(f"""Summarize the following description, if provided, and ignore all the links: {about_me}. 
-                                                If you are unable to summarize, ouput -1 only.
-                                            Remember, ignore any links and output -1 if you can't summarize.  """)
-            self.new_chat.update_entities(f"about me:{about_me_summary} /n ###")
-        else:
+        about_me_summary = get_completion(f"""Summarize the following about me, if provided, and ignore all the links: {about_me}. """)
+        self.new_chat.update_entities(f"about me:{about_me_summary} /n ###")
+        if user_request:
             self.question = about_me
         # process any links in the about me
         urls = re.findall(r'(https?://\S+)', about_me)
