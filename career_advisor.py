@@ -62,7 +62,7 @@ from langchain.schema import OutputParserException
 from multiprocessing import Process, Queue, Value
 from generate_cover_letter import cover_letter_generator, create_cover_letter_generator_tool
 from upgrade_resume import  resume_evaluator, create_resume_evaluator_tool
-from improve_personal_statement import create_personal_statement_writer_tool
+from customize_document import create_resume_customize_writer_tool, create_cover_letter_customize_writer_tool, create_personal_statement_customize_writer_tool
 from langchain.agents.agent_toolkits import create_conversational_retrieval_agent
 from langchain.agents.agent_toolkits import create_retriever_tool
 from typing import List, Dict
@@ -106,7 +106,8 @@ memory_key="chat_history"
 
 class ChatController():
 
-    llm = ChatOpenAI(model="gpt-4", streaming=True, callbacks=[StreamingStdOutCallbackHandler()], temperature=0, cache = False)
+    # llm = ChatOpenAI(streaming=True, callbacks=[StreamingStdOutCallbackHandler()], temperature=0, cache = False)
+    llm = ChatOpenAI(model="gpt-4", streaming=True,temperature=0, cache = False)
     embeddings = OpenAIEmbeddings()
     chat_memory = ConversationBufferMemory(llm=llm, memory_key=memory_key, return_messages=True, input_key="input", output_key="output", max_token_limit=memory_max_token)
     # chat_memory = ReadOnlySharedMemory(memory=chat_memory)
@@ -128,14 +129,17 @@ class ChatController():
         """ Initializes main chat, a CHAT_CONVERSATIONAL_REACT_DESCRIPTION agent:  https://python.langchain.com/docs/modules/agents/agent_types/chat_conversation_agent#using-a-chat-model """
     
         # initialize tools
-        # cover_letter_tool = create_cover_letter_generator_tool()
+        cover_letter_tool = create_cover_letter_generator_tool()
+        cover_letter_customize_tool = create_cover_letter_customize_writer_tool()
         # cover letter generator tool
-        cover_letter_tool = [cover_letter_generator]
-        # resume_evaluator_tool = create_resume_evaluator_tool()
+        # cover_letter_tool = [cover_letter_generator]
+        resume_evaluator_tool = create_resume_evaluator_tool()
         # resume evaluator tool
-        resume_evaluator_tool = [resume_evaluator]
-        personal_statement_writer_tool = create_personal_statement_writer_tool()
-        interview_material_tool = [search_user_material]
+        # resume_evaluator_tool = [resume_evaluator]
+        resume_customize_tool = create_resume_customize_writer_tool()
+        # document_customize_tool = [document_customize_writer]
+        personal_statement_customize_tool = create_personal_statement_customize_writer_tool()
+        user_material_tool = [search_user_material]
         # interview mode starter tool
         # interview_tool = self.initiate_interview_tool()
         # file_loader_tool = create_file_loader_tool()
@@ -151,7 +155,7 @@ class ChatController():
         # file_sys_tools[0].description = 'Read file from disk. DO NOT USE THIS TOOL UNLESS YOU ARE TOLD TO DO SO.'
         # file_sys_tools[1].description = 'List files and directories in a specified folder. DO NOT USE THIS TOOL UNLESS YOU ARE TOLD TO DO SO.'
 
-
+        requests_get = load_tools(["requests_get"])
         link_download_tool = [binary_file_downloader_html]
         # general vector store tool
         store = retrieve_faiss_vectorstore("faiss_web_data")
@@ -176,7 +180,7 @@ class ChatController():
         # wiki tool
         wiki_tool = create_wiki_tools()
         # gather all the tools together
-        self.tools =  cover_letter_tool + resume_evaluator_tool + search_tool + wiki_tool + link_download_tool  + general_tool + personal_statement_writer_tool + interview_material_tool
+        self.tools =  cover_letter_tool + resume_evaluator_tool + search_tool + wiki_tool + link_download_tool  + general_tool + resume_customize_tool + personal_statement_customize_tool + cover_letter_customize_tool + user_material_tool  + requests_get
         # + [tool for tool in file_sys_tools]
         tool_names = [tool.name for tool in self.tools]
         print(f"Chat agent tools: {tool_names}")
@@ -192,15 +196,21 @@ class ChatController():
         # self.chat_history=[]
         # initiate prompt template
         # You are provided with information about entities the Human mentioned. If available, they are very important.
-        template = """The following is a friendly conversation between a human and an AI. 
+        template = """Your name is Acai. You are a career AI advisor. The following is a friendly conversation between a human and you. 
 
-        The AI is talkative and provides lots of specific details from its context.
+        You are talkative and provides lots of specific details from its context.
           
-        If the AI does not know the answer to a question, it truthfully says it does not know. 
+        If you do not know the answer to a question,  truthfully say you don't know. 
 
-        Always check the relevant file paths before answering a question.
+        You should only converse with the human on career and education related topics. 
 
-        Relevant file paths: {entities}
+        If human wants to talk about other unrelated subjects, please let them know that you are a career advisor only. 
+
+        You should not answer unrelated questions. 
+
+        Always check the relevant entities below before answering a question. They will help you assist the human better. 
+
+        Relevant entities: {entities}
 
         You are provided with the following tools, use them whenever possible:
 
@@ -224,7 +234,7 @@ class ChatController():
                                             # verbose=True, 
                                             memory=self.chat_memory, 
                                             return_intermediate_steps = True,
-                                            handle_parsing_errors=True,
+                                            handle_parsing_errors="Check your output and make sure it conforms!",
                                             callbacks = [self.handler])
         # modify default agent prompt
         prompt = self.chat_agent.agent.create_prompt(system_message=template, input_variables=['chat_history', 'input', 'entities', 'instruction', 'agent_scratchpad'], tools=self.tools)
@@ -459,7 +469,8 @@ class ChatController():
         try:    
             # BELOW IS USED WITH CONVERSATIONAL RETRIEVAL AGENT (grader_agent and interviewer)
             print([tools.name for tools in self.tools])
-            response = self.chat_agent({"input": user_input, "chat_history":[], "entities": self.entities, "instruction": self.instruction}, callbacks = [callbacks])
+            # response = self.chat_agent({"input": user_input, "chat_history":[], "entities": self.entities, "instruction": self.instruction}, callbacks = [callbacks])
+            response = self.chat_agent({"input": user_input, "chat_history":[], "entities": self.entities, "instruction": self.instruction})
             # convert dict to string for chat output
             response = response.get("output", "sorry, something happened, try again.")
             if (update_instruction):

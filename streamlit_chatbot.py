@@ -16,7 +16,7 @@ from basic_utils import convert_to_txt, read_txt, retrieve_web_content, html_to_
 from openai_api import get_completion
 from openai_api import check_content_safety
 from dotenv import load_dotenv, find_dotenv
-from common_utils import  check_content
+from common_utils import  check_content, evaluate_content, generate_tip_of_the_day
 import asyncio
 import concurrent.futures
 import subprocess
@@ -85,6 +85,24 @@ class Chat():
   
     def _create_chatbot(self):
 
+        styl = f"""
+        <style>
+            .stTextInput {{
+            position: fixed;
+            bottom: 3rem;
+            }}
+        </style>
+        """
+        # styl = f"""
+        # <style>
+        #     .element-container:nth-of-type(1) stTextInput {{
+        #     position: fixed;
+        #     bottom: 3rem;
+        #     }}
+        # </style>
+        # """
+        st.markdown(styl, unsafe_allow_html=True)
+
         with placeholder.container():
 
             if "userid" not in st.session_state:
@@ -95,13 +113,23 @@ class Chat():
             if "basechat" not in st.session_state:
                 new_chat = ChatController(st.session_state.userid)
                 st.session_state["basechat"] = new_chat 
+            if "tipofday" not in st.session_state:
+                tip = generate_tip_of_the_day()
+                st.session_state["tipofday"] = tip
+                st.write(tip)
                 
             try:
                 self.new_chat = st.session_state.basechat
             except AttributeError as e:
                 raise e
         
-
+            try: 
+                temp_dir = temp_path+st.session_state.userid
+                user_dir = save_path+st.session_state.userid
+                os.mkdir(temp_dir)
+                os.mkdir(user_dir)
+            except FileExistsError:
+                pass
 
             # Initialize chat history
             # if "messages" not in st.session_state:
@@ -119,8 +147,8 @@ class Chat():
             SAMPLE_QUESTIONS = {
                 "":"",
                 "help me write a cover letter": "coverletter",
-                "help  evaluate my my resume": "resume",
-                "polish my personal statement": "personalstatement"
+                "help me evaluate my resume": "resume",
+                "help me customize my document": "customize"
             }
 
 
@@ -132,72 +160,76 @@ class Chat():
             ## generated stores AI generated responses
             if 'responses' not in st.session_state:
                 st.session_state['responses'] = list()
-
-            question_container = st.container()
-            results_container = st.container()
+            # if "responses_container" not in st.session_state:
+            #     st.session_state["responses_container"] = st.container()
+            # if "questions_container" not in st.session_state:
+            #     st.session_state["questions_container"] = st.container()
+            # question_container = st.container()
+            # results_container = st.container()
 
 
             # hack to clear text after user input
             if 'questionInput' not in st.session_state:
                 st.session_state.questionInput = ''
-            def submit():
-                st.session_state.questionInput = st.session_state.input
-                st.session_state.input = ''    
+            # def submit():
+            #     st.session_state.questionInput = st.session_state.input
+            #     st.session_state.input = ''    
             # User input
             ## Function for taking user provided prompt as input
-            def get_text():
-                st.text_input("Ask a specific question: ", "", key="input", on_change = submit)
-                return st.session_state.questionInput
+            # def get_text():
+            #     st.text_input("Chat with me: ", "", key="input", on_change = submit)
+            #     return st.session_state.questionInput
             ## Applying the user input box
-            with question_container:
-                user_input = get_text()
-                question_container = st.empty()
-                st.session_state.questionInput=''
+            # with st.session_state.questions_container:
+            #     st.text_input("Chat with me: ", "", key="input", on_change = submit)
+                # user_input = get_text()
+                # st.session_state.questions_container = st.empty()
+                # st.session_state.questionInput=''
 
 
             #Sidebar section
             with st.sidebar:
-                st.title('Quick Navigation 🧸')
+                st.title("""Hi, I'm ACAI 🧸""")
                 st.markdown('''
-                Hi, I'm Acai, a career AI. I can: 
+                I'm a career AI advisor. I can:
                             
-                - improve your resume and personal statement
-                - write a cover letter
-                - conduct a mock interview 
+                - Evaluate your resume
+                - Write a cover letter
+                - Customize your application
                             
-                Fill out the form below. Only your resume is really required, but I can generate better responses if you provide me with more information!
+                Get started by filling out the form below, or just chat with me!
                                             
                 ''')
 
                 add_vertical_space(3)
 
-                # st.markdown('''
-                #     Upload your resume and fill out a few questions for a quick start
-                #             ''')
+  
                 with st.form( key='my_form', clear_on_submit=True):
 
                     # col1, col2= st.columns([5, 5])
 
                     # with col1:
                     #     job = st.text_input(
-                    #         "job title",
+                    #         "job/program",
                     #         "",
                     #         key="job",
                     #     )
                     
                     # with col2:
                     #     company = st.text_input(
-                    #         "company/institution name",
+                    #         "company/institution",
                     #         "",
                     #         key = "company"
                     #     )
 
-                    about_me = st.text_area(label="tell me about yourself", placeholder="For example, you can say,  I want to apply for the MBA program at ABC University, or I want to apply for this job at <link> ", key="about_me")
+                    about_me = st.text_area(label="About", placeholder="""You can say,  I want to apply for the MBA program at ABC University, or I wish to work for XYZ as a customer service representative. 
+                    
+                    If you want to provide any links, such as a link to a job posting, please paste it here. """, key="about_me")
                         
                     add_vertical_space(1)
-                    # link = st.text_input("job posting link", "", key = "link")
+                    # link = st.text_area(label="share your links here", placeholder="Please separate each link by a comma", key = "link")
 
-                    uploaded_files = st.file_uploader(label="Upload your file",
+                    uploaded_files = st.file_uploader(label="Upload your files",
                                                     type=["pdf","odt", "docx","txt", "zip", "pptx"], 
                                                     key = "files",
                                                     accept_multiple_files=True)
@@ -206,68 +238,77 @@ class Chat():
                                             options=sorted(SAMPLE_QUESTIONS.keys()), 
                                             label_visibility="hidden", 
                                             key = "prefilled",
-                                            format_func=lambda x: '---Quick Help---' if x == '' else x)
+                                            format_func=lambda x: '-----Quick Navigation-----' if x == '' else x,
+                                            )
 
 
                     submit_button = st.form_submit_button(label='Submit', on_click=self.form_callback)
 
-                    # if submit_button and uploaded_file is not None and (job is not None or posting is not None): 
-                    if submit_button:
-                        # if job:
-                        #     self.new_chat.update_entities(f"job:{job} \n ###")
-                        # if company:
-                        #     self.new_chat.update_entities(f"company:{company} \n ###")
-                        # if uploaded_files:
-                        #     self.process_file(uploaded_files)
-                        # if link:
-                        #     self.process_link(link)
-                        if prefilled:
-                            res = results_container.container()
-                            streamlit_handler = StreamlitCallbackHandler(
-                                parent_container=res,
-                            )
-                            question = prefilled
-                            response = self.new_chat.askAI(st.session_state.userid, question, callbacks=streamlit_handler)
-                            st.session_state.questions.append(question)
-                            st.session_state.responses.append(response)
+                    # if submit_button:
+                    #     # if job:
+                    #     #     self.new_chat.update_entities(f"job:{job} \n ###")
+                    #     # if company:
+                    #     #     self.new_chat.update_entities(f"company:{company} \n ###")
+                    #     # if uploaded_files:
+                    #     #     self.process_file(uploaded_files)
+                    #     # if link:
+                    #     #     self.process_link(link)
+                    #     if prefilled:
+                    #         # res = st.session_state.responses_container.container()
+                    #         # streamlit_handler = StreamlitCallbackHandler(
+                    #         #     parent_container=res,
+                    #         # )
+                    #         self.question = prefilled
+                    #         response = self.new_chat.askAI(st.session_state.userid, self.question, callbacks=None)
+                    #         st.session_state.questions.append(self.question)
+                    #         st.session_state.responses.append(response)
 
 
                 add_vertical_space(3)
 
-
-
             # Chat section
-            if user_input:
-                res = results_container.container()
-                streamlit_handler = StreamlitCallbackHandler(
-                    parent_container=res,
-                    # max_thought_containers=int(max_thought_containers),
-                    # expand_new_thoughts=expand_new_thoughts,
-                    # collapse_completed_thoughts=collapse_completed_thoughts,
-                )
-                question = user_input
-                response = self.new_chat.askAI(st.session_state.userid, question, callbacks = streamlit_handler)
-                st.session_state.questions.append(question)
-                st.session_state.responses.append(response)
+            # if user_input:
+            # if st.session_state.questionInput:
+            #     # res = st.session_state.responses_container.container()
+            #     # streamlit_handler = StreamlitCallbackHandler(
+            #     #     parent_container=res,
+            #     #     # max_thought_containers=int(max_thought_containers),
+            #     #     # expand_new_thoughts=expand_new_thoughts,
+            #     #     # collapse_completed_thoughts=collapse_completed_thoughts,
+
+            #     # self.question = user_input
+            #     user_input = st.session_state.questionInput
+            #     self.question = self.process_user_input(user_input)
+            #     response = self.new_chat.askAI(st.session_state.userid, self.question, callbacks = None)
+            #     st.session_state.questions.append(self.question)
+            #     st.session_state.responses.append(response)
+            #     st.session_state.questionInput=''
+
             if st.session_state['responses']:
                 for i in range(len(st.session_state['responses'])-1, -1, -1):
-                    message(st.session_state['responses'][i], key=str(i), avatar_style="initials", seed="AI", allow_html=True)
+                    message(st.session_state['responses'][i], key=str(i), avatar_style="initials", seed="ACAI", allow_html=True)
                     message(st.session_state['questions'][i], is_user=True, key=str(i) + '_user',  avatar_style="initials", seed="Yueqi", allow_html=True)
+
+            st.text_input("Chat with me: ", "", key="input", on_change = self.chatbox_callback)
+
+    def chatbox_callback(self):
+
+        """ Processes user input from chatbox and prefilled question selection after submission. """
+          
+        self.question = self.process_user_input(st.session_state.input)
+        if self.question:
+            response = self.new_chat.askAI(st.session_state.userid, self.question, callbacks = None)
+            st.session_state.questions.append(st.session_state.input)
+            st.session_state.responses.append(response)
+        st.session_state.questionInput = st.session_state.input
+        st.session_state.input = ''    
 
 
 
 
     def form_callback(self):
 
-        """ Processes form information during form submission callback. """
-
-        try: 
-            temp_dir = temp_path+st.session_state.userid
-            user_dir = save_path+st.session_state.userid
-            os.mkdir(temp_dir)
-            os.mkdir(user_dir)
-        except FileExistsError:
-            pass
+        """ Processes form information after form submission. """
 
         # try:
         #     job = st.session_state.job
@@ -277,39 +318,76 @@ class Chat():
         # try: 
         #     company = st.session_state.company
         #     self.new_chat.update_entities(f"company:{company} /n ###")
-        except Exception:
-            pass
+        # except Exception:
+        #     pass
         try:
             files = st.session_state.files 
             self.process_file(files)
         except Exception:
             pass
-        # try:
-        #     link = st.session_state.link
-        #     self.process_link(link)
-        # except Exception:
-        #     pass
+        try:
+            link = st.session_state.link
+            self.process_link(link)
+        except Exception:
+            pass
         try:
             about_me = st.session_state.about_me
             self.process_about_me(about_me)
-            # self.new_chat.update_entities(f"about me:{about_me} /n ###")
         except Exception:
             pass
+        if st.session_state.prefilled:
+            st.session_state.input = st.session_state.prefilled
+            self.chatbox_callback()
+        else:
+        # passes the previous user question to the agent one more time after user uploads form
+            try:
+                print(f"QUESTION INPUT: {st.session_state.questionInput}")
+                # res = st.session_state.responses_container.container()
+                # streamlit_handler = StreamlitCallbackHandler(
+                #     parent_container=res,
+                # )
+                response = self.new_chat.askAI(st.session_state.userid, st.session_state.questionInput, callbacks=None)
+                st.session_state.questions.append(st.session_state.questionInput)
+                st.session_state.responses.append(response)
+            # 'Chat' object has no attribute 'question': exception occurs when user has not asked a question, in this case, pass
+            except AttributeError:
+                pass
+                
+    def process_user_input(self, user_input: str) -> str:
 
-    
+        """ Checks the safety of user input and processes any links in the input. """
 
-    def process_about_me(self, about_me: Any) -> None:
+        if check_content_safety(text_str=user_input):
+            urls = re.findall(r'(https?://\S+)', user_input)
+            print(urls)
+            if urls:
+                for url in urls:
+                    self.process_link(url)
+            return user_input
+        else: return ""
+
+
+
+
+    def process_about_me(self, about_me: str) -> None:
     
-        """ Processes user's about me text input, including any links in the description. """
-        
-        about_me_summary = get_completion(f"Summarize the following about me. Do not include any links in your summary: {about_me}")
+        """ Processes user's about me input for content type and processes any links in the description. """
+
+        content_type = """a job or study related user request. """
+        user_request = evaluate_content(about_me, content_type)
+        about_me_summary = get_completion(f"""Summarize the following about me, if provided, and ignore all the links: {about_me}. """)
         self.new_chat.update_entities(f"about me:{about_me_summary} /n ###")
+        if user_request:
+            self.question = about_me
         # process any links in the about me
         urls = re.findall(r'(https?://\S+)', about_me)
         print(urls)
         if urls:
             for url in urls:
                 self.process_link(url)
+
+
+
 
     def process_file(self, uploaded_files: Any) -> None:
 
@@ -330,10 +408,9 @@ class Chat():
                 if content_type != "other":
                     entity = f"""{content_type} file: {end_path} /n ###"""
                     self.new_chat.update_entities(entity)
-                else:
+                if content_type=="work or study related information" :
                     # update user material, to be used for "search_user_material" tool
                     self.update_vectorstore(content_topics, end_path)
-                # self.add_to_chat(content_type, content_topics, end_path)
             else:
                 st.write("File content unsafe. Please try another file.")
                 os.remove(end_path)
@@ -349,12 +426,12 @@ class Chat():
             content_safe, content_type, content_topics = check_content(end_path)
             if content_safe:
                 if content_type=="browser error":
-                    st.write("Link content cannot be parsed, please try another link.")
+                    st.write("Link content cannot be parsed. Please try another link, paste the link content, or save the content as file.")
                 elif content_type!="other":
                     entity = f"""{content_type} file: {end_path} /n ###"""
                     self.new_chat.update_entities(entity)
-                    # self.add_to_chat(content_type, content_topics, end_path)
-                else:
+                if content_type=="work or study related information" :
+                    # update user material, to be used for "search_user_material" tool
                     self.update_vectorstore(content_topics, end_path)
             else:
                 st.write("Link content unsafe. Please try another link.")

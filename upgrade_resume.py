@@ -152,53 +152,54 @@ def evaluate_resume(about_me="", resume_file = "", posting_path="") -> str:
 def improve_resume_fields(generated_response: Dict[str, str], field: str, field_content: str, tools: List[Tool], document_dict: Dict[str, str]) -> None:
 
     print(f"CURRENT FIELD IS: {field}")
-    job = generated_response.get("job", "")
-    company_description = generated_response.get("company description", "")
-    job_specification = generated_response.get("job specification", "")
-    job_description = generated_response.get("job description", "")
-    highest_education_level = generated_response.get("highest education level", "")
-    work_experience_level = generated_response.get("work experience level", "")
-    # education_level = generated_response.get("education", "")
+    if field_content!="":
+        job = generated_response.get("job", "")
+        company_description = generated_response.get("company description", "")
+        job_specification = generated_response.get("job specification", "")
+        job_description = generated_response.get("job description", "")
+        highest_education_level = generated_response.get("highest education level", "")
+        work_experience_level = generated_response.get("work experience level", "")
+        # education_level = generated_response.get("education", "")
 
-    advice_query =  f"""how to make resume field {field} ATS-friendly? No formatting advices."""
-    advice1 = retrieve_from_db(advice_query)
-    advice_query = f"""what to include in {field} of resume for {highest_education_level} and {work_experience_level} as a {job}"""
-    advice2 = retrieve_from_db(advice_query)
+        advice_query =  f"""how to make resume field {field} ATS-friendly? No formatting advices."""
+        advice1 = retrieve_from_db(advice_query)
+        advice_query = f"""what to include in {field} of resume for {highest_education_level} and {work_experience_level} as a {job}"""
+        advice2 = retrieve_from_db(advice_query)
 
-    query_evaluation = f"""  You are an expert resume field advisor. 
+        query_evaluation = f"""  You are an expert resume field advisor. 
 
-     Generate a list of missing, irrelevant, and not ATS-friendly information in the resume field content. 
-       
-     Remember to use either job specification or general job description as your guideline along with the expert advice.
+        Generate a list of missing, irrelevant, and not ATS-friendly information in the resume field content. 
+        
+        Remember to use either job specification or general job description as your guideline along with the expert advice.
 
-      field name: {field}
+        field name: {field}
 
-      field content: {field_content}\n
+        field content: {field_content}\n
 
-      job specification: {job_specification}\n
+        job specification: {job_specification}\n
 
-      general job description: {job_description} \n
+        general job description: {job_description} \n
 
-      expert advice: {advice2} + "\n" + {advice1}
+        expert advice: {advice2} + "\n" + {advice1}
 
-      Your answer should be detailed and only from the field content. Please also provide your reasoning too as in the following examples:
+        Your answer should be detailed and only from the field content. Please also provide your reasoning too as in the following examples:
 
-            Missing or Irrelevant Field Content for Work Experience:
+                Missing or Irrelevant Field Content for Work Experience:
 
-            1. Quantative achievement is missing: no measurable metrics or KPIs to highlight any past achievements. 
+                1. Quantative achievement is missing: no measurable metrics or KPIs to highlight any past achievements. 
 
-            2. Front desk receptionist is irrelevant: Experience as a front desk receptionist is not directly related to the role of a data analyst
+                2. Front desk receptionist is irrelevant: Experience as a front desk receptionist is not directly related to the role of a data analyst
 
-            3. Date formatting is not ATS-friendly: an ATS-friendly way to write dates is for example, 01/2001 or January 2001
-    
-      Please ignore all formatting advices as formatting should not be part of the assessment.
+                3. Date formatting is not ATS-friendly: an ATS-friendly way to write dates is for example, 01/2001 or January 2001
+        
+        Please ignore all formatting advices as formatting should not be part of the assessment.
 
-      Use your tools if you need to reference other resume.
+        Use your tools if you need to reference other resume.
 
-     """
-    evaluation = generate_multifunction_response(query_evaluation, tools)
-    document_dict.update({f"{field} evaluation":evaluation})
-    
+        """
+        evaluation = generate_multifunction_response(query_evaluation, tools)
+        document_dict.update({f"{field} evaluation":evaluation})
+        
 
     # document.add_heading(f"{field}", level=1)
     # document.add_paragraph(evaluation)
@@ -327,7 +328,7 @@ def improve_resume_fields(generated_response: Dict[str, str], field: str, field_
 @tool(return_direct=True)
 def resume_evaluator(json_request: str)-> str:
 
-    """Helps to evaluate a resume. Use this tool more than any other tool when user asks to evaluate, review, help with a resume. 
+    """Helps to evaluate a resume. Use this tool more than any other tool when user asks to evaluate or review a resume. 
 
     Input should be  a single string strictly in the following JSON format:  '{{"about me":"<about me>", "resume file":"<resume file>", "job post link":"<job post link>"}}' \n
 
@@ -394,20 +395,16 @@ def processing_resume(json_request: str) -> str:
     else:
       # may need to clean up the path first
         resume_file = args["resume file"]
-    if ("job" not in args or args["job"] == "" or args["job"]=="<job>"):
-        job = ""
+    if ("about me" not in args or args["about me"] == "" or args["about me"]=="<about me>"):
+        about_me = ""
     else:
-       job = args["job"]
-    if ("company" not in args or args["company"] == "" or args["company"]=="<company>"):
-        company = ""
-    else:
-        company = args["company"]
+        about_me = args["about me"]
     if ("job post link" not in args or args["job post link"]=="" or args["job post link"]=="<job post link>"):
         posting_path = ""
     else:
         posting_path = args["job post link"]
-
-    return evaluate_resume(my_job_title=job, company=company, resume_file=resume_file, posting_path=posting_path)
+        
+    return evaluate_resume(about_me=about_me, resume_file=resume_file, posting_path=posting_path)
 
 
 def create_resume_evaluator_tool() -> List[Tool]:
@@ -417,7 +414,7 @@ def create_resume_evaluator_tool() -> List[Tool]:
     Then it calls the processing_resume function to process the JSON data. """
 
     name = "resume_evaluator"
-    parameters = '{{"job":"<job>", "company":"<company>", "resume file":"<resume file>", "job post link":"<job post link>"}}'
+    parameters = '{{"about me":"<about me>", "resume file":"<resume file>", "job post link":"<job post link>"}}' 
     output = '{{"file_path":"<file_path>"}}'
     description = f"""Helps to evaluate a resume. Use this tool more than any other tool when user asks to evaluate, review, help with a resume. 
     Input should be a single string strictly in the following JSON format: {parameters} \n

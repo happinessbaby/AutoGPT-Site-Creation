@@ -51,6 +51,7 @@ from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ct
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import queue
 import re
+import base64
 
 
 
@@ -84,8 +85,10 @@ class Interview():
     # placeholder = st.empty()
     q = queue.Queue()
     ctx = get_script_run_ctx()
+    
 
     def __init__(self):
+        self.set_png_as_page_bg('background.png')
         self._create_interviewbot()
         # self.thread_run()
         # thread = threading.Thread(target=self._create_interviewbot)
@@ -93,6 +96,28 @@ class Interview():
         # thread.start()
 
 
+    @st.cache_data()
+    def set_png_as_page_bg(_self, png_file):
+
+        """
+        function to display png as bg
+        ----------
+        png_file: png -> the background image in local folder
+        """
+
+        main_bg_ext = "png"
+        
+        st.markdown(
+         f"""
+         <style>
+         .stApp {{
+             background: url(data:image/{main_bg_ext};base64,{base64.b64encode(open(png_file, "rb").read()).decode()});
+             background-size: cover
+         }}
+         </style>
+         """,
+         unsafe_allow_html=True
+     )
 
 
     # def thread_run(self):
@@ -107,6 +132,7 @@ class Interview():
 
 
     def _create_interviewbot(self):
+
 
 
         with placeholder.container():
@@ -197,8 +223,8 @@ class Interview():
                         additional_prompt_info = ""
                     new_interview = InterviewController(st.session_state.userid, additional_prompt_info)
                     st.session_state["baseinterview"] = new_interview     
-                    welcome_msg = "Welcome to your mock interview session. I will begin conducting the interview now. Please review the sidebar for instructions. "
-                    message(welcome_msg, avatar_style="initials", seed="AI_Interviewer", allow_html=True)
+                    # welcome_msg = "Welcome to your mock interview session. I will begin conducting the interview now. Please review the sidebar for instructions. "
+                    # message(welcome_msg, avatar_style="initials", seed="AI_Interviewer", allow_html=True)
 
                 try:
                     self.new_interview = st.session_state.baseinterview  
@@ -370,56 +396,102 @@ class Interview():
 
         """ Creates text only interview session. """
 
+        # stop the keyboard listener
         try:
             st.session_state.listener.stop()
         except Exception:
             pass
+
+
+        styl = f"""
+        <style>
+            .stTextInput {{
+            position: fixed;
+            bottom: 3rem;
+            }}
+        </style>
+        """
+        st.markdown(styl, unsafe_allow_html=True)
     
         with placeholder.container():
 
-            if 'interview_responses' not in st.session_state:
-                st.session_state['interview_responses'] = list()
-            if 'interview_questions' not in st.session_state:
-                st.session_state['interview_questions'] = list()
-            question_container = st.container()
-            response_container = st.container()
+            # if 'interview_responses' not in st.session_state:
+            #     st.session_state['interview_responses'] = list()
+            # if 'interview_questions' not in st.session_state:
+            #     st.session_state['interview_questions'] = list()
+
+            if 'interview_response' not in st.session_state:
+                st.session_state['interview_response'] = ""
+            if 'interview_question' not in st.session_state:
+                st.session_state['interview_question'] = ""
+
+            col1, col2= st.columns(2)
+            # with col1:
+            #     if "question_container" not in st.session_state:
+            #         st.session_state["question_container"] = st.container()
+            # with col2:
+            #     if "response_container" not in st.session_state:
+            #         st.session_state["response_container"] = st.container()
+            # response_container = st.container()
 
             if 'responseInput' not in st.session_state:
                 st.session_state.responseInput = ''
-            def submit():
-                st.session_state.responseInput = st.session_state.interview_input
-                st.session_state.interview_input = ''    
-            # User input
-            ## Function for taking user provided prompt as input
-            def get_text():
-                st.text_input("Your response: ", "", key="interview_input", on_change = submit)
-                return st.session_state.responseInput
-            ## Applying the user input box
-            with response_container:
-                user_input = get_text()
-                response_container = st.empty()
-                st.session_state.responseInput='' 
+            # def submit():
+            #     st.session_state.responseInput = st.session_state.interview_input
+            #     st.session_state.interview_input = ''    
+            # # User input
+            # ## Function for taking user provided prompt as input
+            # def get_text():
+            #     st.text_input("Your response: ", "", key="interview_input", on_change = submit)
+            #     return st.session_state.responseInput
+            # ## Applying the user input box
+            # with response_container:
+            #     user_input = get_text()
+            #     response_container = st.empty()
+            #     st.session_state.responseInput='' 
 
 
-            if user_input:
+            # if user_input:
 
-                res = question_container.container()
-                streamlit_handler = StreamlitCallbackHandler(
-                    parent_container=res,
-                    # max_thought_containers=int(max_thought_containers),
-                    # expand_new_thoughts=expand_new_thoughts,
-                    # collapse_completed_thoughts=collapse_completed_thoughts,
-                )
-                user_answer = user_input
-                # answer = chat_agent.run(mrkl_input, callbacks=[streamlit_handler])
-                ai_question = self.new_interview.askAI(user_answer, callbacks = streamlit_handler)
-                st.session_state.interview_questions.append(ai_question)
-                st.session_state.interview_responses.append(user_answer)
-                if st.session_state['interview_responses']:
-                    for i in range(len(st.session_state['interview_responses'])-1, -1, -1):
-                        message(st.session_state['interview_questions'][i], key=str(i), avatar_style="initials", seed="AI_Interviewer", allow_html=True)
-                
-                        message(st.session_state['interview_responses'][i], is_user=True, key=str(i) + '_user',  avatar_style="initials", seed="Yueqi", allow_html=True)
+            #     # res = question_container.container()
+            #     # streamlit_handler = StreamlitCallbackHandler(
+            #     #     parent_container=res,
+            #     #     # max_thought_containers=int(max_thought_containers),
+            #     #     # expand_new_thoughts=expand_new_thoughts,
+            #     #     # collapse_completed_thoughts=collapse_completed_thoughts,
+            #     # )
+            #     user_answer = user_input
+            #     # answer = chat_agent.run(mrkl_input, callbacks=[streamlit_handler])
+            #     ai_question = self.new_interview.askAI(user_answer, callbacks = None)
+            #     st.session_state.interview_questions.append(ai_question)
+            #     st.session_state.interview_responses.append(user_answer)
+            # if st.session_state['interview_responses']:
+            #     for i in range(len(st.session_state['interview_responses'])):
+            #         with col1:
+            #             message(st.session_state['interview_questions'][i], key=str(i), avatar_style="initials", seed="AI_Interviewer", allow_html=True)
+            #         with col2:
+            #             message(st.session_state['interview_responses'][i], is_user=True, key=str(i) + '_user',  avatar_style="initials", seed="Yueqi", allow_html=True)
+            if st.session_state["interview_response"]:
+                with col1:
+                    message(st.session_state.interview_question)
+                with col2:
+                    message(st.session_state.interview_response)
+
+            st.text_input("Your response: ", "", key="interview_input", on_change = self.chatbox_callback)
+
+
+    def chatbox_callback(self):
+
+        """ Processes user input from chatbox and prefilled question selection after submission. """
+          
+        response = self.new_interview.askAI(st.session_state.interview_input, callbacks = None)
+        # st.session_state.interview_responses.append(st.session_state.interview_input)
+        # st.session_state.interview_questions.append(response)
+        st.session_state.interview_response = st.session_state.interview_input
+        st.session_state.interview_question = response
+        st.session_state.responseInput = st.session_state.interview_input
+        st.session_state.interview_input = ''    
+
 
         
 
@@ -477,7 +549,8 @@ class Interview():
 
         """ Processes user's about interview text input, including any links in the description."""
         
-        about_interview_summary = get_completion(f"Summarize the following description. Do not include any links in your summary: {about_interview}")
+        about_interview_summary = get_completion(f"""Summarize the following description, if provided, and ignore all the links: {about_interview} \n
+            If you are unable to summarize, ouput -1 only. Remember, ignore any links and output -1 if you can't summarize.""")
         if "about" not in st.session_state:
             st.session_state["about"] = about_interview_summary
         # process any links in the about me
