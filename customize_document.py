@@ -127,22 +127,31 @@ def customize_resume(resume="", about_me="", posting_path=""):
     about_me = generated_info_dict.get("about me", "")
     company_description = generated_info_dict.get("company description", "")
     field_names = generated_info_dict.get("field names", "")
+    company = generated_info_dict.get("company", "")
+    job = generated_info_dict.get("job", "")
+    institution = generated_info_dict.get("instition", "")
+    program = generated_info_dict.get("program", "")
+    
 
-    query = f""" Your task is to help Human revise and polish a resume. You are provided with a resume and various pieces of information, if available, that you may use.
-    Foremost important is Human's about me that you should always keep in mind.
-    about me: {about_me}
-    resume: {resume_content}
-    job desciption: {job_description}
-    job specification: {job_specification}
-    company description: {company_description}
+    for field in field_names:
+        field_content = generated_info_dict.get(field, "")
+        if field_content!="":
+            
+            query = f""" Your task is to help Human revise parts of a resume. You are provided with a part of a resume and various pieces of information, if available, that you may use.
+            The applicant is applying for job {job} at company {company}.. Please revise the content for resume field {field} so that it suits the purpose of applying to this job and this company, if available.
+            content: {field_content}
 
-    please consider blending these information into the existing resume. 
-    Use the same tone and style when inserting information.
-    Correct grammar and spelling mistakes. 
+            job desciption: {job_description}
+            job specification: {job_specification}
+            company description: {company_description}
 
-    """
-    tools = create_search_tools("google", 3)
-    response = generate_multifunction_response(query, tools)
+            please consider blending these information into the existing resume field {field}. 
+            Use the same tone and style when inserting information, and keep in mind you the resume field is {field}. 
+            Correct grammar and spelling mistakes. 
+
+            """
+            tools = create_search_tools("google", 3)
+            response = generate_multifunction_response(query, tools)
     return response
 
 
@@ -302,6 +311,6 @@ if __name__=="__main__":
     posting_path = "./uploads/link/software05.txt"
     # customize_personal_statement(about_me="i want to apply for a MSBA program at university of louisville", personal_statement = personal_statement)
     cover_letter = "cv01.txt"
-    customize_cover_letter(about_me = "", cover_letter=cover_letter, resume=resume, posting_path=posting_path)
-    # customize_resume (about_me="", resume=resume, posting_path=posting_path)
+    # customize_cover_letter(about_me = "", cover_letter=cover_letter, resume=resume, posting_path=posting_path)
+    customize_resume (about_me="", resume=resume, posting_path=posting_path)
         

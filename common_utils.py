@@ -605,6 +605,29 @@ def create_sample_tools(related_samples: List[str], sample_type: str,) -> Union[
     print(f"Successfully created {sample_type} tools")
     return tools, tool_names
 
+def find_positive_qualities(content: str, llm=ChatOpenAI(model="gpt-3.5-turbo", temperature=0.0)) -> str:
+
+    """ Find positive qualities of the applicant in the provided content, such as resume, cover letter, etc. """
+
+    query = f""" Your task is to extract the positive qualities of a job applicant given the provided document. 
+    
+            document: {content}
+
+            Do not focus on hard skills or actual achievements. Rather, focus on soft skills, personality traits, special needs that the applicant may have.
+
+            """
+    response = get_completion(query)
+    print(f"Successfully extracted positive qualities: {response}")
+    return response
+
+def generate_tip_of_the_day() -> str:
+
+    """ Generates a tip of the day and an affirming message. """
+
+    query = """Generate a helpful tip of the day message or an affirming message for job seekers. Make it specific. Output the message only. """
+    response = retrieve_from_db(query)
+    return response
+    
 
 # one of the most important functions
 def get_generated_responses(resume_content="",about_me="", posting_path=""): 

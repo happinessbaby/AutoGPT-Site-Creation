@@ -16,7 +16,7 @@ from basic_utils import convert_to_txt, read_txt, retrieve_web_content, html_to_
 from openai_api import get_completion
 from openai_api import check_content_safety
 from dotenv import load_dotenv, find_dotenv
-from common_utils import  check_content, evaluate_content
+from common_utils import  check_content, evaluate_content, generate_tip_of_the_day
 import asyncio
 import concurrent.futures
 import subprocess
@@ -93,6 +93,14 @@ class Chat():
             }}
         </style>
         """
+        # styl = f"""
+        # <style>
+        #     .element-container:nth-of-type(1) stTextInput {{
+        #     position: fixed;
+        #     bottom: 3rem;
+        #     }}
+        # </style>
+        # """
         st.markdown(styl, unsafe_allow_html=True)
 
         with placeholder.container():
@@ -105,6 +113,10 @@ class Chat():
             if "basechat" not in st.session_state:
                 new_chat = ChatController(st.session_state.userid)
                 st.session_state["basechat"] = new_chat 
+            if "tipofday" not in st.session_state:
+                tip = generate_tip_of_the_day()
+                st.session_state["tipofday"] = tip
+                st.write(tip)
                 
             try:
                 self.new_chat = st.session_state.basechat
@@ -183,7 +195,7 @@ class Chat():
                             
                 - Evaluate your resume
                 - Write a cover letter
-                - Customize your documents
+                - Customize your application
                             
                 Get started by filling out the form below, or just chat with me!
                                             
@@ -198,22 +210,24 @@ class Chat():
 
                     # with col1:
                     #     job = st.text_input(
-                    #         "job title",
+                    #         "job/program",
                     #         "",
                     #         key="job",
                     #     )
                     
                     # with col2:
                     #     company = st.text_input(
-                    #         "company/institution name",
+                    #         "company/institution",
                     #         "",
                     #         key = "company"
                     #     )
 
-                    about_me = st.text_area(label="tell me about yourself", placeholder="For example, you can say,  I want to apply for the MBA program at ABC University, or I wish to work for XYZ as a customer service representative", key="about_me")
+                    about_me = st.text_area(label="About", placeholder="""You can say,  I want to apply for the MBA program at ABC University, or I wish to work for XYZ as a customer service representative. 
+                    
+                    If you want to provide any links, such as a link to a job posting, please paste it here. """, key="about_me")
                         
                     add_vertical_space(1)
-                    link = st.text_area(label="share your links here", placeholder="Please separate each link by a comma", key = "link")
+                    # link = st.text_area(label="share your links here", placeholder="Please separate each link by a comma", key = "link")
 
                     uploaded_files = st.file_uploader(label="Upload your files",
                                                     type=["pdf","odt", "docx","txt", "zip", "pptx"], 
