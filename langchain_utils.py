@@ -60,6 +60,7 @@ from basic_utils import read_txt
 from json import JSONDecodeError
 from langchain.document_transformers import LongContextReorder
 from langchain.retrievers import BM25Retriever, EnsembleRetriever
+from langchain import LLMMathChain
 
 
 
@@ -123,17 +124,18 @@ def split_doc(path='./web_data/', path_type='dir', splitter_type = "recursive", 
     docs = text_splitter.split_documents(documents)
     return docs
 
-def split_doc_file_size(path: str, splitter_type = "recursive", chunk_size=4000) -> List[Document]:
+def split_doc_file_size(path: str, splitter_type = "tiktoken", chunk_size=2000) -> List[Document]:
     
     bytes = os.path.getsize(path)
     docs: List[Document] = []
     # if file is small, don't split
-    if bytes<4000:
+    # 1 byte ~= 1 character, and 1 token ~= 4 characters, so 1 byte ~= 0.25 tokens. Max length is about 4000 tokens for gpt3.5, so if file is less than 15000 bytes, don't need to split. 
+    if bytes<15000:
         docs.extend([Document(
             page_content = read_txt(path)
         )])
     else:
-        docs.extend(split_doc(path, "file", chunk_size=chunk_size))
+        docs.extend(split_doc(path, "file", chunk_size=chunk_size, splitter_type=splitter_type))
     return docs
 
 
@@ -198,6 +200,19 @@ def create_wiki_tools() -> List[Tool]:
     ]
     return tools
 
+def create_math_tools(llm=OpenAI()):
+
+    llm_math_chain = LLMMathChain.from_llm(llm=llm, verbose=True)
+
+    tools = [
+    Tool(
+        name="Calculator",
+        func=llm_math_chain.run,
+        description="useful for when you need to answer questions that needs simple math"
+    ),
+    ]
+
+
 def create_qa_tools(qa_chain):
     tools = [
         Tool(
@@ -210,6 +225,7 @@ def create_qa_tools(qa_chain):
         ),
     ]
     return tools
+
 
 
 def create_search_tools(name: str, top_n: int) -> List[Tool]:
@@ -414,7 +430,7 @@ def create_elastic_knn():
     
     return knn_search
 
-def create_summary_chain(path: str, prompt_template: str, chain_type = "stuff",  llm=OpenAI()) -> str:
+def create_summary_chain(path: str, prompt_template: str, chain_type = "stuff", chunk_size=2000,  llm=OpenAI()) -> str:
 
     """ See summarization chain: https://python.langchain.com/docs/use_cases/summarization
     
@@ -435,7 +451,7 @@ def create_summary_chain(path: str, prompt_template: str, chain_type = "stuff", 
         a summary of the give file
     
     """
-    docs = split_doc_file_size(path)
+    docs = split_doc_file_size(path, chunk_size=chunk_size)
     PROMPT = PromptTemplate(template=prompt_template, input_variables=["text"])
     chain = load_summarize_chain(llm, chain_type="stuff", prompt=PROMPT)
     response = chain.run(docs)
@@ -580,7 +596,7 @@ def generate_multifunction_response(query: str, tools: List[Tool], early_stoppin
             agent=AgentType.OPENAI_MULTI_FUNCTIONS, 
             max_iterations=max_iter,
             early_stopping_method="force",
-            # verbose=True
+            verbose=True
         )
     else:
         agent = initialize_agent(

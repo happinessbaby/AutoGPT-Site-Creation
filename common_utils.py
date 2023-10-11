@@ -39,7 +39,6 @@ from langchain.document_transformers import (
     LongContextReorder,
      DoctranPropertyExtractor,
 )
-from langchain import LLMMathChain
 from langchain.memory import SimpleMemory
 from langchain.chains import SequentialChain
 
@@ -72,6 +71,30 @@ delimiter3 = '---'
 delimiter4 = '////'
 feast_repo_path = "/home/tebblespc/Auto-GPT/autogpt/auto_gpt_workspace/my_feature_repo/feature_repo/"
 store = FeatureStore(repo_path = feast_repo_path)
+
+
+def find_positive_qualities(content: str, llm=ChatOpenAI(model="gpt-3.5-turbo", temperature=0.0)) -> str:
+
+    """ Find positive qualities of the applicant in the provided content, such as resume, cover letter, etc. """
+
+    query = f""" Your task is to extract the positive qualities of a job applicant given the provided document. 
+    
+            document: {content}
+
+            Do not focus on hard skills or actual achievements. Rather, focus on soft skills, personality traits, special needs that the applicant may have.
+
+            """
+    response = get_completion(query)
+    print(f"Successfully extracted positive qualities: {response}")
+    return response
+
+def generate_tip_of_the_day() -> str:
+
+    """ Generates a tip of the day and an affirming message. """
+
+    query = """Generate a helpful tip of the day message for job seekers. Make it specific. Output the message only. """
+    response = retrieve_from_db(query)
+    return response
 
 
 def extract_personal_information(resume: str,  llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> Any:
@@ -251,6 +274,33 @@ def extract_job_title(resume: str) -> str:
     print(f"Successfull extracted job title: {response}")
     return response
 
+def extract_posting_keywords(posting_content:str, llm = OpenAI()) -> List:
+
+    """ Extract the ATS keywords and pieces of job description verbatim out of job posting. """
+
+    query = """Extract all the ATS keywords and phrases, job specific description with regard to skills, responsibilities, roles, requirements from the job posting below.
+
+    Ignore job benefits and salary. 
+
+    Please output everything verbatim. 
+
+    job posting: {job_posting}
+
+    {format_instructions}
+    """
+    output_parser = CommaSeparatedListOutputParser()
+    format_instructions = output_parser.get_format_instructions()
+    prompt = PromptTemplate(
+        template=query,
+        input_variables=["job_posting"],
+        partial_variables={"format_instructions": format_instructions}
+    )
+    chain = LLMChain(llm=llm, prompt=prompt, output_key="ats")
+    response = chain.run({"job_posting": posting_content})
+    print(f"Successfully extracted ATS keywords from posting: {response} ")
+    return response
+
+
 
 # class ResumeField(BaseModel):
 #     field_name: str=Field(description="field name")
@@ -368,10 +418,7 @@ def extract_resume_fields(resume: str,  llm=OpenAI(temperature=0,  max_tokens=20
 
 
 
-
-# This is actually a hard one for LLM to get
-#TODO: math chain date calculation errors out because of formatting
-def extract_work_experience_level(content: str, job_title:str, llm=OpenAI()) -> str:
+def extract_work_experience_level(content: str, job_title:str,  llm=ChatOpenAI(model="gpt-4", temperature=0, cache = False)) -> str:
 
     """ Extracts work experience level of a given job title from work experience.
 
@@ -387,59 +434,76 @@ def extract_work_experience_level(content: str, job_title:str, llm=OpenAI()) -> 
 
     Returns:
 
-        outputs 'entry level', 'junior level', 'mid-level', 'senior or executive level', or 'technical level or other'
+        outputs  "no experience", 'entry level', 'junior level', 'mid level', or 'senior level'
     """
-    llm_math_chain = LLMMathChain.from_llm(llm=llm, verbose=True)
+  
+    dates_query = """ Your task is to extract and output the years of work or volunteer experience of a resume.
+            
+              Search for all work or volunteer experience in the resume similar to that of {job_title}. 
 
-    tools = [
-    Tool(
-        name="Calculator",
-        func=llm_math_chain.run,
-        description="useful for when you need to answer questions that needs simple math"
-    ),
-    ]
+              If the work experience is not in the same field of work as {job_title}, do not output the dates of that period.
 
-    query = f"""
-		You are an assistant that evaluates and categorizes work experience content with respect with to {job_title} into the follow categories:
+              Ignore all the months and days and output the years only. Substitute present or current year with 2023. 
+              
+              For example, format each as such:
 
-        ["entry level", "junior level", "mid-level", "senior or executive level", "technical level or other"] \n
+              example: 2014-2016, 2018-2023
+              example: 2012-2015, 2015-2022
 
-        work experience content: {content}
+              If there are no experience, output 0.
 
-        If content contains work experience related to {job_title}, incorporate these experiences into evalution. 
+              Remember, extract the work or volunteer years of experience only. Ignore education and other stuff. 
 
-        Categorize based on the number fo years: 
+            resume: {content}
 
-        If content does not contain any experiences related to {job_title}, mark as entry level.
+            {format_instructions}
+            """
+    output_parser = CommaSeparatedListOutputParser()
+    format_instructions = output_parser.get_format_instructions()
+    dates_prompt = PromptTemplate(
+        template=dates_query,
+        input_variables=["job_title", "content"],
+        partial_variables={"format_instructions": format_instructions}
+    )
+    dates_chain = LLMChain(llm=llm, prompt=dates_prompt, output_key="dates")
+    response = dates_chain.run({"job_title":job_title, "content":content})
+    dates_list = output_parser.parse(response)
+    print(dates_list)
 
-        For 1 to 2 years of work experience, mark as junionr level.
+    span=0
+    for dates in dates_list:
+        try:
+            span += int(dates[5:])-int(dates[:4])
+        except Exception:
+            pass
 
-        For 2-5 years of work experience, mark as mid-level.
+    if span==0:
+        work_experience = "no experience"
+    elif 1<=span<3:
+        work_experience = "entry level"
+    elif 3<=span<6:
+        work_experience = "junior level"
+    elif 5<=span<10:
+        work_experience =  "mid level"
+    elif span>=10:
+        work_experience = "senior level"
 
-        For 5-10 years of work experience, mark as senior or executive level.
-
-        Today's date is {date.today()}. Please make sure all dates are formatted correctly if you are to use the Calculator tool. 
-
-		Output the category only.
-		"""
-    
-
-    
-    # planner = load_chat_planner(llm)
-    # executor = load_agent_executor(llm, tools, verbose=True)
-    # agent = PlanAndExecute(planner=planner, executor=executor, verbose=True)
-    agent = initialize_agent(tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=True)
-    try: 
-        response = agent.run(query)
-    except Exception:
-        response = ""
-    # response = generate_multifunction_response(query, tools, max_iter=5)
-    print(f"Sucessfully retriever work experience level: {response}")
-    return response
+    print(f"Successfully extracted work experience level: {work_experience}")
+    return work_experience
 
 
-def extract_link_info():
-    return None
+#TODO
+def evaluate_resume_type(resume_content:str, work_experience:str) -> str:
+
+    """ Evaluates if applicant benefits most with a chronological resume or functional resume. """   
+
+    if work_experience=="no experience" or work_experience=="entry level":
+        type =  "functional"
+    else:
+        type = "chronological"
+
+
+
 
 
 def get_web_resources(query: str, llm = ChatOpenAI(temperature=0.8, model="gpt-3.5-turbo-0613", cache=False)) -> str:
@@ -605,29 +669,9 @@ def create_sample_tools(related_samples: List[str], sample_type: str,) -> Union[
     print(f"Successfully created {sample_type} tools")
     return tools, tool_names
 
-def find_positive_qualities(content: str, llm=ChatOpenAI(model="gpt-3.5-turbo", temperature=0.0)) -> str:
 
-    """ Find positive qualities of the applicant in the provided content, such as resume, cover letter, etc. """
 
-    query = f""" Your task is to extract the positive qualities of a job applicant given the provided document. 
-    
-            document: {content}
 
-            Do not focus on hard skills or actual achievements. Rather, focus on soft skills, personality traits, special needs that the applicant may have.
-
-            """
-    response = get_completion(query)
-    print(f"Successfully extracted positive qualities: {response}")
-    return response
-
-def generate_tip_of_the_day() -> str:
-
-    """ Generates a tip of the day and an affirming message. """
-
-    query = """Generate a helpful tip of the day message or an affirming message for job seekers. Make it specific. Output the message only. """
-    response = retrieve_from_db(query)
-    return response
-    
 
 # one of the most important functions
 def get_generated_responses(resume_content="",about_me="", posting_path=""): 
@@ -754,13 +798,12 @@ def search_user_material(json_request: str) -> str:
     if vs_path!="" and query!="":
         # subquery_relevancy = "how to determine what's relevant in resume"
         # option 1: compression retriever
-        # retriever = create_compression_retriever()
+        retriever = create_compression_retriever()
         # option 2: ensemble retriever
         # retriever = create_ensemble_retriever(split_doc())
         # option 3: vector store retriever
-        # db = retrieve_redis_vectorstore("index_web_advice")
-        db = retrieve_faiss_vectorstore(vs_path)
-        retriever = db.as_retriever(search_type="similarity_score_threshold", search_kwargs={"score_threshold": .5, "k":1})
+        # db = retrieve_faiss_vectorstore(vs_path)
+        # retriever = db.as_retriever(search_type="similarity_score_threshold", search_kwargs={"score_threshold": .5, "k":1})
         docs = retriever.get_relevant_documents(query)
         # reordered_docs = reorder_docs(retriever.get_relevant_documents(subquery_relevancy))
         texts = [doc.page_content for doc in docs]
@@ -844,12 +887,52 @@ def debug_error(self, error_message: str) -> str:
 
     return "shorten your prompt"
 
+def shorten_content(file_path: str, file_type: str) -> str:
+
+    """ Shortens files that exceeds max token count. 
+    
+    Args:
+        
+        file_path (str)
+
+        file_type (str)
+
+    Returns:
+
+        shortened content
+
+    """
+    response = ""
+    if file_type=="job posting":  
+        docs = split_doc(file_path, path_type="file", chunk_size = 2000)
+        for i in range(len(docs)):
+            content = docs[i].page_content
+            query = f"""Extract the job posting verbatim and remove other irrelevant information. 
+            job posting: {content}"""
+            response += get_completion(query)
+        with open(file_path, "w") as f:
+            f.write(response)
+
+
+            
 
 
 # Could also implement a scoring system_message to provide model with feedback
 def evaluate_content(content: str, content_type: str) -> bool:
 
-    """ Evaluates if content is a job, work, or study related user request. """
+    """ Evaluates if content is of the content_type. 
+    
+        Args:
+        
+            content (str)
+            
+            content_type (str)
+            
+        Returns:
+
+            True if content contains content_type, False otherwise    
+            
+    """
 
     system_message = f"""
         You are an assistant that evaluates whether the content contains {content_type}

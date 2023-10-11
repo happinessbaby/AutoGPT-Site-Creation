@@ -10,7 +10,7 @@ from pathlib import Path
 from basic_utils import read_txt, convert_to_txt
 from langchain_utils import create_search_tools, generate_multifunction_response
 from langchain import PromptTemplate
-from common_utils import get_generated_responses, get_web_resources
+from common_utils import get_generated_responses, get_web_resources, extract_posting_keywords, retrieve_from_db
 # from langchain.experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
 from typing import Any, List, Union, Dict
 from langchain.docstore.document import Document
@@ -121,37 +121,64 @@ def customize_cover_letter(cover_letter="", resume="", about_me="", posting_path
 def customize_resume(resume="", about_me="", posting_path=""):
 
     resume_content = read_txt(resume)
-    generated_info_dict=get_generated_responses(resume_content = resume_content, about_me=about_me, posting_path=posting_path)
-    job_description = generated_info_dict.get("job description", "")
-    job_specification = generated_info_dict.get("job specification", "")
-    about_me = generated_info_dict.get("about me", "")
-    company_description = generated_info_dict.get("company description", "")
-    field_names = generated_info_dict.get("field names", "")
-    company = generated_info_dict.get("company", "")
-    job = generated_info_dict.get("job", "")
-    institution = generated_info_dict.get("instition", "")
-    program = generated_info_dict.get("program", "")
-    
+    # generated_info_dict=get_generated_responses(resume_content = resume_content, about_me=about_me, posting_path="")
+    if (Path(posting_path).is_file()):
+        posting = read_txt(posting_path)
+        keywords = extract_posting_keywords(posting)
+    # job_description = generated_info_dict.get("job description", "")
+    # job_specification = generated_info_dict.get("job specification", "")
+    # about_me = generated_info_dict.get("about me", "")
+    # company_description = generated_info_dict.get("company description", "")
+    # field_names = generated_info_dict.get("field names", "")
+    # company = generated_info_dict.get("company", "")
+    # job = generated_info_dict.get("job", "")
+    # institution = generated_info_dict.get("instition", "")
+    # program = generated_info_dict.get("program", "")
+    # highest_education_level = generated_info_dict.get("highest education level", "")
+    # work_experience_level = generated_info_dict.get("work_experience_level", "")
 
-    for field in field_names:
-        field_content = generated_info_dict.get(field, "")
-        if field_content!="":
+    # advice_query = f"""ATS-friendly way to write a resume"""
+    # advice = retrieve_from_db(advice_query)
+    query = f"""  You are an expert resume advisor. 
+
+        Generate a list of relevant information that can be added to or replaced in the resume.
+        
+        The most important piece of information is the list of ATS keywords and key phrases that are in the job posting, if available. 
+
+        You should use it as a your primarily guideline. 
+
+        resume content: {resume_content}\n
+
+        job posting keywords: {keywords} \n
+
+        Please provide your reasoning as well. Please format your output as in the following example;
+
+        Things to add or replace in the resume:
+
+        1. Communication skills: communication skills is listed in the job postings keywords but not in the resume
+
+        2. Extract, Transform, and Load: ETL in the resume should be changed to Extract, Transform, and Load as in the job posting keywords
+
+        The above is just an example for your reference. Do not let it be your answer. 
+        
+        """
             
-            query = f""" Your task is to help Human revise parts of a resume. You are provided with a part of a resume and various pieces of information, if available, that you may use.
-            The applicant is applying for job {job} at company {company}.. Please revise the content for resume field {field} so that it suits the purpose of applying to this job and this company, if available.
-            content: {field_content}
+    # query = f""" Your task is to help Human cater a resume to a job position. You are provided with a resume and various pieces of information, if available, that you may use.
 
-            job desciption: {job_description}
-            job specification: {job_specification}
-            company description: {company_description}
+    # The most important piece of information is the list of ATS keywords and phrases that are in the job posting, if available. 
+    
+    # Use these information to generate a list of content to insert into the resume.
 
-            please consider blending these information into the existing resume field {field}. 
-            Use the same tone and style when inserting information, and keep in mind you the resume field is {field}. 
-            Correct grammar and spelling mistakes. 
+    # resume content: {resume_content}
 
-            """
-            tools = create_search_tools("google", 3)
-            response = generate_multifunction_response(query, tools)
+    # ats keywords and phrases: {str(keywords)}
+    # job desciption: {job_description}
+    # job specification: {job_specification}
+    # company description: {company_description}
+
+    # """
+    tools = create_search_tools("google", 3)
+    response = generate_multifunction_response(query, tools)
     return response
 
 
@@ -288,7 +315,6 @@ def process_resume(json_request: str) -> str:
         print(f"JSON DECODER ERROR: {e}")
         return "Format in JSON and try again."
     
-    
     if ("resume file" not in args or args["resume file"]=="" or args["resume file"]=="<resume file>"):
         return """stop using or calling the resume_customize_writer tool. Ask user to upload their resume instead. """
     else:
@@ -308,7 +334,7 @@ def process_resume(json_request: str) -> str:
 if __name__=="__main__":
     personal_statement = "./uploads/file/personal_statement.txt"
     resume = "./resume_samples/resume2023v3.txt"
-    posting_path = "./uploads/link/software05.txt"
+    posting_path = "./uploads/link/software01.txt"
     # customize_personal_statement(about_me="i want to apply for a MSBA program at university of louisville", personal_statement = personal_statement)
     cover_letter = "cv01.txt"
     # customize_cover_letter(about_me = "", cover_letter=cover_letter, resume=resume, posting_path=posting_path)

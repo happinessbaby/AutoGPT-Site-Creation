@@ -61,16 +61,11 @@ def evaluate_resume(about_me="", resume_file = "", posting_path="") -> str:
     info_dict=get_generated_responses(resume_content=resume_content, posting_path=posting_path, about_me=about_me)
     highest_education_level = info_dict.get("highest education level", "")
     work_experience_level = info_dict.get("work experience level", "")
-    name = info_dict.get("name", "")
-    phone = info_dict.get("phone", "")
-    email = info_dict.get("email", "")
-    linkedin = info_dict.get("linkedin", "")
-    website = info_dict.get("website", "")
     job = info_dict.get("job", "")
     company = info_dict.get("company", "")
     field_names = info_dict.get("field names", "")
-    personal_info_dict = {"Name":name, "Phone":phone, "Email":email, "LinkedIn": linkedin, "Website": website, "JobTitle":job}
-    print(personal_info_dict) 
+       
+
     # write_to_docx_template(doc, personal_info, personal_info_dict, docx_filename)
 
     # Note: document comparison benefits from a clear and simple prompt
@@ -191,6 +186,8 @@ def improve_resume_fields(generated_response: Dict[str, str], field: str, field_
                 2. Front desk receptionist is irrelevant: Experience as a front desk receptionist is not directly related to the role of a data analyst
 
                 3. Date formatting is not ATS-friendly: an ATS-friendly way to write dates is for example, 01/2001 or January 2001
+
+        The above is just an example for your reference. Do not let it be your answer. 
         
         Please ignore all formatting advices as formatting should not be part of the assessment.
 
