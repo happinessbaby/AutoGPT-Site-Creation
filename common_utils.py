@@ -174,13 +174,13 @@ def extract_personal_information(resume: str,  llm = ChatOpenAI(temperature=0, m
 
 def extract_pursuit_information(content: str, llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> Any:
 
-    """ Extracts job title and company name from job posting. 
+    """ Extracts job, company, program, and institituion, if available from content.
 
     See: https://python.langchain.com/docs/modules/model_io/output_parsers/structured
 
     Args: 
 
-        posting (str): job posting in text string format
+        content (str): job posting in text string format
 
     Keyword Args:
 
@@ -784,7 +784,7 @@ def search_user_material(json_request: str) -> str:
 
     """Searches and looks up user uploaded material, if available.
 
-      Input should be a single string strictly in the following JSON format: '{{"user material path":"<user material path>", "user query":"<user query>" \n"""
+      Input should be a single string strictly in the following JSON format: '{{"user_material_path":"<user_material_path>", "user_query":"<user_query>" \n"""
 
     try:
         json_request = json_request.strip("'<>() ").replace('\'', '\"')
@@ -793,8 +793,8 @@ def search_user_material(json_request: str) -> str:
         print(f"JSON DECODE ERROR: {e}")
         return "Format in a single string JSON and try again."
  
-    vs_path = args["user material path"]
-    query = args["user query"]
+    vs_path = args["user_material_path"]
+    query = args["user_query"]
     if vs_path!="" and query!="":
         # subquery_relevancy = "how to determine what's relevant in resume"
         # option 1: compression retriever
@@ -960,13 +960,13 @@ def evaluate_content(content: str, content_type: str) -> bool:
         return False
 
 
-def check_content(txt_path: str) -> Union[bool, str, set] :
+def check_content(file_path: str) -> Union[bool, str, set] :
 
     """Extracts file properties using Doctran: https://python.langchain.com/docs/integrations/document_transformers/doctran_extract_properties
 
     Args:
 
-        txt_path: file path
+        file_path (str)
     
     Returns:
 
@@ -974,7 +974,7 @@ def check_content(txt_path: str) -> Union[bool, str, set] :
     
     """
 
-    docs = split_doc_file_size(txt_path)
+    docs = split_doc_file_size(file_path)
     # if file is too large, will randomly select n chunks to check
     docs_len = len(docs)
     print(f"File splitted into {docs_len} documents")
@@ -985,7 +985,7 @@ def check_content(txt_path: str) -> Union[bool, str, set] :
         {
             "name": "category",
             "type": "string",
-            "enum": ["resume", "cover letter", "job posting", "personal statement", "browser error", "work or study related information", "other"],
+            "enum": ["resume", "cover letter", "job posting", "personal statement", "browser error", "learning material", "empty", "other"],
             "description": "categorizes content into the provided categories",
             "required":True,
         },
@@ -1036,7 +1036,7 @@ def check_content(txt_path: str) -> Union[bool, str, set] :
     if (content_dict):    
         return content_safe, content_type, content_topics
     else:
-        raise Exception(f"Content checking failed for {txt_path}")
+        raise Exception(f"Content checking failed for {file_path}")
     
 
 
