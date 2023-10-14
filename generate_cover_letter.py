@@ -242,18 +242,18 @@ def cover_letter_generator(json_request:str) -> str:
       print(f"JSON DECODE ERROR: {e}")
       return "Format in a single string JSON and try again."
    
-    if ("resume file" not in args or args["resume file"]=="" or args["resume file"]=="<resume file>"):
+    if ("resume_file" not in args or args["resume_file"]=="" or args["resume_file"]=="<resume_file>"):
       return "Can you provide your resume so I can further assist you? "
     else:
-        resume_file = args["resume file"]
-    if ("about me" not in args or args["about me"] == "" or args["about me"]=="<about me>"):
+        resume_file = args["resume_file"]
+    if ("about me" not in args or args["about_me"] == "" or args["about_me"]=="<about_me>"):
         about_me = ""
     else:
-        about_me = args["about me"]
-    if ("job post link" not in args or args["job post link"]=="" or args["job post link"]=="<job post link>"):
+        about_me = args["about_me"]
+    if ("job_post_file" not in args or args["job_post_file"]=="" or args["job_post_file"]=="<job_post_file>"):
         posting_path = ""
     else:
-        posting_path = args["job post link"]
+        posting_path = args["job_post_file"]
 
     return generate_basic_cover_letter(about_me=about_me, resume_file=resume_file, posting_path=posting_path)
 
@@ -271,11 +271,11 @@ def processing_cover_letter(json_request: str) -> None:
       return "Format in a single string JSON and try again."
 
     # if resume doesn't exist, ask for resume
-    if ("resume file" not in args or args["resume file"]=="" or args["resume file"]=="<resume file>"):
-      return "Stop using the cover letter generator tool. Ask user for their resume."
+    if ("resume_file" not in args or args["resume_file"]=="" or args["resume_file"]=="<resume_file>"):
+      return "Stop using the cover letter generator tool. Ask user for their resume, along with any other additional information that they could provide. "
     else:
       # may need to clean up the path first
-        resume_file = args["resume file"]
+        resume_file = args["resume_file"]
     # if ("job" not in args or args["job"] == "" or args["job"]=="<job>"):
     #     job = ""
     # else:
@@ -284,14 +284,14 @@ def processing_cover_letter(json_request: str) -> None:
     #     company = ""
     # else:
     #     company = args["company"]
-    if ("about me" not in args or args["about me"] == "" or args["about me"]=="<about me>"):
+    if ("about_me" not in args or args["about_me"] == "" or args["about_me"]=="<about_me>"):
         about_me = ""
     else:
-        about_me = args["about me"]
-    if ("job post link" not in args or args["job post link"]=="" or args["job post link"]=="<job post link>"):
+        about_me = args["about_me"]
+    if ("job post link" not in args or args["job_post_file"]=="" or args["job_post_file"]=="<job_post_file>"):
         posting_path = ""
     else:
-        posting_path = args["job post link"]
+        posting_path = args["job_post_file"]
 
     return generate_basic_cover_letter(about_me=about_me, resume_file=resume_file, posting_path=posting_path)
 
@@ -304,7 +304,7 @@ def create_cover_letter_generator_tool() -> List[Tool]:
     Then it calls the processing_cover_letter function to process the JSON data. """
     
     name = "cover_letter_generator"
-    parameters = '{{"about me":"<about me>", "resume file":"<resume file>", "job post link": "<job post link>"}}'
+    parameters = '{{"about_me":"<about_me>", "resume_file":"<resume_file>", "job_post_file": "<job_post_file>"}}'
     output =  '{{"file_path": "<file_path>"}}'
     description = f"""Helps to generate a cover letter. Use this tool more than any other tool when user asks to write a cover letter. 
      Input should be a single string strictly in the following JSON format: {parameters} \n

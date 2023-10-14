@@ -147,35 +147,6 @@ def check_injection(message):
 		return False
 	
 	
-
-# Could also implement a scoring system_message to provide model with feedback
-def evaluate_content(content, content_type):
-	system_message = f"""
-		You are an assistant that evaluates whether the content contains a {content_type}.
-		 
-		  There may be other irrelevant content. Ignore them and ignore all formatting. 
-
-		Respond with a Y or N character, with no punctuation:
-		Y - if the content contains a {content_type}. it's okay if it also contains other things. 
-		N - otherwise
-
-		Output a single letter only.
-		"""
-	
-	messages = [
-    {'role': 'system', 'content': system_message},
-    {'role': 'user', 'content': content}
-	]	
-	
-	response = get_completion_from_messages(messages, max_tokens=1)
-
-	if (response=="Y"):
-		return True
-	elif (response == "N"):
-		return False
-	else:
-		# return false for now, will have error handling here
-		return False
         
 def split_text(text):
 	# use an estimate token count for ease of control
