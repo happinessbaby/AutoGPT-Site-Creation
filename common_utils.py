@@ -88,11 +88,11 @@ def find_positive_qualities(content: str, llm=ChatOpenAI(model="gpt-3.5-turbo", 
     print(f"Successfully extracted positive qualities: {response}")
     return response
 
-def generate_tip_of_the_day() -> str:
+def generate_tip_of_the_day(topic:str) -> str:
 
     """ Generates a tip of the day and an affirming message. """
 
-    query = """Generate a helpful tip of the day message for job seekers. Make it specific. Output the message only. """
+    query = f"""Generate a helpful tip of the day message for job seekers. Make it specific to topic {topic}. Output the message only. """
     response = retrieve_from_db(query)
     return response
 
@@ -674,7 +674,7 @@ def create_sample_tools(related_samples: List[str], sample_type: str,) -> Union[
 
 
 # one of the most important functions
-def get_generated_responses(resume_content="",about_me="", posting_path=""): 
+def get_generated_responses(resume_content="",about_me="", posting_path="", program_path=""): 
 
     # Get personal information from resume
     generated_responses={}
@@ -692,6 +692,19 @@ def get_generated_responses(resume_content="",about_me="", posting_path=""):
         for key, value in pursuit_info_dict.items():
             if value == -1:
                 pursuit_info_dict[key]=pursuit_info_dict1[key]
+
+    if (Path(program_path).is_file()):
+        posting = read_txt(program_path)
+        prompt_template = """Identity the program, institution then provide a summary in 100 words or less of the following program:
+            {text} \n
+            Focus on the uniqueness, classes, requirements involved. Do not include information irrelevant to this specific program.
+        """
+        program_specification = create_summary_chain(program_path, prompt_template, chunk_size=4000)
+        generated_responses.update({"program specification": program_specification})
+        pursuit_info_dict2 = extract_pursuit_information(posting)
+        for key, value in pursuit_info_dict.items():
+            if value == -1:
+                pursuit_info_dict[key]=pursuit_info_dict2[key]
 
     if about_me!="" and about_me!="-1":
         pursuit_info_dict0 = extract_pursuit_information(about_me)
@@ -741,7 +754,7 @@ def get_generated_responses(resume_content="",about_me="", posting_path=""):
         institution_description = get_web_resources(institution_query)
         generated_responses.update({"institution description": institution_description})
 
-    if program!=-1:
+    if program!=-1 and  generated_responses.get("program specification", "")=="":
         program_query = f"""Research the degree program in the institution provided below. 
         Find out what {program} at the institution {institution} involves, and what's special about the program, and why it's worth pursuing.    
         In 100 words or less, summarize your research result.  
@@ -985,7 +998,7 @@ def check_content(file_path: str) -> Union[bool, str, set] :
         {
             "name": "category",
             "type": "string",
-            "enum": ["resume", "cover letter", "job posting", "personal statement", "browser error", "learning material", "empty", "other"],
+            "enum": ["resume", "cover letter", "job posting", "education program", "personal statement", "browser error", "learning material", "empty", "other"],
             "description": "categorizes content into the provided categories",
             "required":True,
         },
