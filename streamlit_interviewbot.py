@@ -88,7 +88,7 @@ class Interview():
     
 
     def __init__(self):
-        self.set_png_as_page_bg('background.png')
+        self.set_png_as_page_bg('./static/styles/background.png')
         self._create_interviewbot()
         # self.thread_run()
         # thread = threading.Thread(target=self._create_interviewbot)

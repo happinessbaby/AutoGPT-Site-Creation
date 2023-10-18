@@ -3,11 +3,11 @@ import os
 from openai_api import get_completion
 from langchain.chat_models import ChatOpenAI
 from langchain.llms import OpenAI
-from langchain import PromptTemplate
+from langchain.prompts import PromptTemplate
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
 from basic_utils import read_txt
-from common_utils import (extract_personal_information, get_web_resources,  retrieve_from_db,extract_education_level, extract_work_experience_level, get_generated_responses,
+from common_utils import (extract_personal_information, get_web_resources,  retrieve_from_db, get_generated_responses,
                           create_sample_tools, search_related_samples)
 from datetime import date
 from pathlib import Path
@@ -288,7 +288,7 @@ def processing_cover_letter(json_request: str) -> None:
         about_me = ""
     else:
         about_me = args["about_me"]
-    if ("job post link" not in args or args["job_post_file"]=="" or args["job_post_file"]=="<job_post_file>"):
+    if ("job_post_file" not in args or args["job_post_file"]=="" or args["job_post_file"]=="<job_post_file>"):
         posting_path = ""
     else:
         posting_path = args["job_post_file"]

@@ -56,6 +56,7 @@ show_pages(
     [
         Page("streamlit_chatbot.py", "Home", "🏠"),
         Page("streamlit_interviewbot.py", "Mock Interview", ":books:"),
+        Page("streamlit_resources.py", "Resources", ":busts_in_silhouette:" ),
     ]
 )
 
@@ -74,6 +75,7 @@ fs = 44100 # sample rate
 channels = 1 # number of channel
 device = 4
 max_token_count=3500
+topic = "networking in job application"
 
 
 class Chat():
@@ -115,7 +117,7 @@ class Chat():
                 new_chat = ChatController(st.session_state.userid)
                 st.session_state["basechat"] = new_chat 
             if "tipofday" not in st.session_state:
-                tip = generate_tip_of_the_day()
+                tip = generate_tip_of_the_day(topic)
                 st.session_state["tipofday"] = tip
                 st.write(tip)
                 
@@ -147,8 +149,9 @@ class Chat():
 
             SAMPLE_QUESTIONS = {
                 "":"",
-                "help me write a cover letter": "coverletter",
-                "help me evaluate my resume": "resume",
+                "help me write a cover letter": "generate",
+                "help me evaluate my resume": "evaluate",
+                "help me reformat my resume": "reformat",
                 "help me tailor my application": "customize"
             }
 
@@ -194,11 +197,9 @@ class Chat():
                 st.markdown('''
                 I'm a career AI advisor. I can:
                             
-                - Evaluate your resume
-                - Write a cover letter
+                - Help with your resume
+                - Conduct a mock interview
                 - Tailor your application
-                            
-                Get started by filling out the form below, or just chat with me!
                                             
                 ''')
 
@@ -327,11 +328,11 @@ class Chat():
             self.process_file(files)
         except Exception:
             pass
-        try:
-            link = st.session_state.link
-            self.process_link(link)
-        except Exception:
-            pass
+        # try:
+        #     link = st.session_state.link
+        #     self.process_link(link)
+        # except Exception:
+        #     pass
         # try:
         #     about_me = st.session_state.about_me
         #     self.process_about_me(about_me)
@@ -360,9 +361,7 @@ class Chat():
         """ Processes user input and processes any links in the input. """
 
         if check_content_safety(text_str=user_input):
-            if evaluate_content(user_input, "a job or program application request that contains a job or program title"):
-                self.new_chat.update_entities(f"about me:{user_input} /n ###")
-            elif evaluate_content(user_input, "a career or education related self description "):
+            if evaluate_content(user_input, "a job, program, company, or institutation description or a personal background description"):
                 self.new_chat.update_entities(f"about me:{user_input} /n ###")
             urls = re.findall(r'(https?://\S+)', user_input)
             print(urls)
