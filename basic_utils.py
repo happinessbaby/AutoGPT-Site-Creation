@@ -154,14 +154,14 @@ def html_to_text(urls:List[str], save_path="./web_data/test.txt"):
 
 
 
-def write_to_docx_template(doc: Any, field_name: List[str], field_content: Dict[str, str], res_path) -> None:
-    context = {key: None for key in field_name}
-    for field in field_name:
-        if field_content[field] != -1:
-            context[field] = field_content[field]
-    doc.render(context)
-    doc.save(res_path)
-    print(f"Succesfully written {field_name} to {res_path}.")
+# def write_to_docx_template(doc: Any, field_name: List[str], field_content: Dict[str, str], res_path) -> None:
+#     context = {key: None for key in field_name}
+#     for field in field_name:
+#         if field_content[field] != -1:
+#             context[field] = field_content[field]
+#     doc.render(context)
+#     doc.save(res_path)
+#     print(f"Succesfully written {field_name} to {res_path}.")
 
 # source code: https://github.com/trancethehuman/entities-extraction-web-scraper/blob/main/scrape.py
 async def ascrape_playwright(url, tags: list[str] = ["h1", "h2", "h3", "span"]) -> str:

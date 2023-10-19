@@ -7,7 +7,7 @@ from langchain.output_parsers import CommaSeparatedListOutputParser
 from langchain.prompts import PromptTemplate
 from langchain_experimental.smart_llm import SmartLLMChain
 from langchain.agents import AgentType, Tool, initialize_agent, create_json_agent
-from basic_utils import read_txt, write_to_docx_template
+from basic_utils import read_txt
 from common_utils import (get_web_resources, retrieve_from_db,  get_generated_responses,calculate_graduation_years, find_resume_content, extract_posting_keywords,
                            extract_resume_fields, search_related_samples, create_sample_tools, extract_personal_information)
 from langchain_utils import create_search_tools, create_mapreduce_chain, create_summary_chain, generate_multifunction_response, create_refine_chain, handle_tool_error
@@ -72,7 +72,7 @@ def evaluate_resume(about_me="", resume_file = "", posting_path="") -> str:
     else:
         resume_type = "chronological"
 
-  #TODO: 
+  #TODO: This query should make suggestions on what type of resume they should write and how to improve the overall impression
     query_overall = f"""Your task is to provide an assessment of a resume delimited by {delimiter} characters.
 
     resume: {delimiter}{resume_content}{delimiter} \n
@@ -174,39 +174,41 @@ def evaluate_resume_fields(generated_response: Dict[str, str], field: str, field
 
         evaluation = generate_multifunction_response(query_evaluation, tools)
 
-
         with open(f"{field}_evaluation.txt", "x") as f:
            f.write(evaluation)
 
 
 
-def reformat_functional_resume(resume_file:str, posting_path:str) -> Dict[str, str]:
+def reformat_functional_resume(resume_file:str, posting_path:str) -> str:
 
     resume_content = read_txt(resume_file)
     functional_doc_template = DocxTemplate("./resume_templates/functional.docx")
     info_dict = get_generated_responses(resume_content=resume_content, posting_path=posting_path)
+    func = lambda key, default: default if info_dict[key]==-1 else info_dict[key]
     personal_context = {
-        "NAME": info_dict.get("name", "YOUR NAME"),
-        "ADDRESS": info_dict.get("address", "YOUR ADDRESS"),
-        "PHONE": info_dict.get("phone", "YOUR PHONE NUMBER"),
-        "EMAIL": info_dict.get("email", "YOUR EMAIL ADDRESS"),
-        "LINKEDIN": info_dict.get("linkedin", "YOUR LINKEDIN URL"),
-        "WEBSITE": info_dict.get("website", "OTHER WEBSITE URL")
+        "NAME": func("name", "YOUR NAME"),
+        "ADDRESS": func("address", "YOUR ADDRESS"),
+        "PHONE": func("phone", "YOUR PHONE"),
+        "EMAIL": func("email", "YOUR EMAIL"),
+        "LINKEDIN": func("linkedin", "YOUR LINKEDIN URL"),
+        "WEBSITE": func("website", "WEBSITE"),
     }
-    context_keys = ["SKILLS_SUMMARY", "WORK_HISTORY", "EDUCATION"]
+    #TODO: save the context dictionary somewhere
+    context_keys = ["SKILLS_SUMMARY", "WORK_HISTORY", "PROFESSIONAL_ACCOMPLISHMENTS", "EDUCATION"]
+    info_dict_keys = ["summary or objective", "work experience", "professional accomplishment", "education"]
+    context_dict = dict(zip(context_keys, info_dict_keys))
     context = {key: None for key in context_keys}
-    for key in context_keys:
-        content = find_resume_content(key, resume_content)
+    for key, value in context_dict.items():
+        # content = find_resume_content(key, resume_content)
+        content = info_dict.get(value, "")
         if key == "SKILLS_SUMMARY":
             job_description = info_dict.get("job description", "")
             job_specification = info_dict.get("job specification", "")
-            query = f""" Your task is to improve the objective section of the resume.
+            query = f""" Your task is to improve or write the objective section of the functional resume.
 
             If you are provided with an existing objective section, use it as your context and build on top of it.
               
             Otherwise, refer to the job specification or job description below, whichever is available.
-
-            Use them to write in a few sentences the most relevant hard skills and soft skills relevant in job specification or job description.
 
             objective section: {content}
 
@@ -214,29 +216,93 @@ def reformat_functional_resume(resume_file:str, posting_path:str) -> Dict[str, s
 
             job specification: {job_specification}
 
-            PLEASE WRITE IN A FEW SENTENCE AS IF YOU ARE WRITING AN OBJECTIVE OR SUMMARY SECTION OF THE RESUME.
+            Please write in fewer than five sentences the objective section of the functiional resume using the information above. 
+
+            Incorporate relevant soft skills and hard skills into the objective section. 
             
             """
             tools = create_search_tools("google", 1)
             content = generate_multifunction_response(query, tools)
-        # elif key=="PROFESSIONAL_ACCOMPLISHMENTS":
-        #     if (Path(posting_path).is_file()):
-        #         keywords = extract_posting_keywords(read_txt(posting_path))
-        #         query = f"""Your task is to  catgeorize the professional accomplishments, skills, trainings delimited with {delimiter} characters under certain skills. 
+        elif key=="PROFESSIONAL_ACCOMPLISHMENTS":
+            if (Path(posting_path).is_file()):
+                keywords = extract_posting_keywords(read_txt(posting_path))
+                query = f"""Your task is to catgeorize the professional accomplishments, skills, trainings, projects in the resume delimited with {delimiter} characters under certain skills. 
 
-        #         Please in total pick at least 3 skill from the following available skillset. 
+                Please in total pick at least 3 skill from the following available skillset. 
 
-        #         skillset: {keywords}.
+                skillset: {keywords}.
 
-        #         Read the 
+                Categorize the content into the different skills. For example, your output should look like something like this:
 
-                
-        #         """
+                Skill1:
+
+                    - Examples of projects or situations that utilized this skill
+                    - Measurable results and accomplishments
+
+                content: {delimiter}{content}{delimiter}
+
+                """
+                tools = create_search_tools("google", 1)
+                content = generate_multifunction_response(query, tools)
         context[key] = content
     context.update(personal_context)
-    print(context)
+    # print(context)
     functional_doc_template.render(context)
-    functional_doc_template.save("./test_reformatter.docx")    
+    functional_doc_template.save("./test_functional_reformatter.docx")   
+
+
+
+def reformat_chronological_resume(resume_file:str, posting_path:str,) -> str:
+
+    resume_content = read_txt(resume_file)
+    chronological_resume_template = DocxTemplate("./resume_templates/chronological.docx")
+    info_dict = get_generated_responses(resume_content=resume_content, posting_path=posting_path)
+    func = lambda key, default: default if info_dict[key]==-1 else info_dict[key]
+    personal_context = {
+        "NAME": func("name", "YOUR NAME"),
+        "ADDRESS": func("address", "YOUR ADDRESS"),
+        "PHONE": func("phone", "YOUR PHONE"),
+        "EMAIL": func("email", "YOUR EMAIL"),
+        "LINKEDIN": func("linkedin", "YOUR LINKEDIN URL"),
+        "WEBSITE": func("website", "WEBSITE"),
+    }
+    context_keys = ["SUMMARY", "PROFESSIONAL_EXPERIENCE", "RELEVANT_SKILLS", "EDUCATION"]
+    info_dict_keys = ["summary or objective", "work experience", "skills", "education"]
+    context_dict = dict(zip(context_keys, info_dict_keys))
+    context = {key: None for key in context_keys}
+    for key, value in context_dict.items():
+        # content = find_resume_content(key, resume_content)
+        content = info_dict.get(value, "")
+        if key == "SUMMARY":
+            work_experience = info_dict.get("work experience", "")
+            query = f""" Your task is to improve or rewrite the summary section of a chronological resume.
+
+            If you are provided with an existing summary section, use it as your context and build on top of it, if needed.
+              
+            Otherwise, refer to the work experience, if available. 
+
+            summary section: {content}
+
+            work experience: {work_experience}
+
+            Please write in fewer than five sentences the summary section of the chronological resume with the information above.
+
+            If the summary already is already filled with relevant work experience, you can output the original summary section. 
+            
+            Otherwise, incorporate relevant work experience into the summary section. 
+
+            """
+            tools = create_search_tools("google", 1)
+            content = generate_multifunction_response(query, tools)
+        # elif key=="RELEVANT_SKILLS":
+        #     job_description = info_dict.get("job description", "")
+        #     job_specification = info_dict.get("job specification", "") 
+        #     query = f""" """
+        context[key] = content
+    context.update(personal_context)
+    # print(context)
+    chronological_resume_template.render(context)
+    chronological_resume_template.save("./test_chronological_reformatter.docx")   
 
 
 # @tool("resume evaluator")
@@ -291,10 +357,6 @@ def resume_evaluator(json_request: str)-> str:
 
 
 
-
-
-
-
 def processing_resume(json_request: str) -> str:
 
     """ Input parser: input is LLM's action_input in JSON format. This function then processes the JSON data and feeds them to the resume evaluator. """
@@ -322,6 +384,8 @@ def processing_resume(json_request: str) -> str:
         posting_path = args["job_post_file"]
         
     return evaluate_resume(about_me=about_me, resume_file=resume_file, posting_path=posting_path)
+
+
 
 def processing_resume2(json_request: str) -> str:
 
@@ -420,7 +484,8 @@ if __name__ == '__main__':
     # company = "Southern Company"
     # evaluate_resume(my_job_title =my_job_title, company = company, resume_file=my_resume_file, posting_path = job_posting)
     my_resume_file = "./resume_samples/resume2023v3.txt"
-    reformat_functional_resume(resume_file=my_resume_file, posting_path=job_posting)
+    # reformat_functional_resume(resume_file=my_resume_file, posting_path=job_posting)
+    reformat_chronological_resume(resume_file="./resume_samples/sample1.txt", posting_path="./uploads/link/accountant.txt")
     # evaluate_resume(resume_file=my_resume_file)
 
 

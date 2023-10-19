@@ -152,7 +152,7 @@ class Chat():
                 "help me write a cover letter": "generate",
                 "help me evaluate my resume": "evaluate",
                 "help me reformat my resume": "reformat",
-                "help me tailor my application": "customize"
+                "help me rewrite my document": "customize"
             }
 
 
@@ -197,9 +197,9 @@ class Chat():
                 st.markdown('''
                 I'm a career AI advisor. I can:
                             
-                - Help with your resume
+                - Help with your resume, cover letter/cv, and personal statement
                 - Conduct a mock interview
-                - Tailor your application
+                - Be your study companion
                                             
                 ''')
 
