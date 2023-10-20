@@ -67,6 +67,7 @@ from langchain_experimental.autonomous_agents import BabyAGI
 import faiss
 from langchain.vectorstores import FAISS
 from langchain.docstore import InMemoryDocstore
+from langchain.chains import create_tagging_chain, create_tagging_chain_pydantic
 
 
 
@@ -561,6 +562,12 @@ def create_mapreduce_chain(files: List[str], map_template:str, reduce_template:s
     # split_docs = text_splitter.split_documents(docs)
 
     print(map_reduce_chain.run(docs))
+
+def create_tag_chain(schema, user_input, llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613")):
+
+    chain = create_tagging_chain(schema, llm)
+    response = chain.run(user_input)
+    return response
 
 
 def create_web_extraction_chain(content:str, schema, schema_type="dict", llm=ChatOpenAI(temperature=0, cache = False)):

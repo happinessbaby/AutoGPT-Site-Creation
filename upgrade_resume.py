@@ -266,6 +266,7 @@ def reformat_chronological_resume(resume_file:str, posting_path:str,) -> str:
         "LINKEDIN": func("linkedin", "YOUR LINKEDIN URL"),
         "WEBSITE": func("website", "WEBSITE"),
     }
+    # TODO: add awards and honors or professional accomplishments
     context_keys = ["SUMMARY", "PROFESSIONAL_EXPERIENCE", "RELEVANT_SKILLS", "EDUCATION"]
     info_dict_keys = ["summary or objective", "work experience", "skills", "education"]
     context_dict = dict(zip(context_keys, info_dict_keys))
@@ -294,15 +295,66 @@ def reformat_chronological_resume(resume_file:str, posting_path:str,) -> str:
             """
             tools = create_search_tools("google", 1)
             content = generate_multifunction_response(query, tools)
-        # elif key=="RELEVANT_SKILLS":
-        #     job_description = info_dict.get("job description", "")
-        #     job_specification = info_dict.get("job specification", "") 
-        #     query = f""" """
+        elif key=="RELEVANT_SKILLS":
+            if (Path(posting_path).is_file()):
+                keywords = extract_posting_keywords(read_txt(posting_path))
+            job_description = info_dict.get("job description", "")
+            job_specification = info_dict.get("job specification", "") 
+            skills = info_dict.get("skills", "")
+            query = f""" 
+
+            Your tasks is to improve the Skills section of the resume. You are provided with a job description or job specificaiton, whichever is available.
+
+            If you are provided with an existing Skills section, use it as your context and build on top of it, if needed.
+
+            You are also provided with a list of important keywords that are in the job posting. Some of them should be included also. 
+
+            skills section: {skills}
+
+            job description: {job_description}
+            
+            job specification: {job_specification}
+
+            important keywords: {keywords}
+
+            If the skills section exist, add to it relevant skills and remove from it irrelevant skills.
+
+            Otherwise, if the skills section is already well-written, output the original skills section. 
+
+            """
         context[key] = content
     context.update(personal_context)
     # print(context)
     chronological_resume_template.render(context)
     chronological_resume_template.save("./test_chronological_reformatter.docx")   
+
+
+def reformat_student_resume(resume_file:str, posting_path:str) -> str:
+
+    resume_content = read_txt(resume_file)
+    chronological_resume_template = DocxTemplate("./resume_templates/student.docx")
+    info_dict = get_generated_responses(resume_content=resume_content, posting_path=posting_path)
+    func = lambda key, default: default if info_dict[key]==-1 else info_dict[key]
+    personal_context = {
+        "NAME": func("name", "YOUR NAME"),
+        "ADDRESS": func("address", "YOUR ADDRESS"),
+        "PHONE": func("phone", "YOUR PHONE"),
+        "EMAIL": func("email", "YOUR EMAIL"),
+        "LINKEDIN": func("linkedin", "YOUR LINKEDIN URL"),
+        "WEBSITE": func("website", "WEBSITE"),
+    }
+    #TODO: add volunteer experience
+    context_keys = ["OBJECTIVE", "EDUCATION", "AWARDS_HONORS", "SKILLS", "WORK_EXPERIENCE"]
+    info_dict_keys = ["summary or objective", "education", "awards and honors", "skills", "work experience"]
+    context_dict = dict(zip(context_keys, info_dict_keys))
+    context = {key: None for key in context_keys}
+    for key, value in context_dict.items():
+        # content = find_resume_content(key, resume_content)
+        content = info_dict.get(value, "")
+    context.update(personal_context)
+    # print(context)
+    chronological_resume_template.render(context)
+    chronological_resume_template.save("./test_student_reformatter.docx")   
 
 
 # @tool("resume evaluator")
