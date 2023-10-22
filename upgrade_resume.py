@@ -227,8 +227,8 @@ def reformat_functional_resume(info_dict: Dict[str, str]) -> str:
         "WEBSITE": func("website", "WEBSITE"),
     }
     #TODO: save the context dictionary somewhere
-    context_keys = ["SUMMARY", "WORK_HISTORY", "PROFESSIONAL_ACCOMPLISHMENTS", "EDUCATION", "SKILLS"]
-    info_dict_keys = ["summary or objective", "work experience", "professional accomplishment", "education", "skills"]
+    context_keys = ["SUMMARY", "WORK_HISTORY", "PROFESSIONAL_ACCOMPLISHMENTS", "EDUCATION", "SKILLS", "CERTIFICATION"]
+    info_dict_keys = ["summary or objective", "work experience", "professional accomplishment", "education", "skills", "certification"]
     context_dict = dict(zip(context_keys, info_dict_keys))
     context = {key: None for key in context_keys}
     #TODO, this tool below is temporary
@@ -292,14 +292,13 @@ def reformat_functional_resume(info_dict: Dict[str, str]) -> str:
 
             If professional accomplishments do not exist, please output an example. 
 
-
             """
             content = generate_multifunction_response(query, tools)
         context[key] = content
     context.update(personal_context)
     # print(context)
     functional_doc_template.render(context)
-    end_path = "./test_functional_reformatter.docx"
+    end_path = "./test_functional_reformatter_W.docx"
     functional_doc_template.save(end_path) 
     return f"""file_path:{end_path}"""  
 
@@ -343,6 +342,18 @@ def reformat_chronological_resume(info_dict: Dict[str, str]) -> str:
             If the summary already is already filled with relevant work experience, you can output the original summary section. 
             
             Otherwise, incorporate relevant work experience into the summary section. 
+
+            Here are some examples: 
+
+            Experienced [position] looking to help [company] provide excellent customer service. Over [number] years of experience at [company], demonstrating excellent [skill], [skill], and [skill]. 
+
+            [Position] with [number] years of experience looking to help [company] improve its [function]. Diligent and detail-oriented professional with extensive experience with [hard skill]. 
+
+            Hardworking [position] with [number] years of experience at a [type of environment]. Seeking to bring [skills] and experience to benefit [company] in the [department].
+
+            Dedicated [position] with over [number] years of experience looking to move into [new field]. [Graduate degree title] from [school name]. Excellent [skill], [skill], and [skill].
+
+            PLEASE WRITE IN LESS THAN FIVE SENTENCES THE SUMMARY SECTION OF THE RESUME AND OUTPUT IT AS YOUR FINAL ANSWER. DO NOT OUTPUT ANYTHING ELSE. 
 
             """
             
@@ -402,6 +413,19 @@ def reformat_student_resume(info_dict: Dict[str, str]) -> str:
     context = {key: None for key in context_keys}
     for key, value in context_dict.items():
         # content = find_resume_content(key, resume_content)
+        if key == "OBJECTIVE":
+            job_description = info_dict.get("job description", "")
+            job_specification = info_dict.get("job specification", "")
+            skills = info_dict.get("skills", "")
+            query = """Detail-oriented college student at [school] with [GPA]. Graduating in [year] with [degree title]. Looking to use [skills] as a [position] for [company]. 
+
+                High school student with proven [skills] looking for a [position] at [company]. Proven [skill] as [extracurricular position]. Wishing to use [skills] to [achieve goals].
+
+                Hardworking recent graduate in [degree] from [school]. Excellent [skills] and [skills]. Experienced in [function], function, and [function] at [company].
+
+                [Degree] candidate in [subject] from [school] seeking a [position] at [company]. Experience in [function]. Exceptional [skills], [skills], and [skills].
+
+                """
         content = info_dict.get(value, "")
         context[key] = content
     context.update(personal_context)
@@ -596,8 +620,6 @@ if __name__ == '__main__':
     # company = "Southern Company"
     # evaluate_resume(my_job_title =my_job_title, company = company, resume_file=my_resume_file, posting_path = job_posting)
     my_resume_file = "./resume_samples/resume2023vs1.txt"
-    reformat_functional_resume(resume_file=my_resume_file, posting_path=job_posting)
-    # reformat_chronological_resume(resume_file="./resume_samples/sample1.txt", posting_path="./uploads/link/accountant.txt")
     # evaluate_resume(resume_file=my_resume_file)
 
 

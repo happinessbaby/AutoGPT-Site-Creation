@@ -328,8 +328,10 @@ def extract_resume_fields3(resume: str,  llm = ChatOpenAI(temperature=0, model="
                                    description="""Extract the professional accomplishment section of the resume that is not work experience. 
                                    Professional accomplishment should be composed of trainings, skills, projects that the applicant learned or has done. 
                                    .  If this information is not found, output -1""")
+    certification_schema = ResponseSchema(name="certification", 
+                                description="""Extract the certification sections of the resume. Extract only names of certifications, names of certifying agencies, if applicable,  
+                                                dates of obtainment (and expiration date, if applicable), and location, if applicable. If none of these information is found, output -1""")
     
-
     response_schemas = [contact_schema, 
                         work_schema,
                         education_schema, 
@@ -337,6 +339,7 @@ def extract_resume_fields3(resume: str,  llm = ChatOpenAI(temperature=0, model="
                         skills_schema,
                         awards_schema,
                         accomplishments_schema,
+                        certification_schema,
                         ]
 
     output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
@@ -356,8 +359,11 @@ def extract_resume_fields3(resume: str,  llm = ChatOpenAI(temperature=0, model="
     awards and honors: Extract the awards and honors sections of the resume.  If this information is not found, output -1\
     
     professional accomplishment: Extract professional accomplishment from the resume that is not work experience. 
-                    Professional accomplishment should be composed of trainings, skills, projects that the applicant learned or has done. 
-                    If this information is not found, output -1
+                                Professional accomplishment should be composed of trainings, skills, projects that the applicant learned or has done. 
+                                If this information is not found, output -1\
+                    
+    certification: Extract the certification sections of the resume. Extract only names of certification, names of certifying agencies, if applicable,  
+                    dates of obtainment (and expiration date, if applicable), and location, if applicable. If none of these information is found, output -1
 
     text: {delimiter}{text}{delimiter}
 
@@ -368,8 +374,6 @@ def extract_resume_fields3(resume: str,  llm = ChatOpenAI(temperature=0, model="
     messages = prompt.format_messages(text=resume, 
                                 format_instructions=format_instructions,
                                 delimiter=delimiter)
-
-    
     response = llm(messages)
     field_info_dict = output_parser.parse(response.content)
     print(f"Successfully extracted resume field info: {field_info_dict}")
@@ -1067,7 +1071,7 @@ def binary_file_downloader_html(json_request: str):
 
     try: 
         args = json.loads(json_request)
-        file = args["file path"]
+        file = args["file_path"]
     except JSONDecodeError:
         return """ Format in the following JSON and try again: '{{"file path": "<file path>"}}' """
     with open(file, 'rb') as f:
