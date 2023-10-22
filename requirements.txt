@@ -37,3 +37,4 @@ pip-tools
 streamlit-modal
 st-pages
 docxtpl
+langhchain_experimental

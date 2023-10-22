@@ -14,10 +14,9 @@ from langchain.agents import AgentType
 from langchain.chains import RetrievalQA,  LLMChain
 from pathlib import Path
 from basic_utils import read_txt, convert_to_txt
-from langchain_utils import ( create_wiki_tools, create_search_tools, create_retriever_tools, create_compression_retriever, create_ensemble_retriever, generate_multifunction_response,
+from langchain_utils import ( create_wiki_tools, create_search_tools, create_retriever_tools, create_compression_retriever, create_ensemble_retriever, generate_multifunction_response, create_babyagi_chain,
                               split_doc, handle_tool_error, retrieve_faiss_vectorstore, split_doc_file_size, reorder_docs, create_summary_chain)
-from langchain import PromptTemplate
-# from langchain.experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
+from langchain.prompts import PromptTemplate
 from langchain.agents.agent_toolkits import create_python_agent
 from langchain.output_parsers import CommaSeparatedListOutputParser
 from langchain.chains.summarize import load_summarize_chain
@@ -29,10 +28,11 @@ from langchain.vectorstores import FAISS
 from langchain.retrievers import BM25Retriever, EnsembleRetriever
 from langchain.tools.convert_to_openai import  format_tool_to_openai_function
 from langchain.schema import HumanMessage
-from langchain.utilities import GoogleSearchAPIWrapper
+from langchain.utilities.google_search import GoogleSearchAPIWrapper
 from langchain.retrievers.web_research import WebResearchRetriever
 from langchain.chains import RetrievalQAWithSourcesChain, StuffDocumentsChain
-# from langchain_experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
+from langchain_experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
+from langchain_experimental.smart_llm import SmartLLMChain
 from langchain.docstore import InMemoryDocstore
 from langchain.retrievers.multi_query import MultiQueryRetriever
 from langchain.document_transformers import (
@@ -41,14 +41,21 @@ from langchain.document_transformers import (
 )
 from langchain.memory import SimpleMemory
 from langchain.chains import SequentialChain
-
-from typing import Any, List, Union, Dict
+from langchain.prompts import PromptTemplate
+from typing import Any, List, Union, Dict, Optional
 from langchain.docstore.document import Document
 from langchain.tools import tool
 from langchain.output_parsers import PydanticOutputParser
 from langchain.tools.file_management.move import MoveFileTool
 from pydantic import BaseModel, Field, validator
 from langchain.document_loaders import UnstructuredWordDocumentLoader
+from langchain.chains import LLMMathChain
+from langchain.agents import create_json_agent, AgentExecutor
+from langchain.agents.agent_toolkits import JsonToolkit
+from langchain.chains import LLMChain
+from langchain.requests import TextRequestsWrapper
+from langchain.tools.json.tool import JsonSpec
+from langchain.schema.output_parser import OutputParserException
 import os
 import sys
 import re
@@ -60,6 +67,7 @@ import faiss
 import asyncio
 import random
 import base64
+import datetime
 from datetime import date
 from feast import FeatureStore
 from dotenv import load_dotenv, find_dotenv
@@ -73,20 +81,7 @@ feast_repo_path = "/home/tebblespc/Auto-GPT/autogpt/auto_gpt_workspace/my_featur
 store = FeatureStore(repo_path = feast_repo_path)
 
 
-def find_positive_qualities(content: str, llm=ChatOpenAI(model="gpt-3.5-turbo", temperature=0.0)) -> str:
 
-    """ Find positive qualities of the applicant in the provided content, such as resume, cover letter, etc. """
-
-    query = f""" Your task is to extract the positive qualities of a job applicant given the provided document. 
-    
-            document: {content}
-
-            Do not focus on hard skills or actual achievements. Rather, focus on soft skills, personality traits, special needs that the applicant may have.
-
-            """
-    response = get_completion(query)
-    print(f"Successfully extracted positive qualities: {response}")
-    return response
 
 def generate_tip_of_the_day(topic:str) -> str:
 
@@ -180,7 +175,7 @@ def extract_pursuit_information(content: str, llm = ChatOpenAI(temperature=0, mo
 
     Args: 
 
-        content (str): job posting in text string format
+        content (str)
 
     Keyword Args:
 
@@ -234,30 +229,157 @@ def extract_pursuit_information(content: str, llm = ChatOpenAI(temperature=0, mo
     return pursuit_info_dict
 
 
+def extract_education_information(content: str, llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> Any:
 
+    """ Extracts highest education degree, area of study, year of graduation, and gpa if available from content.
 
-def extract_education_level(resume: str) -> str:
+    See: https://python.langchain.com/docs/modules/model_io/output_parsers/structured
 
-    """ Extracts the highest degree including area of study from resume. """
+    Args: 
 
-    response = get_completion(f""" Read the resume closely. It is delimited with {delimiter} characters.
-                              
-                              Ouput the highest level of education the applicant holds, including any major, minor, area of study that's part of the degree.
+        content (str)
 
-                              If any part of the information is unavaible, do not make it up.
+    Keyword Args:
 
-                              Also, do not count any certifications.
-                              
-                              resume: {delimiter}{resume}{delimiter}
-                                
-                                Respond following these sample formats:
-                                
-                                1. MBA in Management Information System 
-                                2. Bachelors of Science with major in Computer Information Systems in Business, minor in Mathematics
-                                3. Bachelors of Arts """)
+        llm (BaseModel): ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False) by default
+
+    Returns:
+
+        a dictionary containing the extracted information; if a field does not exist, its dictionary value will be -1.
+     
+    """
+
+    degree_schema = ResponseSchema(name="degree",
+                             description="Extract the highest degree of education, ignore any cerfications. If this information is not found, output -1")
+    study_schema = ResponseSchema(name="study",
+                                        description="Extract the area of study including any majors and minors for the highest degree of education. If this information is not found, output -1")
+    year_schema = ResponseSchema(name="graduation year",
+                             description="Extract the year of graduation from the highest degree of education. If this information is not found, output -1")
+    gpa_schema = ResponseSchema(name="gpa",
+                                        description="Extract the gpa of the highest degree of graduation. If this information is not found, output -1")
     
-    print(f"Sucessfully extracted highest education: {response}")
-    return response
+    response_schemas = [degree_schema, 
+                        study_schema,
+                        year_schema,
+                        gpa_schema]
+
+    output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
+    format_instructions = output_parser.get_format_instructions()
+    template_string = """For the following text, delimited with {delimiter} chracters, extract the following information:
+
+    degree: Extract the highest degree of education, ignore any cerfications. If this information is not found, output -1\
+
+    study: Extract the area of study including any majors and minors for the highest degree of education. If this information is not found, output -1-1\
+    
+    graduation year: Extract the year of graduation from the highest degree of education. If this information is not found, output -1\
+    
+    gpa: Extract the gpa of the highest degree of graduation. If this information is not found, output -1\
+
+    text: {delimiter}{text}{delimiter}
+
+    {format_instructions}
+    """
+
+    prompt = ChatPromptTemplate.from_template(template=template_string)
+    messages = prompt.format_messages(text=content, 
+                                format_instructions=format_instructions,
+                                delimiter=delimiter)
+ 
+    response = llm(messages)
+    education_info_dict = output_parser.parse(response.content)
+    print(f"Successfully extracted education info: {education_info_dict}")
+    return education_info_dict
+
+
+def extract_resume_fields3(resume: str,  llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False)) -> Any:
+
+    """ Extracts personal information from resume, including name, email, phone, and address
+
+    See structured output parser: https://python.langchain.com/docs/modules/model_io/output_parsers/structured
+
+    Args:
+
+        resume (str)
+
+    Keyword Args:
+
+        llm (BaseModel): ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", cache=False) by default
+
+    Returns:
+
+        a dictionary containing the extracted information; if a field does not exist, its dictionary value will be -1
+    
+    """
+
+    field_names = ["Personal Information", "Work Experience", "Education", "Summary or Objective", "Skills", "Awards and Honors", "Voluntary Experience", "Activities and Hobbies", "Professional Accomplishment"]
+    contact_schema = ResponseSchema(name="personal contact",
+                             description="Extract the personal contact section of the resume. If this information is not found, output -1")
+    work_schema = ResponseSchema(name="work experience",
+                                        description="Extract the work experience section of the resume. If this information is not found, output -1")
+    education_schema = ResponseSchema(name="education",
+                                        description="Extract the education section of the resume. If this information is not found, output -1")
+    objective_schema = ResponseSchema(name="summary or objective",
+                                        description="Extract the summary of objective section of the resume. If this information is not found, output -1")
+    skills_schema = ResponseSchema(name="skills", 
+                                 description="Extract the skills section of the resume. If there are multiple skills section, combine them into one. If this information is not found, output -1")
+    awards_schema = ResponseSchema(name="awards and honors", 
+                                   description="Extract the awards and honors sections of the resume.  If this information is not found, output -1")
+    accomplishments_schema = ResponseSchema(name="professional accomplishment", 
+                                   description="""Extract the professional accomplishment section of the resume that is not work experience. 
+                                   Professional accomplishment should be composed of trainings, skills, projects that the applicant learned or has done. 
+                                   .  If this information is not found, output -1""")
+    certification_schema = ResponseSchema(name="certification", 
+                                description="""Extract the certification sections of the resume. Extract only names of certifications, names of certifying agencies, if applicable,  
+                                                dates of obtainment (and expiration date, if applicable), and location, if applicable. If none of these information is found, output -1""")
+    
+    response_schemas = [contact_schema, 
+                        work_schema,
+                        education_schema, 
+                        objective_schema, 
+                        skills_schema,
+                        awards_schema,
+                        accomplishments_schema,
+                        certification_schema,
+                        ]
+
+    output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
+    format_instructions = output_parser.get_format_instructions()
+    template_string = """For the following text, delimited with {delimiter} chracters, extract the following information:
+
+    personal contact: Extract the personal contact section of the resume. If this information is not found, output -1\
+
+    work experience: Extract the work experience section of the resume. If this information is not found, output -1\
+
+    education: Extract the education section of the resume. If this information is not found, output -1\
+    
+    summary or objective: Extract the summary of objective section of the resume. If this information is not found, output -1\
+
+    skills: Extract the skills section of the resume. If there are multiple skills section, combine them into one. If this information is not found, output -1\
+
+    awards and honors: Extract the awards and honors sections of the resume.  If this information is not found, output -1\
+    
+    professional accomplishment: Extract professional accomplishment from the resume that is not work experience. 
+                                Professional accomplishment should be composed of trainings, skills, projects that the applicant learned or has done. 
+                                If this information is not found, output -1\
+                    
+    certification: Extract the certification sections of the resume. Extract only names of certification, names of certifying agencies, if applicable,  
+                    dates of obtainment (and expiration date, if applicable), and location, if applicable. If none of these information is found, output -1
+
+    text: {delimiter}{text}{delimiter}
+
+    {format_instructions}
+    """
+
+    prompt = ChatPromptTemplate.from_template(template=template_string)
+    messages = prompt.format_messages(text=resume, 
+                                format_instructions=format_instructions,
+                                delimiter=delimiter)
+    response = llm(messages)
+    field_info_dict = output_parser.parse(response.content)
+    print(f"Successfully extracted resume field info: {field_info_dict}")
+    return field_info_dict
+
+
 
 
 def extract_job_title(resume: str) -> str:
@@ -274,9 +396,39 @@ def extract_job_title(resume: str) -> str:
     print(f"Successfull extracted job title: {response}")
     return response
 
-def extract_posting_keywords(posting_content:str, llm = OpenAI()) -> List:
+def extract_positive_qualities(content: str, llm=ChatOpenAI(model="gpt-3.5-turbo", temperature=0.0)) -> str:
 
-    """ Extract the ATS keywords and pieces of job description verbatim out of job posting. """
+    """ Find positive qualities of the applicant in the provided content, such as resume, cover letter, etc. """
+
+    query = f""" Your task is to extract the positive qualities of a job applicant given the provided document. 
+    
+            document: {content}
+
+            Do not focus on hard skills or actual achievements. Rather, focus on soft skills, personality traits, special needs that the applicant may have.
+
+            """
+    response = get_completion(query)
+    print(f"Successfully extracted positive qualities: {response}")
+    return response
+
+def extract_posting_keywords(posting_content:str, llm = OpenAI()) -> List[str]:
+
+    """ Extract the ATS keywords and key phrases from job posting. 
+    
+        Args:
+         
+            posting_content(str)
+
+        Keyword Args:
+
+            llm: default is OpenAI()
+
+        Returns:
+
+            list of keywords and key phrases
+
+        
+    """
 
     query = """Extract all the ATS keywords and phrases, job specific description with regard to skills, responsibilities, roles, requirements from the job posting below.
 
@@ -302,125 +454,149 @@ def extract_posting_keywords(posting_content:str, llm = OpenAI()) -> List:
 
 
 
-# class ResumeField(BaseModel):
-#     field_name: str=Field(description="field name")
-#     field_content: str=Field(description="content of the field")
-def extract_resume_fields(resume: str,  llm=OpenAI(temperature=0,  max_tokens=2048)) -> Dict[str, str]:
+# def extract_resume_fields(resume: str,  llm=OpenAI(temperature=0,  max_tokens=2048)) -> Dict[str, str]:
 
-    """ Extracts resume field names and field content.
+#     """ Extracts resume field names and field content.
 
-    This utilizes a sequential chain: https://python.langchain.com/docs/modules/chains/foundational/sequential_chains
+#     This utilizes a sequential chain: https://python.langchain.com/docs/modules/chains/foundational/sequential_chains
 
-    Args: 
+#     Args: 
 
-        resume (str)
+#         resume (str)
 
-    Keyword Args:
+#     Keyword Args:
 
-        llm (BaseModel): default is OpenAI(temperature=0,  max_tokens=1024). Note max_token is specified due to a cutoff in output if max token is not specified. 
+#         llm (BaseModel): default is OpenAI(temperature=0,  max_tokens=1024). Note max_token is specified due to a cutoff in output if max token is not specified. 
 
-    Returns:
+#     Returns:
 
-        a dictionary of field names and their respective content
+#         a dictionary of field names and their respective content
     
-    
-    """
+#     """
 
-    # First chain: get resume field names
-    field_name_query =  """Search and extract names of fields contained in the resume delimited with {delimiter} characters. A field name must has content contained in it for it to be considered a field name. 
+#     # First chain: get resume field names
+#     field_name_query =  """Search and extract names of fields contained in the resume delimited with {delimiter} characters. A field name must has content contained in it for it to be considered a field name. 
 
-        Some common resume field names include but not limited to personal information, objective, education, work experience, awards and honors, area of expertise, professional highlights, skills, etc. 
+#         Some common resume field names include but not limited to personal information, objective, education, work experience, awards and honors, area of expertise, professional highlights, skills, etc. 
              
-        If there are no obvious field name but some information belong together, like name, phone number, address, please generate a field name for this group of information, such as Personal Information.  
+#         If there are no obvious field name but some information belong together, like name, phone number, address, please generate a field name for this group of information, such as Personal Information.  
  
-        Do not output both names if they point to the same content, such as Work Experience and Professional Experience. 
+#         Do not output both names if they point to the same content, such as Work Experience and Professional Experience. 
 
-         resume: {delimiter}{resume}{delimiter} \n
+#          resume: {delimiter}{resume}{delimiter} \n
          
-         {format_instructions}"""
-    output_parser = CommaSeparatedListOutputParser()
-    format_instructions = output_parser.get_format_instructions()
-    field_name_prompt = PromptTemplate(
-        template=field_name_query,
-        input_variables=["delimiter", "resume"],
-        partial_variables={"format_instructions": format_instructions}
-    )
-    field_name_chain = LLMChain(llm=llm, prompt=field_name_prompt, output_key="field_names")
+#          {format_instructions}"""
+#     output_parser = CommaSeparatedListOutputParser()
+#     format_instructions = output_parser.get_format_instructions()
+#     field_name_prompt = PromptTemplate(
+#         template=field_name_query,
+#         input_variables=["delimiter", "resume"],
+#         partial_variables={"format_instructions": format_instructions}
+#     )
+#     field_name_chain = LLMChain(llm=llm, prompt=field_name_prompt, output_key="field_names")
 
-    field_content_query = """For each field name in {field_names}, check if there is valid content within it in the resume. 
+#     field_content_query = """For each field name in {field_names}, check if there is valid content within it in the resume. 
 
-    If the field name is valid, output in JSON with field name as key and content as value. DO NOT LOSE ANY INFORMATION OF THE CONTENT WHEN YOU SAVE IT AS THE VALUE.
+#     If the field name is valid, output in JSON with field name as key and content as value. DO NOT LOSE ANY INFORMATION OF THE CONTENT WHEN YOU SAVE IT AS THE VALUE.
 
-    Also, there should not be two field names with the same value. 
 
-      resume: {delimiter}{resume}{delimiter} \n
+#       resume: {delimiter}{resume}{delimiter} \n
  
-    """
+#     """
+#     # Chain two: get resume field content associated with each names
+#     format_instructions = output_parser.get_format_instructions()
+#     prompt = PromptTemplate(
+#         template=field_content_query,
+#         input_variables=["delimiter", "resume", "field_names"],
+#     )
+#     field_content_chain = LLMChain(llm=llm, prompt=prompt, output_key="field_content")
 
-    # {format_instructions}
-    
-    # output_parser = PydanticOutputParser(pydantic_object=ResumeField)
+#     overall_chain = SequentialChain(
+#         memory=SimpleMemory(memories={"resume":resume}),
+#         chains=[field_name_chain, field_content_chain],
+#         input_variables=["delimiter"],
+#     # Here we return multiple variables
+#         output_variables=["field_names",  "field_content"],
+#         verbose=True)
+#     response = overall_chain({"delimiter": "####"})
+#     field_names = output_parser.parse(response.get("field_names", ""))
+#     # sometimes, not always, there's an annoying text "Output: " in front of json that needs to be stripped
+#     field_content = '{' + response.get("field_content", "").split('{', 1)[-1]
+#     print(response.get("field_content", ""))
+#     field_content = get_completion(f""" Delete any keys with empty values and keys with duplicate value in the following JSON string: {field_content}.                                
+#                                    Your output should still be in JSON. """)
+#     try: 
+#         field_content_dict = json.loads(field_content)
+#     except Exception as e:
+#         raise e
+#     return field_content_dict
 
-    # Chain two: get resume field content associated with each names
-    format_instructions = output_parser.get_format_instructions()
-    prompt = PromptTemplate(
-        template=field_content_query,
-        input_variables=["delimiter", "resume", "field_names"],
-        # partial_variables={"format_instructions": format_instructions}
-    )
-    field_content_chain = LLMChain(llm=llm, prompt=prompt, output_key="field_content")
+# class ResumeField(BaseModel):
+#     field_name:   str = Field(description="resume field name",)
+#     field_content: str = Field(description="resume field content",)
+# def extract_resume_fields2(resume: str,  llm=OpenAI(temperature=0,  max_tokens=2048)) -> Dict[str, str]:
+#     # Set up a parser + inject instructions into the prompt template.
+#     field_names = ["Personal Information", "Work Experience", "Education", "Summary or Objective", "Skills", "Awards and Honors", "Voluntary Experience", "Activities and Hobbies", "Professional Accomplishment"]
+#     query = f"""For each field name in the list {field_names}, check if there is valid content in the resume that can be categorized into it.
 
-    # Chain three: trim the dictionary for further resume evaluation
-    # dict_trim_query = """ For the field content in the JSON string format below:
-    
-    # Remove all the JSON key value pair where the value is empty. 
+#     If there's valid content, output in JSON with the field name in the list as key and the valid content as value. DO NOT LOSE ANY INFORMATION OF THE CONTENT WHEN YOU SAVE IT AS THE VALUE.
 
-    # If there are two keys with the same value, remove one of the key and value pair from the JSON entry.
+#     If there's nothing that fit into the field name, output an empty string. 
 
-    # Output the same JSON string with the above things deleted. MAKE SURE YOUR OUTPUT IS IN JSON FORMAT.
+#     resume: {delimiter}{resume}{delimiter} \n
 
-    # field content: {field_content}
+#     """
 
-    # """
-    # format_instructions = output_parser.get_format_instructions()
-    # prompt = PromptTemplate(
-    #     template=dict_trim_query,
-    #     input_variables=["field_content"],
-    #     # partial_variables={"format_instructions": format_instructions}
-    # )
-    # content_trim_chain = LLMChain(llm=llm, prompt=prompt, output_key="trimmed_field_content")
+#     # query = f""" Check if there's valid content that can be categorized into the given resume field names in the resume delimited with {delimiter} characters below.
 
-    overall_chain = SequentialChain(
-        memory=SimpleMemory(memories={"resume":resume}),
-        # chains=[field_name_chain, field_content_chain, content_trim_chain],
-        chains=[field_name_chain, field_content_chain],
-        # input_variables=["delimiter", "resume"],
-        input_variables=["delimiter"],
-    # Here we return multiple variables
-        # output_variables=["field_names",  "field_content", "trimmed_field_content"],
-        output_variables=["field_names",  "field_content"],
-        verbose=True)
-    # response = overall_chain({"delimiter":"####", "resume":resume})
-    response = overall_chain({"delimiter": "####"})
-    field_names = output_parser.parse(response.get("field_names", ""))
-    # sometimes, not always, there's an annoying text "Output: " in front of json that needs to be stripped
-    field_content = '{' + response.get("field_content", "").split('{', 1)[-1]
-    print(response.get("field_content", ""))
-    # trimmed_field_content = '{' + response.get("trimmed_field_content", "").split('{', 1)[-1]
-    # print(trimmed_field_content)
+#     # resume: {delimiter}{resume}{delimiter}"""
+
+#     parser = PydanticOutputParser(pydantic_object=ResumeField)
+
+#     prompt = PromptTemplate(
+#         template="Answer the user query.\n{format_instructions}\n{query}\n",
+#         input_variables=["query"],
+#         partial_variables={"format_instructions": parser.get_format_instructions()},
+#     )
+#     _input = prompt.format_prompt(query=query)
+
+#     output = llm(_input.to_string())
+
+#     try: 
+#         response = parser.parse(output)
+#         print(response)
+#     except OutputParserException as e:
+#         print("EEEEEEEEEEEEEE")
+#         output = str(e)
+#         response = output[output.find("{"):output.rfind("}")-1]
+#         print(response)
+#     # try:
+#     #     dict = json.loads(response)
+#     # except Exception as e:
+#     #     raise e
+#     return response
+
+
+
+def calculate_graduation_years(graduation_year:str) -> Optional[int]:
+
+    """ Calculate the number of years since graduation. """
+
+    today = datetime.date.today()
+    this_year = today.year   
     try:
-        field_content = json.loads(field_content)
-    except JSONDecodeError as e:
-        field_content = get_completion(f""" Correct the misformatted JSON string below and output a valid JSON string:
-                       {field_content} """)
-    # output_parser.parse(field_content)
-    return field_content
+        years = int(this_year)-int(graduation_year)
+    except Exception:
+        return None
+    print(f"Successfully calculated years since graduation: {years}")
+    return years
 
 
 
-def extract_work_experience_level(content: str, job_title:str,  llm=ChatOpenAI(model="gpt-4", temperature=0, cache = False)) -> str:
 
-    """ Extracts work experience level of a given job title from work experience.
+def calculate_work_experience_level(content: str, job_title:str,  llm=ChatOpenAI(temperature=0, cache = False)) -> str:
+
+    """ Calculate work experience level of a given job title based on work experience.
 
     Args:
 
@@ -436,77 +612,107 @@ def extract_work_experience_level(content: str, job_title:str,  llm=ChatOpenAI(m
 
         outputs  "no experience", 'entry level', 'junior level', 'mid level', or 'senior level'
     """
-  
-    dates_query = """ Your task is to extract and output the years of work or volunteer experience of a resume.
-            
-              Search for all work or volunteer experience in the resume similar to that of {job_title}. 
 
-              If the work experience is not in the same field of work as {job_title}, do not output the dates of that period.
+    query = f"""
+		You are an assistant that evaluates and categorizes work experience content with respect with to {job_title} into the follow categories:
 
-              Ignore all the months and days and output the years only. Substitute present or current year with 2023. 
-              
-              For example, format each as such:
+        ["no experience", "entry level", "junior level", "mid level", "senior level"] \n
 
-              example: 2014-2016, 2018-2023
-              example: 2012-2015, 2015-2022
+        work experience content: {content}
 
-              If there are no experience, output 0.
+        If content contains work experience related to {job_title}, incorporate these experiences into evalution. 
 
-              Remember, extract the work or volunteer years of experience only. Ignore education and other stuff. 
+        ADD TOGETHER ALL RELEVANT WORK EXPERIENCE WITH RESPECT TO THE POSITION {job_title}.
 
-            resume: {content}
+        Categorize based on the number fo years: 
+        
+        For less than 1 year of work experience or no experience, mark as no experience.
 
-            {format_instructions}
-            """
-    output_parser = CommaSeparatedListOutputParser()
-    format_instructions = output_parser.get_format_instructions()
-    dates_prompt = PromptTemplate(
-        template=dates_query,
-        input_variables=["job_title", "content"],
-        partial_variables={"format_instructions": format_instructions}
-    )
-    dates_chain = LLMChain(llm=llm, prompt=dates_prompt, output_key="dates")
-    response = dates_chain.run({"job_title":job_title, "content":content})
-    dates_list = output_parser.parse(response)
-    print(dates_list)
+        For 1 to 2 years of work experience, mark as entry level.
 
-    span=0
-    for dates in dates_list:
-        try:
-            span += int(dates[5:])-int(dates[:4])
-        except Exception:
-            pass
+        For 3-5 years of work experience, mark as junior level.
 
-    if span==0:
-        work_experience = "no experience"
-    elif 1<=span<3:
-        work_experience = "entry level"
-    elif 3<=span<6:
-        work_experience = "junior level"
-    elif 5<=span<10:
-        work_experience =  "mid level"
-    elif span>=10:
-        work_experience = "senior level"
+        For 6-10 years of work experience, mark as mid level.
+        
+        For more than 10 years of work experience, mark as senior level
 
-    print(f"Successfully extracted work experience level: {work_experience}")
-    return work_experience
+        Today's date is {date.today()}. 
 
+		Please output the ONLY ONE work experience level without reasoning.
+		"""
 
-#TODO
-def evaluate_resume_type(resume_content:str, work_experience:str) -> str:
+    prompt = PromptTemplate.from_template(query)
+    chain = SmartLLMChain(llm=llm, prompt=prompt, n_ideas=3, verbose=True)
+    response = chain.run({})
+    response = get_completion(f""" Extract the work experience level from the following text. 
+                    text: {response} \n
+                    It should be one of the following: "no experience", "entry level", "junior level", "mid level", "senior level". 
+                    Output the category only and nothing else. """, model="gpt-4")
+    print(f"Successfully calculated work experience level: {response}")
+    return response
 
-    """ Evaluates if applicant benefits most with a chronological resume or functional resume. """   
+# def find_resume_content(field_type: str, resume_content:str)->str:
 
-    if work_experience=="no experience" or work_experience=="entry level":
-        type =  "functional"
-    else:
-        type = "chronological"
+#     query = f"""Search in the resume for content that can be categorized as {field_type}. 
+
+#     It may be the case that the content is found in several section in the resume. 
+    
+#     For example, PROFESSIONAL ACCOMPLISHMENT may be found in work experience, projects, training, skills etc. 
+
+#     However, some fields such as EDUCATION may already be categorized under one section. 
+    
+#     Output the exact content verbatim and nothing else.
+
+#     If the content doesn't exist, output -1. 
+     
+#       resume: {resume_content} """
+
+#     response = get_completion(query)
+
+#     print(f"Successfully found resume content {field_type}: {resume_content}")
+
+#     return response
 
 
 
 
 
-def get_web_resources(query: str, llm = ChatOpenAI(temperature=0.8, model="gpt-3.5-turbo-0613", cache=False)) -> str:
+# def evalute_resume_type(resume_content:str, type:str,  llm=ChatOpenAI( temperature=0, cache = False))-> str:
+
+#     """" Determines if resume is written in the best format. """
+
+#     if type == "student":
+#         query = """ Assess if the below resume meets the criteria for a student resume.
+    
+#         """
+#     elif type == "functional":
+#         query = f""" Assess if the below resume delimited with {delimiter} characters meets the criteria for a functional resume. 
+        
+#         A functional resume should have a professional accomplishment section that is different from the work experience section. 
+          
+#         The professional accomplishment section should be focused on the skills, trainings, and projects that compensate for the lack of work experience.
+
+#         If there's no professional accomplishment section, it should have a descriptive skills sections where how each skill is utlized is showcased. 
+        
+#         The focus of the functional resume should be on skills and abilities rather than work experience.
+
+#         If the resume doesn't meet the above criteria, it is not a functional resume.
+
+#         resume: {delimiter}{resume_content}{delimiter}
+        
+#         """
+
+#     # If it should be a student resume, check on the education, volunteer work, any skill, and reference sections and see if it has these filled out. 
+
+#     # If it should be a functional resume, check and see if there are any professional accomplishmenet other than work experience provided.
+
+#     # If it should be a chronological resume, focus on the work experience, awards and honors, and achievments sections and see if they are written well.
+#     # Please follow the above suggestion and assess if the resume is of the type {type} resume.
+#     tools = create_wiki_tools()
+#     response = generate_multifunction_response(query, tools)
+#     print(response)
+
+def get_web_resources(query: str, with_source: bool=False, llm = ChatOpenAI(temperature=0.8, model="gpt-3.5-turbo-0613", cache=False)) -> str:
 
     """ Retrieves web answer given a query question. The default search is using WebReserachRetriever: https://python.langchain.com/docs/modules/data_connection/retrievers/web_research.
     
@@ -522,8 +728,12 @@ def get_web_resources(query: str, llm = ChatOpenAI(temperature=0.8, model="gpt-3
             llm=llm, 
             search=search, 
         )
-        qa_chain = RetrievalQA.from_chain_type(llm, retriever=web_research_retriever)
-        response = qa_chain.run(query)
+        if (with_source):
+            qa_source_chain = RetrievalQAWithSourcesChain.from_chain_type(llm, retriever=web_research_retriever)
+            response = qa_source_chain({"question":query})
+        else:
+            qa_chain = RetrievalQA.from_chain_type(llm, retriever=web_research_retriever)
+            response = qa_chain.run(query)
         print(f"Successfully retreived web resources using Web Research Retriever: {response}")
     except Exception:
         tools = create_search_tools("google", 3)
@@ -674,20 +884,24 @@ def create_sample_tools(related_samples: List[str], sample_type: str,) -> Union[
 
 
 # one of the most important functions
-def get_generated_responses(resume_content="",about_me="", posting_path="", program_path=""): 
+def get_generated_responses(resume_content="",about_me="", posting_path="", program_path="") -> Dict[str, str]: 
 
     # Get personal information from resume
     generated_responses={}
     pursuit_info_dict = {"job": -1, "company": -1, "institution": -1, "program": -1}
 
     if (Path(posting_path).is_file()):
+        posting = read_txt(posting_path)
         prompt_template = """Identity the job position, company then provide a summary in 100 words or less of the following job posting:
             {text} \n
-            Focus on roles and skills involved for this job. Do not include information irrelevant to this specific position.
+            Focus on the roles and skills involved for this job. Extract any ATS-friendly keyword or key phrases from the job posting too.
+             
+            Do not include information irrelevant to this specific position.
         """
         job_specification = create_summary_chain(posting_path, prompt_template, chunk_size=4000)
         generated_responses.update({"job specification": job_specification})
-        posting = read_txt(posting_path)
+        job_keywords = extract_posting_keywords(posting)
+        generated_responses.update({"job keywords": job_keywords})
         pursuit_info_dict1 = extract_pursuit_information(posting)
         for key, value in pursuit_info_dict.items():
             if value == -1:
@@ -717,15 +931,15 @@ def get_generated_responses(resume_content="",about_me="", posting_path="", prog
     if resume_content!="":
         personal_info_dict = extract_personal_information(resume_content)
         generated_responses.update(personal_info_dict)
-        field_content = extract_resume_fields(resume_content)
-        field_names = list(field_content.keys())
-        generated_responses.update({"field names": field_names})
+        field_content = extract_resume_fields3(resume_content)
+        # field_names = list(field_content.keys())
+        # generated_responses.update({"field names": field_names})
         generated_responses.update(field_content)
         if pursuit_info_dict["job"] == -1:
             pursuit_info_dict["job"] = extract_job_title(resume_content)
-        work_experience = extract_work_experience_level(resume_content, pursuit_info_dict["job"])
-        education_level = extract_education_level(resume_content)
-        generated_responses.update({"highest education level": education_level})
+        work_experience = calculate_work_experience_level(resume_content, pursuit_info_dict["job"])
+        education_info_dict = extract_education_information(resume_content)
+        generated_responses.update(education_info_dict)
         generated_responses.update({"work experience level": work_experience})
 
     generated_responses.update(pursuit_info_dict)
@@ -857,7 +1071,7 @@ def binary_file_downloader_html(json_request: str):
 
     try: 
         args = json.loads(json_request)
-        file = args["file path"]
+        file = args["file_path"]
     except JSONDecodeError:
         return """ Format in the following JSON and try again: '{{"file path": "<file path>"}}' """
     with open(file, 'rb') as f:

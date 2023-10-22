@@ -31,7 +31,7 @@ from langchain.agents import AgentType, Tool, load_tools
 from langchain.memory.chat_message_histories.in_memory import ChatMessageHistory
 from langchain.memory import ChatMessageHistory
 from langchain.schema import messages_from_dict, messages_to_dict, AgentAction
-from langchain.utilities import GoogleSearchAPIWrapper
+from langchain.utilities.google_search import GoogleSearchAPIWrapper
 from langchain.retrievers.web_research import WebResearchRetriever
 from langchain.docstore import InMemoryDocstore
 from langchain.agents import AgentExecutor, ZeroShotAgent
@@ -59,7 +59,7 @@ from langchain.agents.agent_toolkits import create_conversational_retrieval_agen
 from langchain.agents.agent_toolkits import create_retriever_tool
 from typing import List, Dict
 from json import JSONDecodeError
-from langchain.tools import tool, format_tool_to_openai_function
+from langchain.tools import tool
 import re
 import asyncio
 from tenacity import retry, wait_exponential, stop_after_attempt
@@ -68,6 +68,7 @@ from langchain.tools.file_management.read import ReadFileTool
 from langchain.cache import InMemoryCache
 from langchain.tools import StructuredTool
 from urllib import request
+from langchain.globals import set_llm_cache
 
 
 from dotenv import load_dotenv, find_dotenv
@@ -86,7 +87,7 @@ channels = 1 # number of channel
 class InterviewController():
 
     llm = ChatOpenAI(streaming=True,  callbacks=[StreamingStdOutCallbackHandler()], temperature=0)
-    # langchain.llm_cache = InMemoryCache()
+    set_llm_cache(InMemoryCache())
     embeddings = OpenAIEmbeddings()
     # chat_memory = ReadOnlySharedMemory(memory=chat_memory)
     # initialize new memory (shared betweeen interviewer and grader_agent)

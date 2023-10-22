@@ -16,6 +16,9 @@ from typing import Any, List, Union, Dict
 from docxtpl import DocxTemplate
 from langchain.document_transformers import Html2TextTransformer
 from langchain.document_loaders import AsyncHtmlLoader
+import asyncio
+from bs4 import BeautifulSoup
+from playwright.async_api import async_playwright
     
 
 def convert_to_txt(file, output_path):
@@ -77,7 +80,7 @@ def read_txt(file):
             text = f.read()
             return text
     except Exception as e:
-        print(e)
+        raise e
     
 def markdown_table_to_dict(markdown_table):
     # Convert Markdown to HTML
@@ -133,12 +136,12 @@ def retrieve_web_content(link, save_path="./web_data/test.txt"):
     
 # this one is better than the above function 
 def html_to_text(urls:List[str], save_path="./web_data/test.txt"):
+    
     loader = AsyncHtmlLoader(urls)
     docs = loader.load()
     html2text = Html2TextTransformer()
     docs_transformed = html2text.transform_documents(docs)
-    content = docs_transformed[0].page_content
-    print(docs_transformed[0].page_content[0:500])
+    content = docs_transformed[0].page_content              
     if content:
         with open(save_path, 'w') as file:
             file.write(content)
@@ -151,30 +154,113 @@ def html_to_text(urls:List[str], save_path="./web_data/test.txt"):
 
 
 
-def write_to_docx_template(doc: Any, field_name: List[str], field_content: Dict[str, str], res_path) -> None:
-    context = {key: None for key in field_name}
-    for field in field_name:
-        if field_content[field] != -1:
-            context[field] = field_content[field]
-    doc.render(context)
-    doc.save(res_path)
-    print(f"Succesfully written {field_name} to {res_path}.")
+# def write_to_docx_template(doc: Any, field_name: List[str], field_content: Dict[str, str], res_path) -> None:
+#     context = {key: None for key in field_name}
+#     for field in field_name:
+#         if field_content[field] != -1:
+#             context[field] = field_content[field]
+#     doc.render(context)
+#     doc.save(res_path)
+#     print(f"Succesfully written {field_name} to {res_path}.")
+
+# source code: https://github.com/trancethehuman/entities-extraction-web-scraper/blob/main/scrape.py
+async def ascrape_playwright(url, tags: list[str] = ["h1", "h2", "h3", "span"]) -> str:
+    """
+    An asynchronous Python function that uses Playwright to scrape
+    content from a given URL, extracting specified HTML tags and removing unwanted tags and unnecessary
+    lines.
+    """
+    print("Started scraping...")
+    results = ""
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        try:
+            page = await browser.new_page()
+            await page.goto(url)
+
+            page_source = await page.content()
+
+            # results = remove_unessesary_lines(extract_tags(remove_unwanted_tags(
+            #     page_source), tags))
+            results = extract_tags(remove_unwanted_tags(
+                page_source), tags)
+            print("Content scraped")
+        except Exception as e:
+            results = f"Error: {e}"
+        await browser.close()
+    # return page_source
+    return results 
+
+def remove_unwanted_tags(html_content, unwanted_tags=["script", "style"]):
+    """
+    This removes unwanted HTML tags from the given HTML content.
+    """
+    soup = BeautifulSoup(html_content, 'html.parser')
+
+    for tag in unwanted_tags:
+        for element in soup.find_all(tag):
+            element.decompose()
+
+    return str(soup)
 
 
-        
+def extract_tags(html_content, tags: list[str]):
+    """
+    This takes in HTML content and a list of tags, and returns a string
+    containing the text content of all elements with those tags, along with their href attribute if the
+    tag is an "a" tag.
+    """
+    soup = BeautifulSoup(html_content, 'html.parser')
+    text_parts = []
+
+    for tag in tags:
+        elements = soup.find_all(tag)
+        for element in elements:
+            # If the tag is a link (a tag), append its href as well
+            if tag == "a":
+                href = element.get('href')
+                if href:
+                    text_parts.append(f"{element.get_text()} ({href})")
+                else:
+                    text_parts.append(element.get_text())
+            else:
+                text_parts.append(element.get_text())
+
+    return ' '.join(text_parts)
+
+
+def remove_unessesary_lines(content):
+    # Split content into lines
+    lines = content.split("\n")
+
+    # Strip whitespace for each line
+    stripped_lines = [line.strip() for line in lines]
+
+    # Filter out empty lines
+    non_empty_lines = [line for line in stripped_lines if line]
+
+    # Remove duplicated lines (while preserving order)
+    seen = set()
+    deduped_lines = [line for line in non_empty_lines if not (
+        line in seen or seen.add(line))]
+
+    # Join the cleaned lines without any separators (remove newlines)
+    cleaned_content = " ".join(deduped_lines)
+
+    return cleaned_content     
 
 
 
 
 if __name__=="__main__":
     # retrieve_web_content(
-    #     "https://apply.deloitte.com/careers/InviteToApply?jobId=160041&source=LinkedIn",
-    #     save_path = f"./uploads/link/deloitte.txt")
+    #     "https://www.google.com/search?q=software+engineer+jobs+in+chicago+&oq=jobs+in+chicago&aqs=chrome.0.0i131i433i512j0i512l9.1387j1j7&sourceid=chrome&ie=UTF-8&ibp=htl;jobs&sa=X&ved=2ahUKEwikxaml1dqBAxULkmoFHRzvD2MQudcGKAF6BAgSEC8&sxsrf=AM9HkKmG-P_UI-ha1ySTJJklAvltPyKEtA:1696363178524#fpstate=tldetail&htivrt=jobs&htidocid=AMKKBKD-6xYovEnvAAAAAA%3D%3D",
+    #     save_path = f"./uploads/link/chicago0.txt")
     html_to_text(
-        "https://www.themuse.com/advice/interview-questions-and-answers",
-    #     save_path =f"./uploads/link/deloitte.txt")
-        save_path = f"./interview_data/{str(uuid.uuid4())}.txt")
-    # convert_to_txt("./resume_samples/resume2023.docx", "./resume_samples/resume2023v3.txt")
+        "https://www.forbes.com/sites/forbeshumanresourcescouncil/2019/06/17/13-tips-for-standing-out-on-your-next-job-application/?sh=5c7198987d9d",
+        # save_path =f"./uploads/link/software08.txt")
+        save_path = f"./web_data/{str(uuid.uuid4())}.txt")
+    # convert_to_txt("./generated_responses/resume2023v3_cover_letter_southerncompany.docx", "cv01.txt")
 
 
 

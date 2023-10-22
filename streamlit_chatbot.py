@@ -29,7 +29,8 @@ from functools import lru_cache
 from typing import Any
 import multiprocessing as mp
 from langchain.embeddings import OpenAIEmbeddings
-from langchain_utils import retrieve_faiss_vectorstore, create_vectorstore, merge_faiss_vectorstore, create_vs_retriever_tools, create_retriever_tools
+from langchain.chat_models import ChatOpenAI
+from langchain_utils import retrieve_faiss_vectorstore, create_vectorstore, merge_faiss_vectorstore, create_vs_retriever_tools, create_retriever_tools, create_tag_chain
 # import keyboard
 from pynput.keyboard import Key, Controller
 from pynput import keyboard
@@ -44,6 +45,7 @@ from streamlit_modal import Modal
 import json
 from st_pages import show_pages_from_config, add_page_title, show_pages, Page
 
+
 # Either this or add_indentation() MUST be called on each page in your
 # app to add indendation in the sidebar
 
@@ -56,6 +58,7 @@ show_pages(
     [
         Page("streamlit_chatbot.py", "Home", "🏠"),
         Page("streamlit_interviewbot.py", "Mock Interview", ":books:"),
+        # Page("streamlit_resources.py", "Resources", ":busts_in_silhouette:" ),
     ]
 )
 
@@ -74,6 +77,7 @@ fs = 44100 # sample rate
 channels = 1 # number of channel
 device = 4
 max_token_count=3500
+topic = "tech jobs"
 
 
 class Chat():
@@ -115,7 +119,7 @@ class Chat():
                 new_chat = ChatController(st.session_state.userid)
                 st.session_state["basechat"] = new_chat 
             if "tipofday" not in st.session_state:
-                tip = generate_tip_of_the_day()
+                tip = generate_tip_of_the_day(topic)
                 st.session_state["tipofday"] = tip
                 st.write(tip)
                 
@@ -147,9 +151,10 @@ class Chat():
 
             SAMPLE_QUESTIONS = {
                 "":"",
-                "help me write a cover letter": "coverletter",
-                "help me evaluate my resume": "resume",
-                "help me tailor my application": "customize"
+                "help me write a cover letter": "generate",
+                "help me evaluate my resume": "evaluate",
+                "help me reformat my resume": "reformat",
+                "help me rewrite my document": "customize"
             }
 
 
@@ -194,17 +199,17 @@ class Chat():
                 st.markdown('''
                 I'm a career AI advisor. I can:
                             
-                - Evaluate your resume
-                - Write a cover letter
-                - Tailor your application
-                            
-                Get started by filling out the form below, or just chat with me!
+                - Help with your resume, cover letter, and personal statement
+                - Conduct mock interview
+
+                If you want to practice for your next interview, please click on the Mock Interview tab above. 
+                Otherwise, start with the Quick Navigation below, or just chat with me!
                                             
                 ''')
 
                 add_vertical_space(3)
 
-  
+                st.markdown("Quick Navigation")
                 with st.form( key='my_form', clear_on_submit=True):
 
                     # col1, col2= st.columns([5, 5])
@@ -226,21 +231,21 @@ class Chat():
                     # about_me = st.text_area(label="About", placeholder="""You can say,  I want to apply for the MBA program at ABC University, or I wish to work for XYZ as a customer service representative. 
                     
                     # If you want to provide any links, such as a link to a job posting, please paste it here. """, key="about_me")
-                        
-                    add_vertical_space(1)
-                    # link = st.text_area(label="share your links here", placeholder="Please separate each link by a comma", key = "link")
 
                     uploaded_files = st.file_uploader(label="Upload your files",
-                                                      help = "This can be your resume, cover letter, learning material, job posting, or anything else you need help with. ",
+                                                      help = "This can be your resume, cover letter, or anything else you want to provide me with. ",
                                                     type=["pdf","odt", "docx","txt", "zip", "pptx"], 
                                                     key = "files",
                                                     accept_multiple_files=True)
+
+                    
+                    link = st.text_area(label="Paste your link", key = "link", help="This can be a job posting, for example.")
+
                     add_vertical_space(1)
-                    prefilled = st.selectbox(label="Quick navigation",
+                    prefilled = st.selectbox(label="Ask me a question",
                                             options=sorted(SAMPLE_QUESTIONS.keys()), 
-                                            label_visibility="hidden", 
                                             key = "prefilled",
-                                            format_func=lambda x: '-----Quick Navigation-----' if x == '' else x,
+                                            format_func=lambda x: '' if x == '' else x,
                                             )
 
 
@@ -265,6 +270,9 @@ class Chat():
                     #         st.session_state.questions.append(self.question)
                     #         st.session_state.responses.append(response)
 
+                # upload_error = st.empty()
+                # if "upload_error" not in st.session_state:
+                #     st.session_state["upload_error"] = upload_error
 
                 add_vertical_space(3)
 
@@ -348,9 +356,10 @@ class Chat():
                 # streamlit_handler = StreamlitCallbackHandler(
                 #     parent_container=res,
                 # )
-                response = self.new_chat.askAI(st.session_state.userid, st.session_state.questionInput, callbacks=None)
-                st.session_state.questions.append(st.session_state.questionInput)
-                st.session_state.responses.append(response)
+                if st.session_state.questionInput!="":
+                    response = self.new_chat.askAI(st.session_state.userid, st.session_state.questionInput, callbacks=None)
+                    st.session_state.questions.append(st.session_state.questionInput)
+                    st.session_state.responses.append(response)
             # 'Chat' object has no attribute 'question': exception occurs when user has not asked a question, in this case, pass
             except AttributeError:
                 pass
@@ -358,11 +367,34 @@ class Chat():
     def process_user_input(self, user_input: str) -> str:
 
         """ Processes user input and processes any links in the input. """
-
+        tag_schema = {
+            "properties": {
+                "aggressiveness": {
+                    "type": "integer",
+                    "enum": [1, 2, 3, 4, 5],
+                    "description": "describes how aggressive the statement is, the higher the number the more aggressive",
+                },
+                "topic": {
+                    "type": "string",
+                    "enum": ["self description", "job or program description", "company or institution description",],
+                    "description": "determines if the statement contains certain topic",
+                },
+            },
+            "required": ["topic", "sentiment", "aggressiveness"],
+        }
+        response = create_tag_chain(tag_schema, user_input)
+        topic = response.get("topic", "")
+        if topic != "other":
+            self.new_chat.update_entities(f"about me:{user_input} /n ###")
+        urls = re.findall(r'(https?://\S+)', user_input)
+        print(urls)
+        if urls:
+            for url in urls:
+                self.process_link(url)
+        return user_input
+        
         if check_content_safety(text_str=user_input):
-            if evaluate_content(user_input, "a job or program application request that contains a job or program title"):
-                self.new_chat.update_entities(f"about me:{user_input} /n ###")
-            elif evaluate_content(user_input, "a career or education related self description "):
+            if evaluate_content(user_input, "a job, program, company, or institutation description or a personal background description"):
                 self.new_chat.update_entities(f"about me:{user_input} /n ###")
             urls = re.findall(r'(https?://\S+)', user_input)
             print(urls)
@@ -410,10 +442,11 @@ class Chat():
             convert_to_txt(tmp_save_path, end_path)
             content_safe, content_type, content_topics = check_content(end_path)
             print(content_type, content_safe, content_topics) 
-            if content_safe:
+            if content_safe and content_type!="empty":
                 self.update_entities(content_type, content_topics, end_path)
             else:
-                st.write("File content cannot be processed. Please try another file.")
+                st.error(f"Failed processing {Path(uploaded_file.name).root}. Please try another file!")
+                # st.session_state.upload_error.markdown(f"{Path(uploaded_file.name).root} failed. Please try another file!")
                 os.remove(end_path)
         
 
@@ -426,10 +459,11 @@ class Chat():
         # if (retrieve_web_content(posting, save_path = end_path)):
             content_safe, content_type, content_topics = check_content(end_path)
             print(content_type, content_safe, content_topics) 
-            if content_safe:
+            if content_safe and content_type!="empty" and content_type!="browser error":
                 self.update_entities(content_type, content_topics, end_path)
             else:
-                st.write("Link content cannot be processed. Please try another link.")
+                st.error(f"Failed processing {link}. Please try another link!")
+                # st.session_state.upload_error.markdown(f"{link} failed. Please try another link!")
                 os.remove(end_path)
 
 
@@ -437,13 +471,16 @@ class Chat():
 
         """ Update entities for chat agent. """
 
-        if content_type=="browser error" or content_type=="empty":
-            st.write("Link content cannot be read. Please try another link, paste the link content, or save the content as file and try again.")
-        elif content_type!="other":
-            content = read_txt(end_path)
-            token_count = num_tokens_from_text(content)
-            if token_count>max_token_count:
-                shorten_content(end_path, content_type) 
+        # if content_type=="browser error" or content_type=="empty":
+        #     modal = Modal(key="error_popup", title="Content cannot be processed")
+        #     with modal.container():
+        #         st.write("If you shared a link, please try pasting the link content, or save the content as file and try again.")
+        if content_type!="other" and content_type!="learning material":
+            if content_type=="job posting":
+                content = read_txt(end_path)
+                token_count = num_tokens_from_text(content)
+                if token_count>max_token_count:
+                    shorten_content(end_path, content_type) 
             content_type = content_type.replace(" ", "_").strip()        
             entity = f"""{content_type}_file: {end_path} /n ###"""
             self.new_chat.update_entities(entity)

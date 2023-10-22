@@ -5,9 +5,9 @@ from langchain.docstore.wikipedia import Wikipedia
 from langchain.chat_models import ChatOpenAI
 from langchain.llms import OpenAI
 from langchain.tools.python.tool import PythonREPLTool
-from langchain.utilities import SerpAPIWrapper
-from langchain.utilities import GoogleSearchAPIWrapper
-from langchain import ElasticVectorSearch
+from langchain.utilities.serpapi import SerpAPIWrapper
+from langchain.utilities.google_search import GoogleSearchAPIWrapper
+# from langchain import ElasticVectorSearch
 from langchain.vectorstores.elastic_vector_search import ElasticKnnSearch
 from langchain.embeddings import ElasticsearchEmbeddings
 from elasticsearch import Elasticsearch
@@ -15,9 +15,9 @@ from ssl import create_default_context
 from langchain.prompts import BaseChatPromptTemplate
 from langchain.agents import Tool, AgentExecutor, LLMSingleActionAgent, AgentOutputParser, initialize_agent, Tool
 from langchain.schema import AgentAction, AgentFinish, HumanMessage
-from langchain import LLMChain
+from langchain.chains import LLMChain
 from langchain.chains.summarize import load_summarize_chain
-from langchain import PromptTemplate
+from langchain.prompts import PromptTemplate
 from langchain.chains import RetrievalQA, RetrievalQAWithSourcesChain, TransformChain
 from langchain.memory import ConversationBufferMemory
 from langchain.chains.qa_with_sources import load_qa_with_sources_chain, stuff_prompt
@@ -33,7 +33,7 @@ import langchain
 from langchain.cache import RedisCache
 from langchain.cache import RedisSemanticCache
 import json
-from typing import List, Union, Any
+from typing import List, Union, Any, Optional
 import re
 import docx
 from langchain.tools import tool
@@ -60,8 +60,14 @@ from basic_utils import read_txt
 from json import JSONDecodeError
 from langchain.document_transformers import LongContextReorder
 from langchain.retrievers import BM25Retriever, EnsembleRetriever
-from langchain import LLMMathChain
-
+from langchain.chains import LLMMathChain
+from langchain.chains import (create_extraction_chain,
+                              create_extraction_chain_pydantic)
+from langchain_experimental.autonomous_agents import BabyAGI
+import faiss
+from langchain.vectorstores import FAISS
+from langchain.docstore import InMemoryDocstore
+from langchain.chains import create_tagging_chain, create_tagging_chain_pydantic
 
 
 
@@ -72,14 +78,7 @@ feast_repo_path = "."
 redis_password=os.getenv('REDIS_PASSWORD')
 redis_url = f"redis://:{redis_password}@localhost:6379"
 redis_client = redis.Redis.from_url(redis_url)
-# standard cache
-# langchain.llm_cache = RedisCache(redis_client)
-# semantic cache
-# !!!!RedisSentimentCache does not support caching ChatModel outputs.
-# langchain.llm_cache = RedisSemanticCache(
-#     embedding=OpenAIEmbeddings(),
-#     redis_url=redis_url
-# )
+
 
 
 def split_doc(path='./web_data/', path_type='dir', splitter_type = "recursive", chunk_size=200, chunk_overlap=10) -> List[Document]:
@@ -564,7 +563,33 @@ def create_mapreduce_chain(files: List[str], map_template:str, reduce_template:s
 
     print(map_reduce_chain.run(docs))
 
+def create_tag_chain(schema, user_input, llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613")):
 
+    chain = create_tagging_chain(schema, llm)
+    response = chain.run(user_input)
+    return response
+
+
+def create_web_extraction_chain(content:str, schema, schema_type="dict", llm=ChatOpenAI(temperature=0, cache = False)):
+
+    if schema_type=="dict":
+        chain = create_extraction_chain(schema, llm)
+        response = chain.run(content)
+        return response
+
+def create_babyagi_chain(OBJECTIVE: str, llm = OpenAI(temperature=0)):
+    
+    embeddings = OpenAIEmbeddings()
+    embedding_size = 1536
+    index = faiss.IndexFlatL2(embedding_size)
+    vectorstore = FAISS(embeddings.embed_query, index, InMemoryDocstore({}), {})
+    # Logging of LLMChains
+    # If None, will keep on going forever
+    max_iterations: Optional[int] = 3
+    baby_agi = BabyAGI.from_llm(
+        llm=llm, vectorstore=vectorstore, verbose=True, max_iterations=max_iterations
+    )
+    response = baby_agi({"objective": OBJECTIVE})
 
 def generate_multifunction_response(query: str, tools: List[Tool], early_stopping=False, max_iter = 2, llm = ChatOpenAI(model="gpt-3.5-turbo-0613", cache=False)) -> str:
 
