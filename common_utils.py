@@ -69,7 +69,7 @@ import random
 import base64
 import datetime
 from datetime import date
-from feast import FeatureStore
+# from feast import FeatureStore
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
 
@@ -77,8 +77,8 @@ delimiter = "####"
 delimiter2 = "'''"
 delimiter3 = '---'
 delimiter4 = '////'
-feast_repo_path = "/home/tebblespc/Auto-GPT/autogpt/auto_gpt_workspace/my_feature_repo/feature_repo/"
-store = FeatureStore(repo_path = feast_repo_path)
+# feast_repo_path = "/home/tebblespc/Auto-GPT/autogpt/auto_gpt_workspace/my_feature_repo/feature_repo/"
+# store = FeatureStore(repo_path = feast_repo_path)
 
 
 

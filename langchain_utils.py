@@ -74,7 +74,6 @@ from langchain.chains import create_tagging_chain, create_tagging_chain_pydantic
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
 # You may need to update the path depending on where you stored it
-feast_repo_path = "."
 redis_password=os.getenv('REDIS_PASSWORD')
 redis_url = f"redis://:{redis_password}@localhost:6379"
 redis_client = redis.Redis.from_url(redis_url)

@@ -17,7 +17,6 @@ import asyncio
 import random
 import base64
 from datetime import date
-from feast import FeatureStore
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
 
