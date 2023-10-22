@@ -257,10 +257,9 @@ if __name__=="__main__":
     #     "https://www.google.com/search?q=software+engineer+jobs+in+chicago+&oq=jobs+in+chicago&aqs=chrome.0.0i131i433i512j0i512l9.1387j1j7&sourceid=chrome&ie=UTF-8&ibp=htl;jobs&sa=X&ved=2ahUKEwikxaml1dqBAxULkmoFHRzvD2MQudcGKAF6BAgSEC8&sxsrf=AM9HkKmG-P_UI-ha1ySTJJklAvltPyKEtA:1696363178524#fpstate=tldetail&htivrt=jobs&htidocid=AMKKBKD-6xYovEnvAAAAAA%3D%3D",
     #     save_path = f"./uploads/link/chicago0.txt")
     html_to_text(
-        "https://www.forbes.com/sites/forbeshumanresourcescouncil/2019/06/17/13-tips-for-standing-out-on-your-next-job-application/?sh=5c7198987d9d",
+        "https://www.betterup.com/blog/skills-for-resume",
         # save_path =f"./uploads/link/software08.txt")
         save_path = f"./web_data/{str(uuid.uuid4())}.txt")
-    # convert_to_txt("./generated_responses/resume2023v3_cover_letter_southerncompany.docx", "cv01.txt")
 
 
 

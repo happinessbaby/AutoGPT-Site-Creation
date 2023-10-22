@@ -8,9 +8,9 @@ from langchain.tools.python.tool import PythonREPLTool
 from langchain.utilities.serpapi import SerpAPIWrapper
 from langchain.utilities.google_search import GoogleSearchAPIWrapper
 # from langchain import ElasticVectorSearch
-from langchain.vectorstores.elastic_vector_search import ElasticKnnSearch
-from langchain.embeddings import ElasticsearchEmbeddings
-from elasticsearch import Elasticsearch
+# from langchain.vectorstores.elastic_vector_search import ElasticKnnSearch
+# from langchain.embeddings import ElasticsearchEmbeddings
+# from elasticsearch import Elasticsearch
 from ssl import create_default_context
 from langchain.prompts import BaseChatPromptTemplate
 from langchain.agents import Tool, AgentExecutor, LLMSingleActionAgent, AgentOutputParser, initialize_agent, Tool
