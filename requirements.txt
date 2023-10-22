@@ -21,7 +21,7 @@ tiktoken==0.3.3
 rank_bm25==0.2.2
 html2text==2020.1.16
 python-pptx==0.6.21
-doctran==0.0.9
+doctran
 tenacity==8.2.3
 # flask-sqlalchemy==3.1.1
 sounddevice==0.4.6
@@ -34,7 +34,7 @@ docxtpl==0.16.7
 langchain_experimental==0.0.29
 playwright==1.38.0
 SQLAlchemy==2.0.22
-spacy==3.5.0
+spacy
 tokenizers==0.13.3
 urllib3==2.0.4
 requests==2.31.0
