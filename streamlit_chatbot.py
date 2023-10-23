@@ -28,20 +28,8 @@ import requests
 from functools import lru_cache
 from typing import Any
 import multiprocessing as mp
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.chat_models import ChatOpenAI
 from langchain_utils import retrieve_faiss_vectorstore, create_vectorstore, merge_faiss_vectorstore, create_vs_retriever_tools, create_retriever_tools, create_tag_chain
-# import keyboard
-from pynput.keyboard import Key, Controller
-from pynput import keyboard
-import sounddevice as sd
-import soundfile as sf
-import tempfile
 import openai
-from elevenlabs import generate, play, set_api_key
-from time import gmtime, strftime
-from playsound import playsound
-from streamlit_modal import Modal
 import json
 from st_pages import show_pages_from_config, add_page_title, show_pages, Page
 
@@ -68,7 +56,6 @@ show_pages(
 
 _ = load_dotenv(find_dotenv()) # read local .env file
 openai.api_key = os.environ['OPENAI_API_KEY']
-set_api_key(os.environ["11LABS_API_KEY"])
 save_path = os.environ["SAVE_PATH"]
 temp_path = os.environ["TEMP_PATH"]
 placeholder = st.empty()
