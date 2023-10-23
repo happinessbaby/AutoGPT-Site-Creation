@@ -30,7 +30,6 @@ from typing import Any
 import multiprocessing as mp
 from langchain.embeddings import OpenAIEmbeddings
 from langchain_utils import retrieve_faiss_vectorstore, create_vectorstore, merge_faiss_vectorstore, create_vs_retriever_tools, create_retriever_tools
-import keyboard as kb
 from pynput.keyboard import Key, Controller
 from pynput import keyboard
 import sounddevice as sd
