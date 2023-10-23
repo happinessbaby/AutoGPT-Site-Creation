@@ -6,11 +6,7 @@ docarray==0.32.1
 pandoc==2.3
 pypandoc==1.11
 wikipedia==1.4.0
-# Flask-WTF==1.1.1
 google-search-results==2.4.2
-# celery==5.3.1
-# flask-dropzone==1.6.0
-# Flask-Session==0.5.0
 streamlit==1.24.1
 streamlit-chat==0.1.1
 streamlit-extras==0.2.7
@@ -23,7 +19,6 @@ html2text==2020.1.16
 python-pptx==0.6.21
 doctran
 tenacity==8.2.3
-# flask-sqlalchemy==3.1.1
 sounddevice==0.4.6
 soundfile==0.12.1
 # elevenlabs==0.2.26
@@ -47,3 +42,4 @@ python-xlib==0.33
 pydantic==1.10.9
 # feast==0.31.1
 beautifulsoup4==4.12.2
+loguru==0.7.0
