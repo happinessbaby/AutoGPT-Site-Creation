@@ -198,17 +198,18 @@ def create_wiki_tools() -> List[Tool]:
     ]
     return tools
 
-def create_math_tools(llm=OpenAI()):
+# def create_math_tools(llm=OpenAI()):
 
-    llm_math_chain = LLMMathChain.from_llm(llm=llm, verbose=True)
+#     llm_math_chain = LLMMathChain.from_llm(llm=llm, verbose=True)
 
-    tools = [
-    Tool(
-        name="Calculator",
-        func=llm_math_chain.run,
-        description="useful for when you need to answer questions that needs simple math"
-    ),
-    ]
+#     tools = [
+#     Tool(
+#         name="Calculator",
+#         func=llm_math_chain.run,
+#         description="useful for when you need to answer questions that needs simple math"
+#     ),
+#     ]
+#     return tools
 
 
 def create_qa_tools(qa_chain):
