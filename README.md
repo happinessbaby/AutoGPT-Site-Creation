@@ -30,14 +30,5 @@ A voice bot AI that can conduct mock interviews (hopefully a video bot in the fu
 
 
 
-#### How to Run
-
-
-````
- streamlit run streamlit_chatbot.py
-````
-
-
-
 
 
