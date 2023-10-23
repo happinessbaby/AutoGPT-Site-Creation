@@ -46,6 +46,7 @@ from playsound import playsound
 from streamlit_modal import Modal
 import json
 from threading import Thread
+from langchain.tools import ElevenLabsText2SpeechTool
 import threading
 from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -288,6 +289,10 @@ class Interview():
             user_input = self.transcribe_audio2()
             response = self.new_interview.askAI(user_input)
             print(response)
+            # tts = ElevenLabsText2SpeechTool()
+            # speech_file = tts.run(response)
+            # tts.play(speech_file)
+            # st.session_state.tts.play(response)
             self.record = True
 
          
