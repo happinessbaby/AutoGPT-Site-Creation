@@ -8,9 +8,9 @@ from langchain.tools.python.tool import PythonREPLTool
 from langchain.utilities.serpapi import SerpAPIWrapper
 from langchain.utilities.google_search import GoogleSearchAPIWrapper
 # from langchain import ElasticVectorSearch
-from langchain.vectorstores.elastic_vector_search import ElasticKnnSearch
-from langchain.embeddings import ElasticsearchEmbeddings
-from elasticsearch import Elasticsearch
+# from langchain.vectorstores.elastic_vector_search import ElasticKnnSearch
+# from langchain.embeddings import ElasticsearchEmbeddings
+# from elasticsearch import Elasticsearch
 from ssl import create_default_context
 from langchain.prompts import BaseChatPromptTemplate
 from langchain.agents import Tool, AgentExecutor, LLMSingleActionAgent, AgentOutputParser, initialize_agent, Tool
@@ -74,7 +74,6 @@ from langchain.chains import create_tagging_chain, create_tagging_chain_pydantic
 from dotenv import load_dotenv, find_dotenv
 _ = load_dotenv(find_dotenv()) # read local .env file
 # You may need to update the path depending on where you stored it
-feast_repo_path = "."
 redis_password=os.getenv('REDIS_PASSWORD')
 redis_url = f"redis://:{redis_password}@localhost:6379"
 redis_client = redis.Redis.from_url(redis_url)
@@ -401,33 +400,33 @@ def create_compression_retriever(vectorstore = "faiss_web_data") -> ContextualCo
 
 
 
-def create_elastic_knn():
-    # Define the model ID
-    model_id = "mymodel"
-  # Create Elasticsearch connection
-    context = create_default_context(cafile="/home/tebblespc/Downloads/certs.pem")
-    es_connection = Elasticsearch(
-    hosts=["https://127.0.0.1:9200"], basic_auth=("elastic", "changeme"), ssl_context = context)   
+# def create_elastic_knn():
+#     # Define the model ID
+#     model_id = "mymodel"
+#   # Create Elasticsearch connection
+#     context = create_default_context(cafile="/home/tebblespc/Downloads/certs.pem")
+#     es_connection = Elasticsearch(
+#     hosts=["https://127.0.0.1:9200"], basic_auth=("elastic", "changeme"), ssl_context = context)   
 
- # Instantiate ElasticsearchEmbeddings using es_connection
-    embeddings = ElasticsearchEmbeddings.from_es_connection(
-        model_id,
-        es_connection,
-    )
+#  # Instantiate ElasticsearchEmbeddings using es_connection
+#     embeddings = ElasticsearchEmbeddings.from_es_connection(
+#         model_id,
+#         es_connection,
+#     )
 
-    query = "Hello"
-    knn_result = knn_search.knn_search(query=query, model_id="mymodel", k=2)
-    print(f"kNN search results for query '{query}': {knn_result}")
-    print(
-        f"The 'text' field value from the top hit is: '{knn_result['hits']['hits'][0]['_source']['text']}'"
-    )
+#     query = "Hello"
+#     knn_result = knn_search.knn_search(query=query, model_id="mymodel", k=2)
+#     print(f"kNN search results for query '{query}': {knn_result}")
+#     print(
+#         f"The 'text' field value from the top hit is: '{knn_result['hits']['hits'][0]['_source']['text']}'"
+#     )
 
-    # Initialize ElasticKnnSearch
-    knn_search = ElasticKnnSearch(
-        es_connection=es_connection, index_name="elastic-index", embedding=embeddings
-    )
+#     # Initialize ElasticKnnSearch
+#     knn_search = ElasticKnnSearch(
+#         es_connection=es_connection, index_name="elastic-index", embedding=embeddings
+#     )
     
-    return knn_search
+#     return knn_search
 
 def create_summary_chain(path: str, prompt_template: str, chain_type = "stuff", chunk_size=2000,  llm=OpenAI()) -> str:
 

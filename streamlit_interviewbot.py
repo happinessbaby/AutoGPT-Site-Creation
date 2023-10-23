@@ -40,7 +40,7 @@ import numpy  as np# Make sure NumPy is loaded before it is used in the callback
 assert np  # avoid "imported but unused" message (W0611)
 import tempfile
 import openai
-from elevenlabs import generate, play, set_api_key
+# from elevenlabs import generate, play, set_api_key
 from time import gmtime, strftime
 from playsound import playsound
 from streamlit_modal import Modal
@@ -60,7 +60,7 @@ import base64
 
 _ = load_dotenv(find_dotenv()) # read local .env file
 openai.api_key = os.environ['OPENAI_API_KEY']
-set_api_key(os.environ["11LABS_API_KEY"])
+# set_api_key(os.environ["11LABS_API_KEY"])
 save_path = os.environ["SAVE_PATH"]
 temp_path = os.environ["TEMP_PATH"]
 placeholder = st.empty()
@@ -332,12 +332,12 @@ class Interview():
         return transcript["text"].strip()
 
     
-    def play_generated_audio(self, text, voice="Bella", model="eleven_monolingual_v1"):
+    # def play_generated_audio(self, text, voice="Bella", model="eleven_monolingual_v1"):
 
-        """ Deploys Eleven Labs for AI generated voice playback """
+    #     """ Deploys Eleven Labs for AI generated voice playback """
 
-        audio = generate(text=text, voice=voice, model=model)
-        play(audio)
+    #     audio = generate(text=text, voice=voice, model=model)
+    #     play(audio)
 
     def interview_feedback(self):
 
