@@ -245,7 +245,9 @@ def extract_education_information(content: str, llm = ChatOpenAI(temperature=0, 
 
     Returns:
 
-        a dictionary containing the extracted information; if a field does not exist, its dictionary value will be -1.
+        a dictionary containing the keys: degree, study, graduation year, gpa
+        
+        if a field does not exist, its dictionary value will be -1.
      
     """
 
@@ -382,19 +384,19 @@ def extract_resume_fields3(resume: str,  llm = ChatOpenAI(temperature=0, model="
 
 
 
-def extract_job_title(resume: str) -> str:
+# def extract_job_title(resume: str) -> str:
 
-    """ Extracts job title from resume. """
+#     """ Extracts job title from resume. """
 
-    response = get_completion(f"""Read the resume closely. It is delimited with {delimiter} characters. 
+#     response = get_completion(f"""Read the resume closely. It is delimited with {delimiter} characters. 
                               
-                              Output a likely job position that this applicant is currently holding or a possible job position he or she is applying for.
+#                               Output a likely job position that this applicant is currently holding or a possible job position he or she is applying for.
                               
-                              resume: {delimiter}{resume}{delimiter}. \n
+#                               resume: {delimiter}{resume}{delimiter}. \n
                               
-                              Response with only the job position, no punctuation or other text. """)
-    print(f"Successfull extracted job title: {response}")
-    return response
+#                               Response with only the job position, no punctuation or other text. """)
+#     print(f"Successfull extracted job title: {response}")
+#     return response
 
 def extract_positive_qualities(content: str, llm=ChatOpenAI(model="gpt-3.5-turbo", temperature=0.0)) -> str:
 
@@ -936,7 +938,7 @@ def get_generated_responses(resume_content="",about_me="", posting_path="", prog
         # generated_responses.update({"field names": field_names})
         generated_responses.update(field_content)
         if pursuit_info_dict["job"] == -1:
-            pursuit_info_dict["job"] = extract_job_title(resume_content)
+            pursuit_info_dict["job"] = extract_pursuit_information(resume_content).get("job", "")
         work_experience = calculate_work_experience_level(resume_content, pursuit_info_dict["job"])
         education_info_dict = extract_education_information(resume_content)
         generated_responses.update(education_info_dict)
@@ -947,6 +949,10 @@ def get_generated_responses(resume_content="",about_me="", posting_path="", prog
     company = generated_responses["company"]
     institution = generated_responses["institution"]
     program = generated_responses["program"]
+
+    if job!=-1 and generated_responses.get("job keywords", "")=="":
+        job_keywords = get_web_resources(f"Research some ATS-friendly keywords and key phrases for {job}.")
+        generated_responses.update({"job keywords": job_keywords})
 
     if job!=-1 and generated_responses.get("job specification", "")=="":
         job_query  = f"""Research what a {job} does and output a detailed description of the common skills, responsibilities, education, experience needed. 

@@ -13,8 +13,6 @@ from langchain_utils import (create_vectorstore, create_summary_chain,
                              create_retriever_tools, retrieve_faiss_vectorstore, merge_faiss_vectorstore, handle_tool_error, create_search_tools, create_wiki_tools)
 # from langchain.prompts import BaseChatPromptTemplate
 from langchain.agents import Tool, AgentExecutor, LLMSingleActionAgent, AgentOutputParser
-# from langchain.experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
-# from langchain.schema import AgentAction, AgentFinish, HumanMessage
 from langchain.chains import LLMChain
 from langchain.memory import ConversationBufferMemory, ReadOnlySharedMemory
 from langchain.agents import initialize_agent
@@ -22,7 +20,7 @@ from langchain.agents import AgentType, Tool, load_tools
 from langchain.memory.chat_message_histories.in_memory import ChatMessageHistory
 from langchain.memory import ChatMessageHistory
 from langchain.schema import messages_from_dict, messages_to_dict, AgentAction
-from langchain.utilities import GoogleSearchAPIWrapper
+from langchain.utilities.google_search import GoogleSearchAPIWrapper
 from langchain.retrievers.web_research import WebResearchRetriever
 from langchain.docstore import InMemoryDocstore
 from langchain.agents import AgentExecutor, ZeroShotAgent
@@ -61,13 +59,13 @@ from openai_api import get_completion
 from langchain.schema import OutputParserException
 from multiprocessing import Process, Queue, Value
 from generate_cover_letter import cover_letter_generator, create_cover_letter_generator_tool
-from upgrade_resume import  resume_evaluator, create_resume_evaluator_tool
-from customize_document import create_resume_customize_writer_tool, create_cover_letter_customize_writer_tool, create_personal_statement_customize_writer_tool
+from upgrade_resume import  resume_evaluator, create_resume_evaluator_tool, create_resume_writer_tool, redesign_resume_template
+from customize_document import create_cover_letter_customize_writer_tool, create_personal_statement_customize_writer_tool, create_resume_customize_writer_tool
 from langchain.agents.agent_toolkits import create_conversational_retrieval_agent
 from langchain.agents.agent_toolkits import create_retriever_tool
 from typing import List, Dict
 from json import JSONDecodeError
-from langchain.tools import tool, format_tool_to_openai_function
+from langchain.tools import tool
 import re
 import asyncio
 from tenacity import retry, wait_exponential, stop_after_attempt
@@ -75,6 +73,7 @@ from langchain.agents.agent_toolkits import FileManagementToolkit
 from langchain.tools.file_management.read import ReadFileTool
 from langchain.cache import InMemoryCache
 from langchain.tools import StructuredTool
+from langchain.globals import set_llm_cache
 
 
 
@@ -112,7 +111,7 @@ class ChatController():
     chat_memory = ConversationBufferMemory(llm=llm, memory_key=memory_key, return_messages=True, input_key="input", output_key="output", max_token_limit=memory_max_token)
     # chat_memory = ReadOnlySharedMemory(memory=chat_memory)
     # retry_decorator = _create_retry_decorator(llm)
-    langchain.llm_cache = InMemoryCache()
+    set_llm_cache(InMemoryCache())
 
 
     def __init__(self, userid):
@@ -130,18 +129,15 @@ class ChatController():
     
         # initialize tools
         cover_letter_tool = create_cover_letter_generator_tool()
-        cover_letter_customize_tool = create_cover_letter_customize_writer_tool()
-        # cover letter generator tool
         # cover_letter_tool = [cover_letter_generator]
-        resume_evaluator_tool = create_resume_evaluator_tool()
-        # resume evaluator tool
-        # resume_evaluator_tool = [resume_evaluator]
-        resume_customize_tool = create_resume_customize_writer_tool()
-        # document_customize_tool = [document_customize_writer]
+        cover_letter_customize_tool = create_cover_letter_customize_writer_tool()
         personal_statement_customize_tool = create_personal_statement_customize_writer_tool()
+        resume_customize_tool = create_resume_customize_writer_tool()
+        resume_evaluator_tool = create_resume_evaluator_tool()
+        resume_reformatter_tool = create_resume_writer_tool()
+        resume_template_tool = [redesign_resume_template]
+        # resume_evaluator_tool = [resume_evaluator]
         user_material_tool = [search_user_material]
-        # interview mode starter tool
-        # interview_tool = self.initiate_interview_tool()
         # file_loader_tool = create_file_loader_tool()
         # file loader tool
         working_directory = f"./static/{self.userid}/"
@@ -180,7 +176,7 @@ class ChatController():
         # wiki tool
         wiki_tool = create_wiki_tools()
         # gather all the tools together
-        self.tools =  cover_letter_tool + resume_evaluator_tool + search_tool + wiki_tool + link_download_tool  + general_tool + resume_customize_tool + personal_statement_customize_tool + cover_letter_customize_tool + user_material_tool  + requests_get
+        self.tools =  cover_letter_tool + resume_evaluator_tool + resume_reformatter_tool+ resume_template_tool+ resume_customize_tool+ wiki_tool + search_tool+ link_download_tool  + general_tool  + personal_statement_customize_tool + cover_letter_customize_tool + user_material_tool  + requests_get
         # + [tool for tool in file_sys_tools]
         tool_names = [tool.name for tool in self.tools]
         print(f"Chat agent tools: {tool_names}")
@@ -200,13 +196,13 @@ class ChatController():
 
         You are talkative and provides lots of specific details from its context.
           
-        If you do not know the answer to a question,  truthfully say you don't know. 
+        If you do not know the answer to a question, truthfully say you don't know. 
 
-        You should only converse with the human on career and education related topics. 
+        You should only converse with the human on career related topics. 
 
-        If human wants to talk about other unrelated subjects, please let them know that you are a career advisor only. 
+        If human wants to talk about other unrelated subjects, please let them know that you are a career advisor only.
 
-        You should not answer unrelated questions. 
+        Do not look up for Human anything that's unrelated to your role as a career advisor.
 
         Always check the relevant entities below before answering a question. They will help you assist the human better. 
 

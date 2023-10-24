@@ -17,6 +17,7 @@ from openai_api import get_completion, num_tokens_from_text
 from openai_api import check_content_safety
 from dotenv import load_dotenv, find_dotenv
 from common_utils import  check_content, evaluate_content, generate_tip_of_the_day, shorten_content
+from upgrade_resume import reformat_functional_resume
 import asyncio
 import concurrent.futures
 import subprocess
@@ -32,7 +33,9 @@ from langchain_utils import retrieve_faiss_vectorstore, create_vectorstore, merg
 import openai
 import json
 from st_pages import show_pages_from_config, add_page_title, show_pages, Page
-
+from st_clickable_images import clickable_images
+from streamlit_modal import Modal
+import base64
 
 # Either this or add_indentation() MUST be called on each page in your
 # app to add indendation in the sidebar
@@ -57,7 +60,7 @@ show_pages(
 _ = load_dotenv(find_dotenv()) # read local .env file
 openai.api_key = os.environ['OPENAI_API_KEY']
 save_path = os.environ["SAVE_PATH"]
-temp_path = os.environ["TEMP_PATH"]
+temp_path = "./temp_file/"
 placeholder = st.empty()
 duration = 5 # duration of each recording in seconds
 fs = 44100 # sample rate
@@ -105,10 +108,10 @@ class Chat():
             if "basechat" not in st.session_state:
                 new_chat = ChatController(st.session_state.userid)
                 st.session_state["basechat"] = new_chat 
-            if "tipofday" not in st.session_state:
-                tip = generate_tip_of_the_day(topic)
-                st.session_state["tipofday"] = tip
-                st.write(tip)
+            # if "tipofday" not in st.session_state:
+            #     tip = generate_tip_of_the_day(topic)
+            #     st.session_state["tipofday"] = tip
+            #     st.write(tip)
                 
             try:
                 self.new_chat = st.session_state.basechat
@@ -134,17 +137,12 @@ class Chat():
             #     help="True if LLM thoughts should be expanded by default",
             # )
 
-        
-
             SAMPLE_QUESTIONS = {
                 "":"",
                 "help me write a cover letter": "generate",
-                "help me evaluate my resume": "evaluate",
-                "help me reformat my resume": "reformat",
-                "help me rewrite my document": "customize"
+                "can you evaluate my resume?": "evaluate",
+                "rewrite my resume using a new template": "reformat",
             }
-
-
 
             # Generate empty lists for generated and past.
             ## past stores User's questions
@@ -153,50 +151,22 @@ class Chat():
             ## generated stores AI generated responses
             if 'responses' not in st.session_state:
                 st.session_state['responses'] = list()
-            # if "responses_container" not in st.session_state:
-            #     st.session_state["responses_container"] = st.container()
-            # if "questions_container" not in st.session_state:
-            #     st.session_state["questions_container"] = st.container()
-            # question_container = st.container()
-            # results_container = st.container()
-
 
             # hack to clear text after user input
             if 'questionInput' not in st.session_state:
                 st.session_state.questionInput = ''
-            # def submit():
-            #     st.session_state.questionInput = st.session_state.input
-            #     st.session_state.input = ''    
-            # User input
-            ## Function for taking user provided prompt as input
-            # def get_text():
-            #     st.text_input("Chat with me: ", "", key="input", on_change = submit)
-            #     return st.session_state.questionInput
-            ## Applying the user input box
-            # with st.session_state.questions_container:
-            #     st.text_input("Chat with me: ", "", key="input", on_change = submit)
-                # user_input = get_text()
-                # st.session_state.questions_container = st.empty()
-                # st.session_state.questionInput=''
-
 
             #Sidebar section
             with st.sidebar:
-                st.title("""Hi, I'm Acai 🧸""")
+                st.title("""Hi, I'm your career AI advisor Acai!""")
+                add_vertical_space(1)
                 st.markdown('''
-                I'm a career AI advisor. I can:
-                            
-                - Help with your resume, cover letter, and personal statement
-                - Conduct mock interview
-
-                If you want to practice for your next interview, please click on the Mock Interview tab above. 
-                Otherwise, start with the Quick Navigation below, or just chat with me!
-                                            
+                                                    
+                Chat with me, check out the quick navigation below, or click on the Mock Interview tab above to try it out! 
+                                                    
                 ''')
 
-                add_vertical_space(3)
-
-                st.markdown("Quick Navigation")
+                st.markdown("Quick navigation")
                 with st.form( key='my_form', clear_on_submit=True):
 
                     # col1, col2= st.columns([5, 5])
@@ -220,16 +190,16 @@ class Chat():
                     # If you want to provide any links, such as a link to a job posting, please paste it here. """, key="about_me")
 
                     uploaded_files = st.file_uploader(label="Upload your files",
-                                                      help = "This can be your resume, cover letter, or anything else you want to provide me with. ",
+                                                      help = "This can be your resume, cover letter, or anything else you want to share with me. ",
                                                     type=["pdf","odt", "docx","txt", "zip", "pptx"], 
                                                     key = "files",
                                                     accept_multiple_files=True)
 
                     
-                    link = st.text_area(label="Paste your link", key = "link", help="This can be a job posting, for example.")
+                    link = st.text_area(label="Paste a link", key = "link", help="This can be a job posting url, for example.")
 
                     add_vertical_space(1)
-                    prefilled = st.selectbox(label="Ask me a question",
+                    prefilled = st.selectbox(label="Sample questions",
                                             options=sorted(SAMPLE_QUESTIONS.keys()), 
                                             key = "prefilled",
                                             format_func=lambda x: '' if x == '' else x,
@@ -295,8 +265,11 @@ class Chat():
         self.question = self.process_user_input(st.session_state.input)
         if self.question:
             response = self.new_chat.askAI(st.session_state.userid, self.question, callbacks = None)
-            st.session_state.questions.append(st.session_state.input)
-            st.session_state.responses.append(response)
+            if response == "functional" or response == "chronological" or response == "student":
+                self.resume_template_popup(response)
+            else:
+                st.session_state.questions.append(st.session_state.input)
+                st.session_state.responses.append(response)
         st.session_state.questionInput = st.session_state.input
         st.session_state.input = ''    
 
@@ -350,10 +323,63 @@ class Chat():
             # 'Chat' object has no attribute 'question': exception occurs when user has not asked a question, in this case, pass
             except AttributeError:
                 pass
+
+    def resume_template_popup(self, resume_type):
+
+        """ Popup window for user to select a resume template based on the resume type. """
+
+        print("TEMPLATE POPUP")
+        dir_path=""
+        if resume_type == "functional":
+            dir_path = "./resume_templates/functional/"
+        with placeholder.container():
+            # modal = Modal(key="template_popup", title=f"Based on my evaluation, I have selected some {resume_type} resume templates that best fits your needs.")
+            # with modal.container():
+            self.set_clickable_icons(dir_path)
+
+
+
+    def set_clickable_icons(self, dir_path):
+
+        """ Displays a set of clickable images from a directory of resume template images. """
+
+        images = []
+        for path in Path(dir_path).glob('**/*.png'):
+            file = str(path)
+            with open(file, "rb") as image:
+                encoded = base64.b64encode(image.read()).decode()
+                images.append(f"data:image/png;base64,{encoded}")
+        clicked = clickable_images(
+            images,
+            titles=[f"Image #{str(i)}" for i in range(2)],
+            div_style={"display": "flex", "justify-content": "center", "flex-wrap": "wrap"},
+            img_style={"margin": "5px", "height": "200px"},
+        )
+        if clicked>-1:
+            change_template = False
+            if "last_clicked" not in st.session_state:
+                st.session_state["last_clicked"] = clicked
+                change_template = True
+            else:
+                if clicked != st.session_state["last_clicked"]:
+                    st.session_state["last_clicked"] = clicked
+                    change_template = True
+            if change_template:
+                print("HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH")
+                st.session_state["resume_template"] = f"resume_template: {dir_path}functional-{clicked}.png"
+                st.experimental_rerun()
+
+            # print(f"template number: {clicked}")
+            # self.new_chat.add_entities(f"resume_template: {dir_path}functional-{clicked}.png")
+
+        
+
+
                 
     def process_user_input(self, user_input: str) -> str:
 
         """ Processes user input and processes any links in the input. """
+
         tag_schema = {
             "properties": {
                 "aggressiveness": {
@@ -363,7 +389,7 @@ class Chat():
                 },
                 "topic": {
                     "type": "string",
-                    "enum": ["self description", "job or program description", "company or institution description",],
+                    "enum": ["self description", "job or program description", "company or institution description", "other"],
                     "description": "determines if the statement contains certain topic",
                 },
             },
@@ -371,7 +397,7 @@ class Chat():
         }
         response = create_tag_chain(tag_schema, user_input)
         topic = response.get("topic", "")
-        if topic != "other":
+        if topic == "self description" or topic=="job or program description" or topic=="company or institution description":
             self.new_chat.update_entities(f"about me:{user_input} /n ###")
         urls = re.findall(r'(https?://\S+)', user_input)
         print(urls)

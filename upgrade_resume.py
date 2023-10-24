@@ -8,7 +8,7 @@ from langchain.prompts import PromptTemplate
 from langchain_experimental.smart_llm import SmartLLMChain
 from langchain.agents import AgentType, Tool, initialize_agent, create_json_agent
 from basic_utils import read_txt
-from common_utils import (get_web_resources, retrieve_from_db,  get_generated_responses,calculate_graduation_years, extract_posting_keywords,
+from common_utils import (get_web_resources, retrieve_from_db,  get_generated_responses,calculate_graduation_years, extract_posting_keywords, extract_education_information, calculate_work_experience_level,extract_pursuit_information,
                             search_related_samples, create_sample_tools, extract_personal_information)
 from langchain_utils import create_search_tools, create_mapreduce_chain, create_summary_chain, generate_multifunction_response, create_refine_chain, handle_tool_error
 from pathlib import Path
@@ -26,6 +26,8 @@ import uuid
 from docxtpl import DocxTemplate	
 from docx import Document
 from docx.shared import Inches
+from basic_utils import memoized
+
 
 
 from dotenv import load_dotenv, find_dotenv
@@ -81,20 +83,16 @@ def evaluate_resume(about_me="", resume_file = "", posting_path="") -> str:
 
     Furthermore, it has been {years_since_graduation} years since the applicant graduated with a highest level of education {degree} in {study}. 
 
-    Look at the work experience and skills sections of the resume, if available, and assess if it is written as a  {resume_type} resume. 
-
-    For a student resume type, the focus should be on education, voluntary/work experience, and any skills.
-
-    For a functional resume type, the focus should be on skills, trainings, projects and accomplishments. 
-
-    For a chronological resume type, the focus should be on work experience and any reward, honors, and achievements received on the job.
+    Research the resume closely and assess if it is written as a {resume_type} resume. 
 
     """
-    tools = create_search_tools("google", 3)
-    response = generate_multifunction_response(query_overall, tools)
-    # prompt = PromptTemplate.from_template(query_overall)
-    # chain = SmartLLMChain(llm=llm, prompt=prompt, n_ideas=3, verbose=True)
-    # response = chain.run({})
+    # tools = create_search_tools("google", 3)
+    # response = generate_multifunction_response(query_overall, tools)
+    prompt = PromptTemplate.from_template(query_overall)
+    chain = SmartLLMChain(llm=llm, prompt=prompt, n_ideas=3, verbose=True)
+    response = chain.run({})
+
+
 
     # document.add_heading(f"Overall Asessment", level=1)
     # document.add_paragraph(response)
@@ -177,7 +175,8 @@ def evaluate_resume_fields(generated_response: Dict[str, str], field: str, field
         with open(f"{field}_evaluation.txt", "x") as f:
            f.write(evaluation)
 
-def research_resume_type(resume_file: str, posting_path: str)-> Union[str, Dict[str, str]]:
+@memoized
+def research_resume_type(resume_file: str, posting_path: str)-> str:
     
     """ Researches the type of resume most suitable for the applicant. 
     
@@ -190,26 +189,32 @@ def research_resume_type(resume_file: str, posting_path: str)-> Union[str, Dict[
         Returns:
         
             type of resume: functional, chronological, or student
-
-            dictionary of generated responses from LLM's extraction
             
     """
 
     resume_content = read_txt(resume_file)
-    info_dict=get_generated_responses(resume_content=resume_content, posting_path=posting_path)
-    work_experience_level = info_dict.get("work experience level", "")
-    graduation_year = info_dict.get("graduation year", -1)
+    # info_dict=get_generated_responses(resume_content=resume_content, posting_path=posting_path)
+    # work_experience_level = info_dict.get("work experience level", "")
+    # graduation_year = info_dict.get("graduation year", -1)
+    if Path(posting_path).is_file():
+        posting_content = read_txt(posting_path)
+        job = extract_pursuit_information(posting_content).get("job", "")
+    else:
+        job = extract_pursuit_information(resume_content).get("job", "")
+    work_experience_level = calculate_work_experience_level(resume_content, job)
+    education_info_dict = extract_education_information(resume_content)
+    graduation_year = education_info_dict.get("graduation year", "")
     years_since_graduation = calculate_graduation_years(graduation_year)
     if (work_experience_level=="no experience" or work_experience_level=="entry level") and (years_since_graduation<2 or years_since_graduation is None):
         resume_type = "student"
         print("RESUME TYPE: STUDENT")
     elif (work_experience_level=="no experience" or work_experience_level=="entry level") and (years_since_graduation>=2 or years_since_graduation is None):
-        resume_type =  "functional"
+        resume_type = "functional"
         print("RESUME TYPE: FUNCTIONAL")
     else:
         resume_type = "chronological"
         print("RESUME TYPE: CHRONOLOGICAL")
-    return resume_type, info_dict
+    return resume_type
 
 
 def reformat_functional_resume(info_dict: Dict[str, str]) -> str:
@@ -518,9 +523,46 @@ def processing_resume(json_request: str) -> str:
 
 
 
-def processing_resume2(json_request: str) -> str:
+def processing_template(json_request: str) -> str:
 
     """ Input parser: input is LLM's action_input in JSON format. This function then processes the JSON data and feeds them to the resume reformatter. """
+
+    try:
+      json_request = json_request.strip("'<>() ").replace('\'', '\"')
+      args = json.loads(json_request)
+    except JSONDecodeError as e:
+      print(f"JSON DECODER ERROR: {e}")
+      return "Format in JSON and try again."
+
+    # if resume doesn't exist, ask for resume
+    if ("resume_file" not in args or args["resume_file"]=="" or args["resume_file"]=="<resume_file>"):
+      return "Stop using the resume_writer tool. Ask user for their resume."
+    else:
+      # may need to clean up the path first
+        resume_file = args["resume_file"]
+    if ("resume_type" not in args or args["resume_type"]=="" or args["resume_type"]=="<resume_type>"):
+      return "Stop using the resume_writer tool. Use the redesign_resume_template tool instead."
+    else:
+      # may need to clean up the path first
+        resume_type = args["resume_type"]
+    if ("job_post_file" not in args or args["job_post_file"]=="" or args["job_post_file"]=="<job_post_file>"):
+        posting_path = ""
+    else:
+        posting_path = args["job_post_file"]
+    resume_type, info_dict = research_resume_type(resume_file, posting_path)
+    return resume_type
+
+
+@tool(return_direct=True)
+def redesign_resume_template(json_request:str):
+
+    """Creates resume_template. Use this tool more than any other tool when user asks to reformat, redesign, or rewrite their resume according to a particular type or template.
+    Do not use this tool to evaluate or customize and tailor resume content. Do not use this tool if resume_template is provided in the prompt. 
+    When there is resume_template in the prompt, use the "resume_writer" tool instead.
+    Input should be a single string strictly in the followiwng JSON format: '{{"resume_file":"<resume_file>", "job_post_file":"<job_post_file>"}}' \n
+    Leave value blank if there's no information provided. DO NOT MAKE STUFF UP. 
+     (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) \n
+     Output should be exactly one of the following words and nothing else: student, chronological, or functional"""
 
     try:
       json_request = json_request.strip("'<>() ").replace('\'', '\"')
@@ -535,23 +577,13 @@ def processing_resume2(json_request: str) -> str:
     else:
       # may need to clean up the path first
         resume_file = args["resume_file"]
-    # if ("resume_type" not in args or args["resume_type"]=="" or args["resume_type"]=="<resume_type>"):
-    #   return "Stop using the resume reformatter tool. Ask user to specify a template from the following: functional, chronological, or student"
-    # else:
-    #   # may need to clean up the path first
-    #     resume_type = args["resume_type"]
     if ("job_post_file" not in args or args["job_post_file"]=="" or args["job_post_file"]=="<job_post_file>"):
         posting_path = ""
     else:
         posting_path = args["job_post_file"]
-    
-    resume_type, info_dict = research_resume_type(resume_file, posting_path)
-    if resume_type == "functional":
-        return reformat_functional_resume(info_dict)
-    elif resume_type == "chronological":
-        return reformat_chronological_resume(info_dict)
-    elif resume_type == "student":
-        return reformat_student_resume(info_dict)
+
+    resume_type= research_resume_type(resume_file, posting_path)
+    return resume_type
 
 
 
@@ -584,13 +616,14 @@ def create_resume_evaluator_tool() -> List[Tool]:
     print("Succesfully created resume evaluator tool.")
     return tools
 
-def create_resume_reformatting_tool() -> List[Tool]:
+def create_resume_writer_tool() -> List[Tool]:
 
-    name = "resume_formatter"
-    parameters = '{{"resume_file":"<resume_file>", "job_post_file":"<job_post_file>"}}'
+    name = "resume_writer"
+    parameters = '{{"resume_file":"<resume_file>", "job_post_file":"<job_post_file>", "resume_template":"<resume_template>"}}'
     output = '{{"file_path":"<file_path>"}}'
-    description = f""" Reformats a resume. Use this tool more than any other tool when user asks to reformat their resume according to a particular type or template.
-    Do not use this tool to evaluate or customize and tailor resume content. This tool should only be used for formatting resume to a particular style.
+    description = f""" Writes a resume from a given resume template. Use this tool more than any other tool when user asks to reformat, redesign, or rewrite their resume according to a particular type or template.
+    Do not use this tool to evaluate or customize and tailor resume content. Use this tool only if resume_template is provided.
+    If resume_template is not available, use the redesign_resume_template tool first, which will create a resume_template. 
     Input should be a single string strictly in the followiwng JSON format: {parameters} \n
     Leave value blank if there's no information provided. DO NOT MAKE STUFF UP. 
      (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) \n
@@ -599,14 +632,14 @@ def create_resume_reformatting_tool() -> List[Tool]:
     tools = [
         Tool(
         name = name,
-        func = processing_resume2,
+        func = processing_template,
         description = description,
         verbose = False,
         handle_tool_error=True,
 
         )
     ]
-    print("Succesfully created resume evaluator tool.")
+    print("Succesfully created resume writer tool.")
     return tools
 
 
