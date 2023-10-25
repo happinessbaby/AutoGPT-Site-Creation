@@ -8,7 +8,7 @@ from langchain.embeddings import OpenAIEmbeddings
 # from langchain.prompts import ChatPromptTemplate
 # from langchain.agents import ConversationalChatAgent, Tool, AgentExecutor
 from common_utils import file_loader, check_content, binary_file_downloader_html, search_all_chat_history, search_user_material
-from langchain_utils import (create_vectorstore, create_summary_chain,
+from langchain_utils import (create_vectorstore, create_summary_chain, MyCustomAsyncHandler,MyCustomSyncHandler,
                              retrieve_redis_vectorstore, split_doc, CustomOutputParser, CustomPromptTemplate, create_vs_retriever_tools,
                              create_retriever_tools, retrieve_faiss_vectorstore, merge_faiss_vectorstore, handle_tool_error, create_search_tools, create_wiki_tools)
 # from langchain.prompts import BaseChatPromptTemplate
@@ -68,7 +68,7 @@ from json import JSONDecodeError
 from langchain.tools import tool
 import re
 import asyncio
-from tenacity import retry, wait_exponential, stop_after_attempt
+from tenacity import retry, wait_exponential, stop_after_attempt, wait_fixed
 from langchain.agents.agent_toolkits import FileManagementToolkit
 from langchain.tools.file_management.read import ReadFileTool
 from langchain.cache import InMemoryCache
@@ -106,7 +106,7 @@ memory_key="chat_history"
 class ChatController():
 
     # llm = ChatOpenAI(streaming=True, callbacks=[StreamingStdOutCallbackHandler()], temperature=0, cache = False)
-    llm = ChatOpenAI(model="gpt-4", streaming=True,temperature=0, cache = False)
+    llm = ChatOpenAI(model="gpt-4", streaming=True,temperature=0, cache = False, callbacks=[MyCustomSyncHandler()])
     embeddings = OpenAIEmbeddings()
     chat_memory = ConversationBufferMemory(llm=llm, memory_key=memory_key, return_messages=True, input_key="input", output_key="output", max_token_limit=memory_max_token)
     # chat_memory = ReadOnlySharedMemory(memory=chat_memory)
@@ -134,7 +134,7 @@ class ChatController():
         personal_statement_customize_tool = create_personal_statement_customize_writer_tool()
         resume_customize_tool = create_resume_customize_writer_tool()
         resume_evaluator_tool = create_resume_evaluator_tool()
-        resume_reformatter_tool = create_resume_writer_tool()
+        resume_writer_tool = create_resume_writer_tool()
         resume_template_tool = [redesign_resume_template]
         # resume_evaluator_tool = [resume_evaluator]
         user_material_tool = [search_user_material]
@@ -176,7 +176,7 @@ class ChatController():
         # wiki tool
         wiki_tool = create_wiki_tools()
         # gather all the tools together
-        self.tools =  cover_letter_tool + resume_evaluator_tool + resume_reformatter_tool+ resume_template_tool+ resume_customize_tool+ wiki_tool + search_tool+ link_download_tool  + general_tool  + personal_statement_customize_tool + cover_letter_customize_tool + user_material_tool  + requests_get
+        self.tools =  cover_letter_tool + resume_evaluator_tool + resume_writer_tool+ resume_template_tool+ resume_customize_tool+ wiki_tool + search_tool+ link_download_tool  + general_tool  + personal_statement_customize_tool + cover_letter_customize_tool + user_material_tool  + requests_get
         # + [tool for tool in file_sys_tools]
         tool_names = [tool.name for tool in self.tools]
         print(f"Chat agent tools: {tool_names}")
@@ -438,10 +438,11 @@ class ChatController():
 
 
 
-    @retry(
-        wait=wait_exponential(multiplier=1, min=4, max=10),  # Exponential backoff between retries
-        stop=stop_after_attempt(5)  # Maximum number of retry attempts
-    )
+    # @retry(
+    #     wait=wait_exponential(multiplier=1, min=1, max=10),  # Exponential backoff between retries
+    #     stop=stop_after_attempt(5)  # Maximum number of retry attempts
+    # )
+    @retry(wait=wait_fixed(5))
     def askAI(self, userid:str, user_input:str, callbacks=None,) -> str:
 
         """ Main function that processes all agents' conversation with user.
@@ -500,7 +501,8 @@ class ChatController():
                 # self.update_instructions(feedback)
             if evaluate_result:
                 self.update_meta_data(error_msg)
-            self.askAI(userid, user_input, callbacks)        
+            # self.askAI(userid, user_input, callbacks)    
+            raise e    
 
         # pickle memory (sanity check)
         # with open('conv_memory/' + userid + '.pickle', 'wb') as handle:

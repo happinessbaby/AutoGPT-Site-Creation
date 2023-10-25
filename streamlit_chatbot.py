@@ -34,6 +34,7 @@ import openai
 import json
 from st_pages import show_pages_from_config, add_page_title, show_pages, Page
 from st_clickable_images import clickable_images
+from st_click_detector import click_detector
 from streamlit_modal import Modal
 import base64
 
@@ -208,67 +209,26 @@ class Chat():
 
                     submit_button = st.form_submit_button(label='Submit', on_click=self.form_callback)
 
-                    # if submit_button:
-                    #     # if job:
-                    #     #     self.new_chat.update_entities(f"job:{job} \n ###")
-                    #     # if company:
-                    #     #     self.new_chat.update_entities(f"company:{company} \n ###")
-                    #     # if uploaded_files:
-                    #     #     self.process_file(uploaded_files)
-                    #     # if link:
-                    #     #     self.process_link(link)
-                    #     if prefilled:
-                    #         # res = st.session_state.responses_container.container()
-                    #         # streamlit_handler = StreamlitCallbackHandler(
-                    #         #     parent_container=res,
-                    #         # )
-                    #         self.question = prefilled
-                    #         response = self.new_chat.askAI(st.session_state.userid, self.question, callbacks=None)
-                    #         st.session_state.questions.append(self.question)
-                    #         st.session_state.responses.append(response)
-
-                # upload_error = st.empty()
-                # if "upload_error" not in st.session_state:
-                #     st.session_state["upload_error"] = upload_error
-
                 add_vertical_space(3)
-
             # Chat section
-            # if user_input:
-            # if st.session_state.questionInput:
-            #     # res = st.session_state.responses_container.container()
-            #     # streamlit_handler = StreamlitCallbackHandler(
-            #     #     parent_container=res,
-            #     #     # max_thought_containers=int(max_thought_containers),
-            #     #     # expand_new_thoughts=expand_new_thoughts,
-            #     #     # collapse_completed_thoughts=collapse_completed_thoughts,
-
-            #     # self.question = user_input
-            #     user_input = st.session_state.questionInput
-            #     self.question = self.process_user_input(user_input)
-            #     response = self.new_chat.askAI(st.session_state.userid, self.question, callbacks = None)
-            #     st.session_state.questions.append(self.question)
-            #     st.session_state.responses.append(response)
-            #     st.session_state.questionInput=''
-
             if st.session_state['responses']:
                 for i in range(len(st.session_state['responses'])-1, -1, -1):
                     message(st.session_state['responses'][i], key=str(i), avatar_style="initials", seed="ACAI", allow_html=True)
                     message(st.session_state['questions'][i], is_user=True, key=str(i) + '_user',  avatar_style="initials", seed="Yueqi", allow_html=True)
 
-            st.text_input("Chat with me: ", "", key="input", on_change = self.chatbox_callback)
+            st.text_input("Chat with me: ", "", key="input", on_change = self.question_callback)
 
-    def chatbox_callback(self):
+    def question_callback(self):
 
-        """ Sends user input from chatbox and prefilled question selection to chat agent. """
-          
+        """ Sends user input to chat agent. """
+
         self.question = self.process_user_input(st.session_state.input)
         if self.question:
             response = self.new_chat.askAI(st.session_state.userid, self.question, callbacks = None)
             if response == "functional" or response == "chronological" or response == "student":
                 self.resume_template_popup(response)
             else:
-                st.session_state.questions.append(st.session_state.input)
+                st.session_state.questions.append(self.question)
                 st.session_state.responses.append(response)
         st.session_state.questionInput = st.session_state.input
         st.session_state.input = ''    
@@ -280,16 +240,6 @@ class Chat():
 
         """ Processes form information after form submission. """
 
-        # try:
-        #     job = st.session_state.job
-        #     self.new_chat.update_entities(f"job:{job} /n ###")
-        # except Exception:
-        #     pass
-        # try: 
-        #     company = st.session_state.company
-        #     self.new_chat.update_entities(f"company:{company} /n ###")
-        # except Exception:
-        #     pass
         try:
             files = st.session_state.files 
             self.process_file(files)
@@ -307,19 +257,17 @@ class Chat():
         #     pass
         if st.session_state.prefilled:
             st.session_state.input = st.session_state.prefilled
-            self.chatbox_callback()
+            self.question_callback()
         else:
         # passes the previous user question to the agent one more time after user uploads form
             try:
                 print(f"QUESTION INPUT: {st.session_state.questionInput}")
-                # res = st.session_state.responses_container.container()
-                # streamlit_handler = StreamlitCallbackHandler(
-                #     parent_container=res,
-                # )
                 if st.session_state.questionInput!="":
-                    response = self.new_chat.askAI(st.session_state.userid, st.session_state.questionInput, callbacks=None)
-                    st.session_state.questions.append(st.session_state.questionInput)
-                    st.session_state.responses.append(response)
+                    st.session_state.input = st.session_state.questionInput
+                    self.question_callback()
+                    # response = self.new_chat.askAI(st.session_state.userid, st.session_state.questionInput, callbacks=None)
+                    # st.session_state.questions.append(st.session_state.questionInput)
+                    # st.session_state.responses.append(response)   
             # 'Chat' object has no attribute 'question': exception occurs when user has not asked a question, in this case, pass
             except AttributeError:
                 pass
@@ -330,12 +278,35 @@ class Chat():
 
         print("TEMPLATE POPUP")
         dir_path=""
-        if resume_type == "functional":
+        if resume_type == "functional" or resume_type=="chronological":
             dir_path = "./resume_templates/functional/"
-        with placeholder.container():
-            # modal = Modal(key="template_popup", title=f"Based on my evaluation, I have selected some {resume_type} resume templates that best fits your needs.")
-            # with modal.container():
-            self.set_clickable_icons(dir_path)
+        modal = Modal(key="template_popup", title=f"Here are some {resume_type} resume templates that best fits your needs.")
+        with modal.container():
+            with st.form( key='template_form', clear_on_submit=True):
+                add_vertical_space(1)
+                self.set_clickable_icons(dir_path)
+                # content = f"<a href='#' id='{id}'><img src='https://icons.iconarchive.com/icons/custom-icon-design/pretty-office-7/256/Save-icon.png'></a>"
+                # clicked = click_detector(content, key="click_detector")
+                # self.set_clickable_icons(dir_path)
+                # if clicked!="":
+                #     st.subheader("clicked")
+                #     print("YAYAYAYAYAy")
+                #TODO below radio is temporary
+                pick_me = st.radio("Radio", [1, 2, 3])
+                if pick_me:
+                    st.session_state["resume_template_file"] = f"{dir_path}functional-0.png"
+                        # st.experimental_rerun()
+                st.form_submit_button(label='Submit', on_click=self.resume_template_callback)
+
+    def resume_template_callback(self):
+
+        resume_template_file = st.session_state.resume_template_file
+        question = f"""Please use the resume_writer tool to rewrite the resume using the following resume_template_file:{resume_template_file}. """
+        st.session_state.input = question
+        self.question_callback()
+        # response = self.new_chat.askAI(st.session_state.userid, question, callbacks=None)
+        # st.session_state.questions.append(st.session_state.questionInput)
+        # st.session_state.responses.append(response)   
 
 
 
@@ -367,10 +338,7 @@ class Chat():
             if change_template:
                 print("HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH")
                 st.session_state["resume_template"] = f"resume_template: {dir_path}functional-{clicked}.png"
-                st.experimental_rerun()
 
-            # print(f"template number: {clicked}")
-            # self.new_chat.add_entities(f"resume_template: {dir_path}functional-{clicked}.png")
 
         
 
@@ -484,10 +452,6 @@ class Chat():
 
         """ Update entities for chat agent. """
 
-        # if content_type=="browser error" or content_type=="empty":
-        #     modal = Modal(key="error_popup", title="Content cannot be processed")
-        #     with modal.container():
-        #         st.write("If you shared a link, please try pasting the link content, or save the content as file and try again.")
         if content_type!="other" and content_type!="learning material":
             if content_type=="job posting":
                 content = read_txt(end_path)
@@ -516,47 +480,6 @@ class Chat():
         self.new_chat.update_entities(entity)
 
 
-
-    # def add_to_chat(self, content_type: str, content_topics: set, file_path: str) -> None:
-
-    #     """ Updates entities, vector stores, and tools for different chat agents. The main chat agent will have file paths saved as entities. The interview agent will have files as tools.
-        
-    #     Args: 
-
-    #         content_type (str): content category, such as resume, cover letter, job posting, other
-
-    #         content_topics (str): if content_type is other, content will be treated as interview material. So in this case, content_topics is interview topics. 
-
-    #         read_path (str): content file path
-             
-    #      """
-
-    #     if content_type != "other":
-    #         entity = f"""{content_type} file: {file_path} /n ###"""
-    #         self.new_chat.update_entities(entity)
-    #         # name = content_type.strip().replace(" ", "_")
-    #         # vs_name = f"faiss_{name}_{st.session_state.userid}"
-    #         # vs = create_vectorstore("faiss", file_path, "file", vs_name)
-    #         # tool_name = "search_" + vs_name.removeprefix("faiss_").removesuffix(f"_{st.session_state.userid}")
-    #         # tool_description =  f"""Useful for searching documents with respect to content type {content_type}.
-    #         #     Do not use this tool to load any files or documents.  """ 
-    #         # tools = create_retriever_tools(vs.as_retriever(), tool_name, tool_description)
-    #         # self.new_chat.update_tools(tool_name)
-   
-    #     else:
-    #         if content_topics: 
-    #             entity = f"""study material topics: {str(content_topics)} """
-    #             self.new_chat.update_entities(entity)
-    #         # vs_name = f"faiss_study_material_{st.session_state.userid}"
-    #         # vs = merge_faiss_vectorstore(vs_name, file_path)
-    #         # tool_name = "search_" + vs_name.removeprefix("faiss_").removesuffix(f"_{st.session_state.userid}")
-    #         # tool_description =  f"""Used for searching material with respect to content topics such as {content_topics}. 
-    #         #     Do not use this tool to load any files or documents. This should be used only for searching and generating questions and answers of the relevant materials and topics. """
-    #         # tools = create_retriever_tools(vs.as_retriever(), tool_name, tool_description)
-    #         # self.new_chat.update_tools(tools)
-            
-
-    
 
 
 

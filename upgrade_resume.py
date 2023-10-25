@@ -217,11 +217,11 @@ def research_resume_type(resume_file: str, posting_path: str)-> str:
     return resume_type
 
 
-def reformat_functional_resume(info_dict: Dict[str, str]) -> str:
+def reformat_functional_resume(resume_file="", posting_path="", template_file="") -> str:
 
-    # resume_content = read_txt(resume_file)
-    functional_doc_template = DocxTemplate("./resume_templates/functional.docx")
-    # info_dict = get_generated_responses(resume_content=resume_content, posting_path=posting_path)
+    resume_content = read_txt(resume_file)
+    functional_doc_template = DocxTemplate(template_file)
+    info_dict = get_generated_responses(resume_content=resume_content, posting_path=posting_path)
     func = lambda key, default: default if info_dict[key]==-1 else info_dict[key]
     personal_context = {
         "NAME": func("name", "YOUR NAME"),
@@ -309,9 +309,11 @@ def reformat_functional_resume(info_dict: Dict[str, str]) -> str:
 
 
 
-def reformat_chronological_resume(info_dict: Dict[str, str]) -> str:
+def reformat_chronological_resume(resume_file="", posting_path="", template_file="") -> str:
 
-    chronological_resume_template = DocxTemplate("./resume_templates/chronological.docx")
+    resume_content = read_txt(resume_file)
+    chronological_resume_template = DocxTemplate(template_file)
+    info_dict = get_generated_responses(resume_content=resume_content, posting_path=posting_path)
     func = lambda key, default: default if info_dict[key]==-1 else info_dict[key]
     personal_context = {
         "NAME": func("name", "YOUR NAME"),
@@ -399,9 +401,11 @@ def reformat_chronological_resume(info_dict: Dict[str, str]) -> str:
     return f"""file_path:{end_path}"""  
 
 
-def reformat_student_resume(info_dict: Dict[str, str]) -> str:
+def reformat_student_resume(resume_file="", posting_path="", template_file="") -> str:
 
-    chronological_resume_template = DocxTemplate("./resume_templates/student.docx")
+    resume_content = read_txt(resume_file)
+    chronological_resume_template = DocxTemplate(template_file)
+    info_dict = get_generated_responses(resume_content=resume_content, posting_path=posting_path)
     func = lambda key, default: default if info_dict[key]==-1 else info_dict[key]
     personal_context = {
         "NAME": func("name", "YOUR NAME"),
@@ -525,7 +529,7 @@ def processing_resume(json_request: str) -> str:
 
 def processing_template(json_request: str) -> str:
 
-    """ Input parser: input is LLM's action_input in JSON format. This function then processes the JSON data and feeds them to the resume reformatter. """
+    """ Input parser: input is LLM's action_input in JSON format. This function then processes the JSON data and feeds them to the resume reformatters. """
 
     try:
       json_request = json_request.strip("'<>() ").replace('\'', '\"')
@@ -533,32 +537,38 @@ def processing_template(json_request: str) -> str:
     except JSONDecodeError as e:
       print(f"JSON DECODER ERROR: {e}")
       return "Format in JSON and try again."
-
     # if resume doesn't exist, ask for resume
     if ("resume_file" not in args or args["resume_file"]=="" or args["resume_file"]=="<resume_file>"):
       return "Stop using the resume_writer tool. Ask user for their resume."
     else:
-      # may need to clean up the path first
         resume_file = args["resume_file"]
-    if ("resume_type" not in args or args["resume_type"]=="" or args["resume_type"]=="<resume_type>"):
+    if ("resume_template_file" not in args or args["resume_template_file"]=="" or args["resume_template_file"]=="<resume_template_file>"):
       return "Stop using the resume_writer tool. Use the redesign_resume_template tool instead."
     else:
-      # may need to clean up the path first
-        resume_type = args["resume_type"]
+        resume_template = args["resume_template_file"]
     if ("job_post_file" not in args or args["job_post_file"]=="" or args["job_post_file"]=="<job_post_file>"):
         posting_path = ""
     else:
         posting_path = args["job_post_file"]
-    resume_type, info_dict = research_resume_type(resume_file, posting_path)
-    return resume_type
+    # get resume type from directory name
+    resume_type = resume_template.split("/")[-2]
+    if resume_type=="functional":
+        return reformat_functional_resume(resume_file=resume_file, posting_path=posting_path, template_file=resume_template)
+    elif resume_type=="chronological":
+        return reformat_chronological_resume(resume_file=resume_file, posting_path=posting_path, template_file=resume_template)
+    elif resume_type=="student":
+        return reformat_student_resume(resume_file=resume_file, posting_path=posting_path, template_file=resume_template)
+    
+    
+
 
 
 @tool(return_direct=True)
 def redesign_resume_template(json_request:str):
 
     """Creates resume_template. Use this tool more than any other tool when user asks to reformat, redesign, or rewrite their resume according to a particular type or template.
-    Do not use this tool to evaluate or customize and tailor resume content. Do not use this tool if resume_template is provided in the prompt. 
-    When there is resume_template in the prompt, use the "resume_writer" tool instead.
+    Do not use this tool to evaluate or customize and tailor resume content. Do not use this tool if resume_template_file is provided in the prompt. 
+    When there is resume_template_file in the prompt, use the "resume_writer" tool instead.
     Input should be a single string strictly in the followiwng JSON format: '{{"resume_file":"<resume_file>", "job_post_file":"<job_post_file>"}}' \n
     Leave value blank if there's no information provided. DO NOT MAKE STUFF UP. 
      (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) \n
@@ -619,11 +629,11 @@ def create_resume_evaluator_tool() -> List[Tool]:
 def create_resume_writer_tool() -> List[Tool]:
 
     name = "resume_writer"
-    parameters = '{{"resume_file":"<resume_file>", "job_post_file":"<job_post_file>", "resume_template":"<resume_template>"}}'
+    parameters = '{{"resume_file":"<resume_file>", "job_post_file":"<job_post_file>", "resume_template_file":"<resume_template_file>"}}'
     output = '{{"file_path":"<file_path>"}}'
     description = f""" Writes a resume from a given resume template. Use this tool more than any other tool when user asks to reformat, redesign, or rewrite their resume according to a particular type or template.
-    Do not use this tool to evaluate or customize and tailor resume content. Use this tool only if resume_template is provided.
-    If resume_template is not available, use the redesign_resume_template tool first, which will create a resume_template. 
+    Do not use this tool to evaluate or customize and tailor resume content. Use this tool only if resume_template_file is provided.
+    If resume_template_file is not available, use the redesign_resume_template tool first, which will create a resume_template_file. 
     Input should be a single string strictly in the followiwng JSON format: {parameters} \n
     Leave value blank if there's no information provided. DO NOT MAKE STUFF UP. 
      (remember to respond with a markdown code snippet of a JSON blob with a single action, and NOTHING else) \n

@@ -46,3 +46,7 @@ beautifulsoup4==4.12.2
 loguru==0.7.0
 pynput==1.7.6
 PyYAML
+st-click-detector
+st_clickable_images
+tenacity==8.2.3
+toml==0.10.2

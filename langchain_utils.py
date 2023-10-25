@@ -33,7 +33,7 @@ import langchain
 from langchain.cache import RedisCache
 from langchain.cache import RedisSemanticCache
 import json
-from typing import List, Union, Any, Optional
+from typing import List, Union, Any, Optional, Dict
 import re
 import docx
 from langchain.tools import tool
@@ -68,6 +68,10 @@ import faiss
 from langchain.vectorstores import FAISS
 from langchain.docstore import InMemoryDocstore
 from langchain.chains import create_tagging_chain, create_tagging_chain_pydantic
+from langchain.schema import LLMResult, HumanMessage
+from langchain.callbacks.base import AsyncCallbackHandler, BaseCallbackHandler
+from langchain.schema.messages import BaseMessage
+import asyncio
 
 
 
@@ -807,7 +811,46 @@ class CustomOutputParser(AgentOutputParser):
         return AgentAction(tool=action, tool_input=action_input.strip(" ").strip('"'), log=llm_output)
     
 
-    
+class MyCustomAsyncHandler(AsyncCallbackHandler):
+    """Async callback handler that can be used to handle callbacks from langchain."""
+
+    async def on_llm_start(
+        self, serialized: Dict[str, Any], prompts: List[str], **kwargs: Any
+    ) -> None:
+        """Run when chain starts running."""
+        print("zzzz....")
+        await asyncio.sleep(0.3)
+        class_name = serialized["name"]
+        print("Hi! I just woke up. Your llm is starting")
+
+    async def on_llm_end(self, response: LLMResult, **kwargs: Any) -> None:
+        """Run when chain ends running."""
+        print("zzzz....")
+        await asyncio.sleep(0.3)
+        print("Hi! I just woke up. Your llm is ending")
+
+
+class MyCustomSyncHandler(BaseCallbackHandler):
+    """Async callback handler that can be used to handle callbacks from langchain."""
+
+    def on_llm_start(
+        self, serialized: Dict[str, Any], prompts: List[str], **kwargs: Any
+    ) -> None:
+        """Run when chain starts running."""
+        print("zzzz....")
+        print("Hi! I just woke up. Your llm is starting")
+
+    def on_llm_end(self, response: LLMResult, **kwargs: Any) -> None:
+        """Run when chain ends running."""
+        print("zzzz....")
+        print("Hi! I just woke up. Your llm is ending")
+
+
+    def on_chain_end(self, outputs: Dict[str, Any], **kwargs: Any) -> Any:
+        """Run when chain ends running."""
+        print("zzzz....")
+        print("Hi! I just woke up. Your chain is ending")
+
 
 
 
