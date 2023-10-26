@@ -59,7 +59,7 @@ from openai_api import get_completion
 from langchain.schema import OutputParserException
 from multiprocessing import Process, Queue, Value
 from generate_cover_letter import cover_letter_generator, create_cover_letter_generator_tool
-from upgrade_resume import  resume_evaluator, create_resume_evaluator_tool, create_resume_writer_tool, redesign_resume_template
+from upgrade_resume import  resume_evaluator, create_resume_evaluator_tool, create_resume_rewriter_tool, redesign_resume_template
 from customize_document import create_cover_letter_customize_writer_tool, create_personal_statement_customize_writer_tool, create_resume_customize_writer_tool
 from langchain.agents.agent_toolkits import create_conversational_retrieval_agent
 from langchain.agents.agent_toolkits import create_retriever_tool
@@ -134,7 +134,7 @@ class ChatController():
         personal_statement_customize_tool = create_personal_statement_customize_writer_tool()
         resume_customize_tool = create_resume_customize_writer_tool()
         resume_evaluator_tool = create_resume_evaluator_tool()
-        resume_writer_tool = create_resume_writer_tool()
+        resume_rewriter_tool = create_resume_rewriter_tool()
         resume_template_tool = [redesign_resume_template]
         # resume_evaluator_tool = [resume_evaluator]
         user_material_tool = [search_user_material]
@@ -142,6 +142,7 @@ class ChatController():
         # file loader tool
         working_directory = f"./static/{self.userid}/"
         file_loader_tool = [file_loader]
+    
         # file_sys_tools = FileManagementToolkit(
         #     root_dir=working_directory, # ensures only the working directory is accessible 
         #     selected_tools=["read_file", "list_directory"],
@@ -176,7 +177,7 @@ class ChatController():
         # wiki tool
         wiki_tool = create_wiki_tools()
         # gather all the tools together
-        self.tools =  cover_letter_tool + resume_evaluator_tool + resume_writer_tool+ resume_template_tool+ resume_customize_tool+ wiki_tool + search_tool+ link_download_tool  + general_tool  + personal_statement_customize_tool + cover_letter_customize_tool + user_material_tool  + requests_get
+        self.tools =  cover_letter_tool + resume_evaluator_tool + resume_rewriter_tool+ resume_template_tool+ resume_customize_tool+ wiki_tool + search_tool+ link_download_tool  + general_tool  + personal_statement_customize_tool + cover_letter_customize_tool + user_material_tool  + requests_get
         # + [tool for tool in file_sys_tools]
         tool_names = [tool.name for tool in self.tools]
         print(f"Chat agent tools: {tool_names}")
@@ -609,6 +610,13 @@ class ChatController():
         with open(log_path+f"{self.userid}.log", "a") as f:
             f.write(str(data))
             print(f"Successfully updated meta data: {data}")
+
+    @tool
+    def file_upload(self):
+
+        """ Use this tool when user wants to upload their files. """
+
+        
 
 
 

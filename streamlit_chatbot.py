@@ -37,6 +37,7 @@ from st_clickable_images import clickable_images
 from st_click_detector import click_detector
 from streamlit_modal import Modal
 import base64
+from langchain.tools import tool
 
 # Either this or add_indentation() MUST be called on each page in your
 # app to add indendation in the sidebar
@@ -50,6 +51,7 @@ show_pages(
     [
         Page("streamlit_chatbot.py", "Home", "🏠"),
         Page("streamlit_interviewbot.py", "Mock Interview", ":books:"),
+        # Page("Streamlit_journey.py", "My Journey"),
         # Page("streamlit_resources.py", "Resources", ":busts_in_silhouette:" ),
     ]
 )
@@ -89,6 +91,14 @@ class Chat():
             }}
         </style>
         """
+        styl1 = f"""
+        <style>
+            .stSelectbox {{
+            position: fixed;
+            bottom: 3rem;
+            }}
+        </style>
+        """
         # styl = f"""
         # <style>
         #     .element-container:nth-of-type(1) stTextInput {{
@@ -98,6 +108,7 @@ class Chat():
         # </style>
         # """
         st.markdown(styl, unsafe_allow_html=True)
+        st.markdown(styl1, unsafe_allow_html=True)
 
         with placeholder.container():
 
@@ -140,6 +151,7 @@ class Chat():
 
             SAMPLE_QUESTIONS = {
                 "":"",
+                "upload my files": "upload",
                 "help me write a cover letter": "generate",
                 "can you evaluate my resume?": "evaluate",
                 "rewrite my resume using a new template": "reformat",
@@ -167,47 +179,51 @@ class Chat():
                                                     
                 ''')
 
-                st.markdown("Quick navigation")
-                with st.form( key='my_form', clear_on_submit=True):
+                # st.markdown("Quick navigation")
+                # with st.form( key='my_form', clear_on_submit=True):
 
-                    # col1, col2= st.columns([5, 5])
+                #     # col1, col2= st.columns([5, 5])
 
-                    # with col1:
-                    #     job = st.text_input(
-                    #         "job/program",
-                    #         "",
-                    #         key="job",
-                    #     )
+                #     # with col1:
+                #     #     job = st.text_input(
+                #     #         "job/program",
+                #     #         "",
+                #     #         key="job",
+                #     #     )
                     
-                    # with col2:
-                    #     company = st.text_input(
-                    #         "company/institution",
-                    #         "",
-                    #         key = "company"
-                    #     )
+                #     # with col2:
+                #     #     company = st.text_input(
+                #     #         "company/institution",
+                #     #         "",
+                #     #         key = "company"
+                #     #     )
 
-                    # about_me = st.text_area(label="About", placeholder="""You can say,  I want to apply for the MBA program at ABC University, or I wish to work for XYZ as a customer service representative. 
+                #     # about_me = st.text_area(label="About", placeholder="""You can say,  I want to apply for the MBA program at ABC University, or I wish to work for XYZ as a customer service representative. 
                     
-                    # If you want to provide any links, such as a link to a job posting, please paste it here. """, key="about_me")
+                #     # If you want to provide any links, such as a link to a job posting, please paste it here. """, key="about_me")
 
-                    uploaded_files = st.file_uploader(label="Upload your files",
-                                                      help = "This can be your resume, cover letter, or anything else you want to share with me. ",
-                                                    type=["pdf","odt", "docx","txt", "zip", "pptx"], 
-                                                    key = "files",
-                                                    accept_multiple_files=True)
+                #     uploaded_files = st.file_uploader(label="Upload your files",
+                #                                       help = "This can be your resume, cover letter, or anything else you want to share with me. ",
+                #                                     type=["pdf","odt", "docx","txt", "zip", "pptx"], 
+                #                                     key = "files",
+                #                                     accept_multiple_files=True)
 
                     
-                    link = st.text_area(label="Paste a link", key = "link", help="This can be a job posting url, for example.")
+                #     link = st.text_area(label="Share your link", 
+                #                         placeholder="Paste a link here; this can be a job posting url, for example.", 
+                #                         key = "link", 
+                #                         label_visibility="hidden",
+                #                         help="This can be a job posting url, for example.",)
 
-                    add_vertical_space(1)
-                    prefilled = st.selectbox(label="Sample questions",
-                                            options=sorted(SAMPLE_QUESTIONS.keys()), 
-                                            key = "prefilled",
-                                            format_func=lambda x: '' if x == '' else x,
-                                            )
+                #     add_vertical_space(1)
+                #     # prefilled = st.selectbox(label="Sample questions",
+                #     #                         options=sorted(SAMPLE_QUESTIONS.keys()), 
+                #     #                         key = "prefilled",
+                #     #                         format_func=lambda x: '' if x == '' else x,
+                #     #                         )
 
 
-                    submit_button = st.form_submit_button(label='Submit', on_click=self.form_callback)
+                #     submit_button = st.form_submit_button(label='Submit', on_click=self.form_callback)
 
                 add_vertical_space(3)
             # Chat section
@@ -216,16 +232,44 @@ class Chat():
                     message(st.session_state['responses'][i], key=str(i), avatar_style="initials", seed="ACAI", allow_html=True)
                     message(st.session_state['questions'][i], is_user=True, key=str(i) + '_user',  avatar_style="initials", seed="Yueqi", allow_html=True)
 
-            st.text_input("Chat with me: ", "", key="input", on_change = self.question_callback)
+            c1, c2 = st.columns([2, 1])
+
+
+            if "prefilled" not in st.session_state:
+                st.session_state["prefilled"] = ""
+            c1.text_input("Chat with me: ",
+                        # value=st.session_state.prefilled, 
+                        key="input", 
+                        label_visibility="hidden", 
+                        placeholder="Chat with me",
+                        on_change = self.question_callback,
+                        )
+            # Automatically select the last input with last_index
+            c2.selectbox(label="Sample questions",
+                        options=sorted(SAMPLE_QUESTIONS.keys()), 
+                        key = "prefilled",
+                        format_func=lambda x: 'sample questions' if x == '' else x,
+                        label_visibility= "hidden",
+                        on_change = self.question_callback,
+                        )
+
+            # st.text_input("Chat with me: ", "", key="input", on_change = self.question_callback)
+
 
     def question_callback(self):
 
         """ Sends user input to chat agent. """
-
-        self.question = self.process_user_input(st.session_state.input)
+        if st.session_state.input!="":
+            self.question = self.process_user_input(st.session_state.input) 
+        elif st.session_state.prefilled!="":
+            self.question = self.process_user_input(st.session_state.prefilled)
         if self.question:
             response = self.new_chat.askAI(st.session_state.userid, self.question, callbacks = None)
             if response == "functional" or response == "chronological" or response == "student":
+                # img_path = "/home/tebblespc/Auto-GPT/autogpt/auto_gpt_workspace/resume_templates/functional/functional-0.png"
+                # response = f'<img width="100%" height="200" src="{img_path}"/>'
+                # st.session_state.questions.append(self.question)
+                # st.session_state.responses.append(response)
                 self.resume_template_popup(response)
             else:
                 st.session_state.questions.append(self.question)
@@ -233,9 +277,24 @@ class Chat():
         st.session_state.questionInput = st.session_state.input
         st.session_state.input = ''    
 
+    
+    def file_upload_popup(self):
 
+        """Use this tool when user wants to upload their files."""
 
-
+        modal = Modal(title="Upload your files", key="popup")
+        with modal.container():
+            with st.form( key='my_form', clear_on_submit=True):
+                add_vertical_space(1)
+                st.file_uploader(label="Upload your files",
+                                type=["pdf","odt", "docx","txt", "zip", "pptx"], 
+                                key = "files",
+                                help = "This can be your resume, cover letter, or anything else you want to share with me. ",
+                                label_visibility="hidden",
+                                accept_multiple_files=True)
+                add_vertical_space(1)
+                st.form_submit_button(label='Submit', on_click=self.form_callback)  
+ 
     def form_callback(self):
 
         """ Processes form information after form submission. """
@@ -245,32 +304,32 @@ class Chat():
             self.process_file(files)
         except Exception:
             pass
-        try:
-            link = st.session_state.link
-            self.process_link(link)
-        except Exception:
-            pass
+        # try:
+        #     link = st.session_state.link
+        #     self.process_link(link)
+        # except Exception:
+        #     pass
         # try:
         #     about_me = st.session_state.about_me
         #     self.process_about_me(about_me)
         # except Exception:
         #     pass
-        if st.session_state.prefilled:
-            st.session_state.input = st.session_state.prefilled
-            self.question_callback()
-        else:
+        # if st.session_state.prefilled:
+        #     st.session_state.input = st.session_state.prefilled
+        #     self.question_callback()
+        # else:
         # passes the previous user question to the agent one more time after user uploads form
-            try:
-                print(f"QUESTION INPUT: {st.session_state.questionInput}")
-                if st.session_state.questionInput!="":
-                    st.session_state.input = st.session_state.questionInput
-                    self.question_callback()
-                    # response = self.new_chat.askAI(st.session_state.userid, st.session_state.questionInput, callbacks=None)
-                    # st.session_state.questions.append(st.session_state.questionInput)
-                    # st.session_state.responses.append(response)   
-            # 'Chat' object has no attribute 'question': exception occurs when user has not asked a question, in this case, pass
-            except AttributeError:
-                pass
+        try:
+            print(f"QUESTION INPUT: {st.session_state.questionInput}")
+            if st.session_state.questionInput!="":
+                st.session_state.input = st.session_state.questionInput
+                self.question_callback()
+                # response = self.new_chat.askAI(st.session_state.userid, st.session_state.questionInput, callbacks=None)
+                # st.session_state.questions.append(st.session_state.questionInput)
+                # st.session_state.responses.append(response)   
+        # 'Chat' object has no attribute 'question': exception occurs when user has not asked a question, in this case, pass
+        except AttributeError:
+            pass
 
     def resume_template_popup(self, resume_type):
 
@@ -300,14 +359,12 @@ class Chat():
 
     def resume_template_callback(self):
 
+        """ Calls the resume_rewriter tool to rewrite the resume according to the chosen resume template. """
+
         resume_template_file = st.session_state.resume_template_file
-        question = f"""Please use the resume_writer tool to rewrite the resume using the following resume_template_file:{resume_template_file}. """
+        question = f"""Please help user rewrite their resume using the resume_rewriter tool with the following resume_template_file:{resume_template_file}. """
         st.session_state.input = question
         self.question_callback()
-        # response = self.new_chat.askAI(st.session_state.userid, question, callbacks=None)
-        # st.session_state.questions.append(st.session_state.questionInput)
-        # st.session_state.responses.append(response)   
-
 
 
     def set_clickable_icons(self, dir_path):
@@ -348,6 +405,13 @@ class Chat():
 
         """ Processes user input and processes any links in the input. """
 
+        #process url in input
+        urls = re.findall(r'(https?://\S+)', user_input)
+        print(urls)
+        if urls:
+            for url in urls:
+                self.process_link(url)
+        #tag user input content
         tag_schema = {
             "properties": {
                 "aggressiveness": {
@@ -357,7 +421,7 @@ class Chat():
                 },
                 "topic": {
                     "type": "string",
-                    "enum": ["self description", "job or program description", "company or institution description", "other"],
+                    "enum": ["self description", "job or program description", "company or institution description", "upload files", "resume help"],
                     "description": "determines if the statement contains certain topic",
                 },
             },
@@ -365,25 +429,23 @@ class Chat():
         }
         response = create_tag_chain(tag_schema, user_input)
         topic = response.get("topic", "")
-        if topic == "self description" or topic=="job or program description" or topic=="company or institution description":
-            self.new_chat.update_entities(f"about me:{user_input} /n ###")
-        urls = re.findall(r'(https?://\S+)', user_input)
-        print(urls)
-        if urls:
-            for url in urls:
-                self.process_link(url)
-        return user_input
-        
-        if check_content_safety(text_str=user_input):
-            if evaluate_content(user_input, "a job, program, company, or institutation description or a personal background description"):
+        if topic == "upload files":
+            self.file_upload_popup()
+        else: 
+            if topic == "self description" or topic=="job or program description" or topic=="company or institution description":
                 self.new_chat.update_entities(f"about me:{user_input} /n ###")
-            urls = re.findall(r'(https?://\S+)', user_input)
-            print(urls)
-            if urls:
-                for url in urls:
-                    self.process_link(url)
             return user_input
-        else: return ""
+        
+        # if check_content_safety(text_str=user_input):
+        #     if evaluate_content(user_input, "a job, program, company, or institutation description or a personal background description"):
+        #         self.new_chat.update_entities(f"about me:{user_input} /n ###")
+        #     urls = re.findall(r'(https?://\S+)', user_input)
+        #     print(urls)
+        #     if urls:
+        #         for url in urls:
+        #             self.process_link(url)
+        #     return user_input
+        # else: return ""
 
 
 
@@ -424,6 +486,7 @@ class Chat():
             content_safe, content_type, content_topics = check_content(end_path)
             print(content_type, content_safe, content_topics) 
             if content_safe and content_type!="empty":
+                st.write("File successfully uploaded!")
                 self.update_entities(content_type, content_topics, end_path)
             else:
                 st.error(f"Failed processing {Path(uploaded_file.name).root}. Please try another file!")
